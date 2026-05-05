@@ -154,7 +154,7 @@ export function generateTreatmentOutput(
   }
 
   // ── Denosumab rebound / missed injection ──
-  denosumabReboundFlags(patient, flags, referrals);
+  denosumabReboundFlags(patient, flags);
 
   // ── Special population overrides ──
 
@@ -649,7 +649,6 @@ function postAnabolicFlags(flags: ClinicalFlag[]): void {
 function denosumabReboundFlags(
   patient: PatientInput,
   flags: ClinicalFlag[],
-  referrals: ReferralRecommendation[],
 ): void {
   const isOnDenosumab = patient.currentTreatment?.agent === 'denosumab' && patient.currentTreatment.currentlyOn;
 
@@ -1301,11 +1300,6 @@ function denosumab(egfr: number | null): TreatmentRecommendation {
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────
-
-function vitDSafe(patient: PatientInput): boolean {
-  const vitD = patient.bloodResults?.vitaminDNmol ?? null;
-  return vitD === null || vitD >= 50; // unknown → allow with supplement flag; known <50 → block
-}
 
 function addVitDBlock(patient: PatientInput, flags: ClinicalFlag[]): void {
   const vitD = patient.bloodResults?.vitaminDNmol;
