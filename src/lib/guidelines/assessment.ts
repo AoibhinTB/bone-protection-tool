@@ -38,79 +38,98 @@ export function assessInvestigationsNeeded(
     });
   }
 
-  // ── Bloods ──────────────────────────────────────────────────────────────
+  // ── Tier 1: Mandatory pre-treatment bloods ────────────────────────────────
 
-  // Adjusted calcium
   if (!patient.bloodResults?.adjustedCalciumMmol) {
     needed.push({
       investigation: 'calcium',
+      tier: 1,
       reason:
-        'Adjusted serum calcium required: hypocalcaemia must be corrected before bisphosphonate or denosumab initiation; ' +
-        'hypercalcaemia may indicate primary hyperparathyroidism (refer endocrinology).',
+        '[Tier 1 — mandatory pre-treatment] Adjusted serum calcium: hypocalcaemia must be corrected before ' +
+        'bisphosphonate or denosumab; hypercalcaemia may indicate primary hyperparathyroidism (refer endocrinology).',
       urgency: 'routine',
     });
   }
 
-  // Vitamin D
   const vitD = patient.bloodResults?.vitaminDNmol ?? null;
   if (vitD === null || vitD < BLOOD_RANGES.vitaminD.target) {
+    const severelyDeficient = vitD !== null && vitD < 25;
     needed.push({
       investigation: 'vitamin_d',
+      tier: 1,
       reason:
         vitD === null
-          ? `Serum 25-OHD not checked. Required before initiating antiresorptive therapy (target ≥${BLOOD_RANGES.vitaminD.target} nmol/L). ` +
-            `If severely deficient (<${BLOOD_RANGES.vitaminD.deficient} nmol/L): load first — do NOT start bisphosphonate or denosumab until replete.`
+          ? `[Tier 1 — mandatory pre-treatment] Serum 25-OHD not checked. Target ≥${BLOOD_RANGES.vitaminD.target} nmol/L. ` +
+            'If severely deficient (<25 nmol/L): Irish loading protocol — 50,000 IU cholecalciferol weekly × 6 weeks, then maintenance. ' +
+            'Do NOT start bisphosphonate or denosumab until replete.'
+          : vitD < 25
+          ? `[Tier 1 — mandatory pre-treatment] Severe vitamin D deficiency (${vitD} nmol/L). ` +
+            'Irish loading protocol: 50,000 IU cholecalciferol weekly × 6 weeks (300,000 IU total). ' +
+            `Do NOT start antiresorptive therapy until replete (target ≥${BLOOD_RANGES.vitaminD.target} nmol/L). ` +
+            'Do NOT administer denosumab until Vit D ≥50 nmol/L.'
           : vitD < BLOOD_RANGES.vitaminD.deficient
-          ? `Severe vitamin D deficiency (${vitD} nmol/L). Load first (e.g. 50,000 IU weekly × 8–12 weeks). ` +
-            `Do NOT start bisphosphonate or denosumab until replete (target ≥${BLOOD_RANGES.vitaminD.target} nmol/L).`
-          : `Vitamin D insufficient (${vitD} nmol/L, target ≥${BLOOD_RANGES.vitaminD.target} nmol/L). ` +
+          ? `[Tier 1 — mandatory pre-treatment] Vitamin D deficient (${vitD} nmol/L). ` +
+            `Load with 50,000 IU weekly × 8 weeks; target ≥${BLOOD_RANGES.vitaminD.target} nmol/L before starting treatment. ` +
+            'Do NOT administer denosumab until Vit D ≥50 nmol/L.'
+          : `[Tier 1] Vitamin D insufficient (${vitD} nmol/L, target ≥${BLOOD_RANGES.vitaminD.target} nmol/L). ` +
             'Supplement alongside bone protection therapy.',
-      urgency: vitD !== null && vitD < BLOOD_RANGES.vitaminD.deficient ? 'soon' : 'routine',
+      urgency: severelyDeficient ? 'soon' : vitD !== null && vitD < BLOOD_RANGES.vitaminD.deficient ? 'soon' : 'routine',
     });
   }
 
-  // eGFR
   const hasEGFR = patient.renalFunction !== null || (patient.bloodResults?.egfr ?? null) !== null;
   if (!hasEGFR) {
     needed.push({
       investigation: 'egfr',
+      tier: 1,
       reason:
-        'Renal function (eGFR) required to select safe bone protection agent. ' +
-        'Alendronate and zoledronate are contraindicated if eGFR <35 ml/min; risedronate if eGFR <30.',
+        '[Tier 1 — mandatory pre-treatment] eGFR required to select safe agent: ' +
+        'alendronate/zoledronate CI if eGFR <35; risedronate CI if eGFR <30. ' +
+        'eGFR <35 with denosumab: mandatory corrected calcium check 2 weeks after every injection.',
       urgency: 'routine',
     });
   }
 
-  // ALP — bone turnover, Paget's, osteomalacia screen (NOGG 2024 Rec 7)
+  // ── Tier 2: Routine baseline ──────────────────────────────────────────────
+
   if (!patient.bloodResults?.alp) {
     needed.push({
       investigation: 'alp',
+      tier: 2,
       reason:
-        'Alkaline phosphatase (ALP): bone turnover marker; elevated ALP with low calcium/vitamin D suggests osteomalacia; ' +
-        'markedly elevated ALP may indicate Paget\'s disease — investigate before starting treatment.',
+        '[Tier 2 — routine baseline] ALP: bone turnover marker; elevated ALP + low calcium/vit D suggests osteomalacia; ' +
+        'markedly elevated ALP may indicate Paget\'s — investigate before starting treatment. ' +
+        'Unexplained raised ALP is a contraindication to teriparatide.',
       urgency: 'routine',
     });
   }
 
-  // FBC — exclude haematological malignancy (myeloma)
   if (!patient.bloodResults?.fbc) {
     needed.push({
       investigation: 'fbc',
+      tier: 2,
       reason:
-        'Full blood count: exclude haematological malignancy (myeloma) — particularly in unexplained anaemia, ' +
-        'very high fracture risk, or markedly elevated ESR. Consider SPEP if FBC abnormal.',
+        '[Tier 2 — routine baseline] FBC: exclude haematological malignancy (myeloma) — especially with anaemia, ' +
+        'vertebral fracture without clear cause, or elevated ESR. If abnormal, add SPEP/UPEP.',
       urgency: 'routine',
     });
   }
 
-  // Secondary osteoporosis workup
+  // ── Tier 3: Suspected secondary cause ────────────────────────────────────
+
+  const alpAbnormal = patient.bloodResults?.alp !== null && patient.bloodResults?.alp !== undefined &&
+    (patient.bloodResults.alp > 130 || patient.bloodResults.alp < 30);
+  const calciumAbnormal = patient.bloodResults?.adjustedCalciumMmol !== null &&
+    patient.bloodResults?.adjustedCalciumMmol !== undefined &&
+    (patient.bloodResults.adjustedCalciumMmol > 2.6 || patient.bloodResults.adjustedCalciumMmol < 2.1);
+
   if (secondaryWorkupIndicated(patient)) {
     if (patient.sex === 'male') {
       needed.push({
         investigation: 'testosterone',
+        tier: 3,
         reason:
-          'Hypogonadism is the most common secondary cause of osteoporosis in men. ' +
-          'Morning serum testosterone required.',
+          '[Tier 3 — secondary cause] Morning serum testosterone: hypogonadism is the most common secondary cause of osteoporosis in men.',
         urgency: 'routine',
       });
     }
@@ -118,27 +137,72 @@ export function assessInvestigationsNeeded(
     if (patient.sex === 'female' && patient.earlyMenopause) {
       needed.push({
         investigation: 'lh_fsh',
+        tier: 3,
         reason:
-          'LH and FSH to confirm premature ovarian insufficiency (POI): elevated FSH with low oestrogen ' +
-          'confirms diagnosis; HRT is first-line bone protection in this group.',
+          '[Tier 3 — secondary cause] LH and FSH: confirm premature ovarian insufficiency (POI). ' +
+          'HRT is first-line bone protection in this group.',
         urgency: 'routine',
       });
     }
 
-    needed.push({
-      investigation: 'thyroid',
-      reason:
-        'Thyroid function (TSH): untreated hyperthyroidism and T4 over-replacement both cause bone loss. ' +
-        'TSH outside normal range requires review.',
-      urgency: 'routine',
-    });
+    if (alpAbnormal || calciumAbnormal || patient.secondaryOsteoporosis.includes('hyperparathyroidism')) {
+      needed.push({
+        investigation: 'pth',
+        tier: 3,
+        reason:
+          '[Tier 3 — secondary cause] PTH: abnormal calcium or ALP — exclude primary hyperparathyroidism. ' +
+          'Elevated PTH with normal or high calcium → refer endocrinology. ' +
+          'Note: forearm-only osteoporosis (33% radius ≤-2.5) should prompt PTH + calcium workup.',
+        urgency: 'routine',
+      });
+    }
 
+    if (!patient.bloodResults?.tshNormal) {
+      needed.push({
+        investigation: 'thyroid',
+        tier: 3,
+        reason:
+          '[Tier 3 — secondary cause] TSH: untreated hyperthyroidism and T4 over-replacement cause bone loss.',
+        urgency: 'routine',
+      });
+    }
+  }
+
+  // SPEP/UPEP — Tier 3: if FBC abnormal, anaemia suspected, or vertebral fracture without clear cause
+  const fhcAbnormal = patient.bloodResults?.fbc === false;
+  const vertebralNoOtherCause =
+    patient.priorVertebralFracture &&
+    patient.secondaryOsteoporosis.length === 0 &&
+    !patient.glucocorticoidUse;
+  if (fhcAbnormal || vertebralNoOtherCause) {
+    needed.push({
+      investigation: 'spep_upep',
+      tier: 3,
+      reason:
+        '[Tier 3 — secondary cause] SPEP/UPEP: exclude myeloma — particularly with abnormal FBC, anaemia, ' +
+        'or vertebral fracture with no clear secondary cause.',
+      urgency: fhcAbnormal ? 'soon' : 'routine',
+    });
+  }
+
+  // Forearm-only osteoporosis — flag PTH workup
+  const forearmOnly =
+    patient.dexaResults !== null &&
+    patient.dexaResults.forearmTScore !== null &&
+    patient.dexaResults.forearmTScore <= -2.5 &&
+    (patient.dexaResults.lumbarSpineTScore === null || patient.dexaResults.lumbarSpineTScore > -2.5) &&
+    (patient.dexaResults.totalHipTScore === null || patient.dexaResults.totalHipTScore > -2.5) &&
+    (patient.dexaResults.femoralNeckTScore === null || patient.dexaResults.femoralNeckTScore > -2.5);
+
+  if (forearmOnly && !needed.some(i => i.investigation === 'pth')) {
     needed.push({
       investigation: 'pth',
+      tier: 3,
       reason:
-        'PTH and calcium: exclude primary hyperparathyroidism as secondary cause. ' +
-        'Elevated PTH with normal or high calcium → refer endocrinology.',
-      urgency: 'routine',
+        '[Tier 3 — forearm-only osteoporosis] T-score ≤-2.5 at 33% radius with no low-T-score at standard sites. ' +
+        'Rule out primary hyperparathyroidism before starting treatment: check calcium, ALP, PTH. ' +
+        'Note: FRAX cannot accept forearm BMD — femoral neck BMD must be used for FRAX calculation.',
+      urgency: 'soon',
     });
   }
 
@@ -231,7 +295,10 @@ function vfaIndicationReason(patient: PatientInput): string | null {
   const reasons: string[] = [];
 
   if (patient.heightLossCm !== null && patient.heightLossCm >= 4) {
-    reasons.push(`height loss ≥4 cm (${patient.heightLossCm} cm reported)`);
+    reasons.push(`historical height loss ≥4 cm (${patient.heightLossCm} cm)`);
+  }
+  if (patient.heightLossProspectiveCm !== null && patient.heightLossProspectiveCm >= 2) {
+    reasons.push(`prospective height loss ≥2 cm measured in clinic (${patient.heightLossProspectiveCm} cm)`);
   }
   if (patient.kyphosis) {
     reasons.push('kyphosis');

@@ -74,6 +74,16 @@ export function Step2FractureHistory({ data, onChange }: Props) {
               width="w-20"
             />
           </Field>
+          <Field
+            label="Fracture within the last 2 years"
+            hint="Imminent risk — start treatment immediately without waiting for DEXA"
+            indent
+          >
+            <YesNo
+              value={data.recentFractureWithin2Years}
+              onChange={v => onChange({ recentFractureWithin2Years: v })}
+            />
+          </Field>
         </>
       )}
     </div>

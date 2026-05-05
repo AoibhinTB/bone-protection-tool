@@ -232,7 +232,7 @@ function buildSummary(patient: PatientInput, riskCategory: RiskCategory): string
 
 function lifestyleAdvice(patient: PatientInput): string[] {
   const advice: string[] = [
-    'Weight-bearing and resistance exercise ≥30 min most days (walking, dancing, strength training, back extensor exercises)',
+    'Progressive resistance training and weight-bearing exercise ≥30 min most days (strength training, walking, dancing, back extensor exercises) per NOGG 2024 — progressive load is key to bone stimulation',
     'Fall prevention: balance training (tai chi / Otago programme for age ≥65), home hazard assessment, annual vision check, medication review for fall risk',
     'Calcium: healthy diet rich in dairy, leafy greens, fortified foods (700–1200 mg/day from food preferred over supplementation)',
     'Vitamin D: sunlight exposure, oily fish, fortified foods; supplement in most Irish adults given latitude',

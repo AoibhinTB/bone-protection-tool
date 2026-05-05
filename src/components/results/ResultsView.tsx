@@ -1,6 +1,7 @@
 'use client';
 
-import type { ClinicalDecision, TrafficLight, FlagSeverity, Urgency } from '@/lib/guidelines/types';
+import { useState } from 'react';
+import type { ClinicalDecision, TrafficLight, FlagSeverity, Urgency, PatientEducation } from '@/lib/guidelines/types';
 
 interface Props {
   result: ClinicalDecision;
@@ -41,6 +42,50 @@ function Badge({ children, className }: { children: React.ReactNode; className: 
 
 function SectionTitle({ children }: { children: React.ReactNode }) {
   return <h2 className="text-base font-semibold text-slate-900 mb-3">{children}</h2>;
+}
+
+function PatientEducationPanel({ edu }: { edu: PatientEducation }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="mt-3 border border-teal-200 rounded-lg overflow-hidden">
+      <button
+        type="button"
+        onClick={() => setOpen(o => !o)}
+        className="w-full flex items-center justify-between px-3 py-2 bg-teal-50 hover:bg-teal-100 transition-colors text-left"
+      >
+        <span className="text-xs font-medium text-teal-700">Patient education information</span>
+        <span className="text-teal-500 text-xs">{open ? '▲ hide' : '▼ show'}</span>
+      </button>
+      {open && (
+        <div className="px-3 py-3 bg-white space-y-3">
+          <div>
+            <p className="text-xs font-semibold text-teal-700 mb-0.5">What this medicine does</p>
+            <p className="text-xs text-slate-600">{edu.whatItDoes}</p>
+          </div>
+          <div>
+            <p className="text-xs font-semibold text-teal-700 mb-0.5">How to take it</p>
+            <p className="text-xs text-slate-600">{edu.howToTake}</p>
+          </div>
+          {edu.sideEffects.length > 0 && (
+            <div>
+              <p className="text-xs font-semibold text-teal-700 mb-0.5">Common side effects</p>
+              <ul className="text-xs text-slate-600 space-y-0.5 list-disc list-inside">
+                {edu.sideEffects.map((s, i) => <li key={i}>{s}</li>)}
+              </ul>
+            </div>
+          )}
+          {edu.warnings.length > 0 && (
+            <div>
+              <p className="text-xs font-semibold text-amber-700 mb-0.5">Important warnings</p>
+              <ul className="text-xs text-amber-800 space-y-0.5 list-disc list-inside">
+                {edu.warnings.map((w, i) => <li key={i}>{w}</li>)}
+              </ul>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
 }
 
 export function ResultsView({ result, onReset, onBack }: Props) {
@@ -196,6 +241,10 @@ export function ResultsView({ result, onReset, onBack }: Props) {
                 <p className="text-xs text-slate-400">
                   {tr.source.guideline} {tr.source.year}
                 </p>
+
+                {tr.patientEducation && (
+                  <PatientEducationPanel edu={tr.patientEducation} />
+                )}
               </div>
             ))}
           </div>
@@ -216,9 +265,20 @@ export function ResultsView({ result, onReset, onBack }: Props) {
                 >
                   <Badge className={uc.color}>{uc.label}</Badge>
                   <div>
-                    <p className="text-sm font-medium text-slate-800">
-                      {inv.investigation.toUpperCase().replace(/_/g, ' ')}
-                    </p>
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <p className="text-sm font-medium text-slate-800">
+                        {inv.investigation.toUpperCase().replace(/_/g, ' ')}
+                      </p>
+                      {inv.tier && (
+                        <span className={`text-xs px-1.5 py-0.5 rounded font-medium ${
+                          inv.tier === 1 ? 'bg-red-100 text-red-700' :
+                          inv.tier === 2 ? 'bg-amber-100 text-amber-700' :
+                          'bg-slate-100 text-slate-600'
+                        }`}>
+                          Tier {inv.tier}
+                        </span>
+                      )}
+                    </div>
                     <p className="text-xs text-slate-500">{inv.reason}</p>
                   </div>
                 </div>

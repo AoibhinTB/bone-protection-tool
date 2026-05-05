@@ -93,7 +93,7 @@ export function Step6Investigations({ data, onChange }: Props) {
           onChange={v =>
             onChange({
               dexaResults: v
-                ? { lumbarSpineTScore: null, totalHipTScore: null, femoralNeckTScore: null }
+                ? { lumbarSpineTScore: null, totalHipTScore: null, femoralNeckTScore: null, forearmTScore: null }
                 : null,
             })
           }
@@ -125,6 +125,16 @@ export function Step6Investigations({ data, onChange }: Props) {
             <NumInput
               value={data.dexaResults.femoralNeckTScore}
               onChange={v => onChange({ dexaResults: { ...data.dexaResults!, femoralNeckTScore: v } })}
+              min={-5}
+              max={3}
+              step={0.1}
+              width="w-20"
+            />
+          </Field>
+          <Field label="33% radius / forearm T-score" hint="Peripheral DEXA — enter if available; forearm-only osteoporosis has specific rules" indent>
+            <NumInput
+              value={data.dexaResults.forearmTScore}
+              onChange={v => onChange({ dexaResults: { ...data.dexaResults!, forearmTScore: v } })}
               min={-5}
               max={3}
               step={0.1}

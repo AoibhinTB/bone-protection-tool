@@ -54,7 +54,7 @@ export function Step3RiskFactors({ data, onChange }: Props) {
           width="w-20"
         />
       </Field>
-      <Field label="Rheumatoid arthritis">
+      <Field label="Rheumatoid arthritis" hint="FRAX risk factor — do NOT also tick 'secondary osteoporosis' in FRAX (double counts risk)">
         <YesNo
           value={data.rheumatoidArthritis}
           onChange={v => onChange({ rheumatoidArthritis: v })}
@@ -93,6 +93,20 @@ export function Step3RiskFactors({ data, onChange }: Props) {
         <YesNo
           value={data.learningDisabilities}
           onChange={v => onChange({ learningDisabilities: v })}
+        />
+      </Field>
+
+      <SectionHeading>HRT safety (affects first-line recommendations)</SectionHeading>
+      <Field label="Personal or family history of VTE" hint="DVT, PE — affects HRT safety assessment">
+        <YesNo
+          value={data.vteHistory}
+          onChange={v => onChange({ vteHistory: v })}
+        />
+      </Field>
+      <Field label="Personal history of breast cancer or high breast cancer risk">
+        <YesNo
+          value={data.breastCancerHistory}
+          onChange={v => onChange({ breastCancerHistory: v })}
         />
       </Field>
 

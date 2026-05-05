@@ -48,6 +48,7 @@ export interface DexaResults {
   lumbarSpineTScore: number | null;
   totalHipTScore: number | null;
   femoralNeckTScore: number | null;
+  forearmTScore: number | null; // 33% radius — peripheral DEXA; forearm-only osteoporosis
 }
 
 export interface BloodResults {
@@ -130,12 +131,20 @@ export interface PatientInput {
   ageAtMenopause: number | null;
 
   // Physical findings (VFA indications)
-  heightLossCm: number | null;        // ≥4 cm → VFA
+  heightLossCm: number | null;             // ≥4 cm historical → VFA
+  heightLossProspectiveCm: number | null;  // ≥2 cm prospective (measured in clinic) → VFA
   kyphosis: boolean;
-  acuteBackPain: boolean;             // with osteoporosis risk factors → VFA
+  acuteBackPain: boolean;                  // with osteoporosis risk factors → VFA
+
+  // HRT safety checks
+  vteHistory: boolean;                // personal or family VTE history
+  breastCancerHistory: boolean;       // personal breast cancer or high familial risk
 
   // Cardiovascular history (romosozumab contraindication)
   priorMIOrStrokeWithin12Months: boolean;
+
+  // Imminent fracture risk
+  recentFractureWithin2Years: boolean; // any fragility fracture within last 24 months → treat immediately
 
   // Renal function
   renalFunction: RenalFunction | null;
@@ -193,9 +202,18 @@ export interface InvestigationRecommendation {
     | 'lh_fsh'
     | 'alp'
     | 'fbc'
-    | 'frax';
+    | 'frax'
+    | 'spep_upep';
   reason: string;
   urgency: Urgency;
+  tier?: 1 | 2 | 3; // 1 = mandatory pre-treatment, 2 = routine baseline, 3 = secondary cause
+}
+
+export interface PatientEducation {
+  whatItDoes: string;
+  howToTake: string;
+  sideEffects: string[];
+  warnings: string[];
 }
 
 export interface TreatmentRecommendation {
@@ -208,6 +226,7 @@ export interface TreatmentRecommendation {
   monitoring: string[];
   irishPrescribingNote?: string;
   source: GuidelineSource;
+  patientEducation?: PatientEducation;
 }
 
 export interface ReferralRecommendation {

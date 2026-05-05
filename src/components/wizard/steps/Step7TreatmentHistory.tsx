@@ -108,8 +108,8 @@ export function Step7TreatmentHistory({ data, onChange }: Props) {
           )}
           {isOnBP && (
             <Field
-              label="Thigh or groin pain"
-              hint="Prodrome of atypical femoral fracture (AFF)"
+              label="Unexplained mid-thigh or groin pain"
+              hint="Prodrome of atypical femoral fracture (AFF) — ask at every review"
               indent
             >
               <YesNo
