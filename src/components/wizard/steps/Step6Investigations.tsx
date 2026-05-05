@@ -1,0 +1,213 @@
+'use client';
+
+import { estimateFrax } from '@/lib/fraxEstimate';
+import type { PatientInput } from '@/lib/guidelines/types';
+import { Field, NumInput, YesNo, SectionHeading } from '../FormPrimitives';
+
+interface Props {
+  data: PatientInput;
+  onChange: (patch: Partial<PatientInput>) => void;
+}
+
+export function Step6Investigations({ data, onChange }: Props) {
+  const fraxEst = estimateFrax(data);
+  const hasManualFrax = data.fraxMOFPercent !== null;
+  const hasDexa = data.dexaResults !== null;
+  const hasBlood = data.bloodResults !== null;
+
+  return (
+    <div>
+      <SectionHeading>FRAX</SectionHeading>
+
+      {/* Auto-calculated estimate */}
+      <div className="bg-indigo-50 border border-indigo-200 rounded-lg px-4 py-3 mb-4">
+        <p className="text-xs font-medium text-indigo-700 mb-1">Estimated FRAX — Ireland (no BMD)</p>
+        <div className="flex gap-6 text-sm">
+          <div>
+            <span className="text-indigo-500">MOF </span>
+            <span className="font-bold text-indigo-900">{fraxEst.mof}%</span>
+          </div>
+          <div>
+            <span className="text-indigo-500">Hip </span>
+            <span className="font-bold text-indigo-900">{fraxEst.hip}%</span>
+          </div>
+        </div>
+        <p className="text-xs text-indigo-500 mt-1">
+          Calculated from risk factors above · Based on published NOGG/FRAX algorithm (Kanis et al.)
+        </p>
+      </div>
+
+      <Field
+        label="Override with official FRAX values"
+        hint="Use frax.shef.ac.uk (country 49) — required if you have BMD available"
+      >
+        <YesNo
+          value={hasManualFrax}
+          onChange={v => {
+            if (v) {
+              onChange({ fraxMOFPercent: fraxEst.mof, fraxHipPercent: fraxEst.hip });
+            } else {
+              onChange({ fraxMOFPercent: null, fraxHipPercent: null, fraxCalculatedWithBMD: false });
+            }
+          }}
+        />
+      </Field>
+
+      {hasManualFrax && (
+        <>
+          <Field label="Official MOF (10-year)" indent>
+            <NumInput
+              value={data.fraxMOFPercent}
+              onChange={v => onChange({ fraxMOFPercent: v })}
+              min={0}
+              max={100}
+              step={0.1}
+              unit="%"
+              width="w-20"
+            />
+          </Field>
+          <Field label="Official hip fracture (10-year)" indent>
+            <NumInput
+              value={data.fraxHipPercent}
+              onChange={v => onChange({ fraxHipPercent: v })}
+              min={0}
+              max={100}
+              step={0.1}
+              unit="%"
+              width="w-20"
+            />
+          </Field>
+          <Field label="Calculated with BMD" hint="If yes, arithmetic adjustments (T2DM, falls, Parkinson's) still applied" indent>
+            <YesNo
+              value={data.fraxCalculatedWithBMD}
+              onChange={v => onChange({ fraxCalculatedWithBMD: v })}
+            />
+          </Field>
+        </>
+      )}
+
+      <SectionHeading>DEXA</SectionHeading>
+      <Field label="DEXA results available">
+        <YesNo
+          value={hasDexa}
+          onChange={v =>
+            onChange({
+              dexaResults: v
+                ? { lumbarSpineTScore: null, totalHipTScore: null, femoralNeckTScore: null }
+                : null,
+            })
+          }
+        />
+      </Field>
+      {hasDexa && data.dexaResults && (
+        <>
+          <Field label="Lumbar spine T-score" indent>
+            <NumInput
+              value={data.dexaResults.lumbarSpineTScore}
+              onChange={v => onChange({ dexaResults: { ...data.dexaResults!, lumbarSpineTScore: v } })}
+              min={-5}
+              max={3}
+              step={0.1}
+              width="w-20"
+            />
+          </Field>
+          <Field label="Total hip T-score" indent>
+            <NumInput
+              value={data.dexaResults.totalHipTScore}
+              onChange={v => onChange({ dexaResults: { ...data.dexaResults!, totalHipTScore: v } })}
+              min={-5}
+              max={3}
+              step={0.1}
+              width="w-20"
+            />
+          </Field>
+          <Field label="Femoral neck T-score" indent>
+            <NumInput
+              value={data.dexaResults.femoralNeckTScore}
+              onChange={v => onChange({ dexaResults: { ...data.dexaResults!, femoralNeckTScore: v } })}
+              min={-5}
+              max={3}
+              step={0.1}
+              width="w-20"
+            />
+          </Field>
+        </>
+      )}
+
+      <SectionHeading>Blood results</SectionHeading>
+      <Field label="Blood results available">
+        <YesNo
+          value={hasBlood}
+          onChange={v =>
+            onChange({
+              bloodResults: v
+                ? { adjustedCalciumMmol: null, vitaminDNmol: null, egfr: null, alp: null, tshNormal: null, fbc: null }
+                : null,
+            })
+          }
+        />
+      </Field>
+      {hasBlood && data.bloodResults && (
+        <>
+          <Field label="Adjusted calcium" hint="mmol/L" indent>
+            <NumInput
+              value={data.bloodResults.adjustedCalciumMmol}
+              onChange={v => onChange({ bloodResults: { ...data.bloodResults!, adjustedCalciumMmol: v } })}
+              min={1}
+              max={4}
+              step={0.01}
+              unit="mmol/L"
+              width="w-20"
+            />
+          </Field>
+          <Field label="25-OH vitamin D" hint="nmol/L" indent>
+            <NumInput
+              value={data.bloodResults.vitaminDNmol}
+              onChange={v => onChange({ bloodResults: { ...data.bloodResults!, vitaminDNmol: v } })}
+              min={0}
+              max={300}
+              unit="nmol/L"
+              width="w-20"
+            />
+          </Field>
+          <Field label="eGFR" hint="ml/min/1.73 m²" indent>
+            <NumInput
+              value={data.bloodResults.egfr}
+              onChange={v => onChange({ bloodResults: { ...data.bloodResults!, egfr: v } })}
+              min={1}
+              max={130}
+              unit="ml/min"
+              width="w-20"
+            />
+          </Field>
+          <Field label="ALP" hint="U/L — bone turnover, Paget's, osteomalacia screen" indent>
+            <NumInput
+              value={data.bloodResults.alp}
+              onChange={v => onChange({ bloodResults: { ...data.bloodResults!, alp: v } })}
+              min={0}
+              max={1000}
+              unit="U/L"
+              width="w-20"
+            />
+          </Field>
+          <Field label="TSH" indent>
+            <YesNo
+              value={data.bloodResults.tshNormal ?? false}
+              onChange={v => onChange({ bloodResults: { ...data.bloodResults!, tshNormal: v } })}
+              yesLabel="Normal"
+              noLabel="Abnormal"
+            />
+          </Field>
+          <Field label="FBC" indent>
+            <YesNo
+              value={data.bloodResults.fbc ?? false}
+              onChange={v => onChange({ bloodResults: { ...data.bloodResults!, fbc: v } })}
+              yesLabel="Normal"
+              noLabel="Abnormal / not done"
+            />
+          </Field>
+        </>
+      )}
+    </div>
+  );
+}
