@@ -157,12 +157,17 @@ export function assessInvestigationsNeeded(
       });
     }
 
-    if (!patient.bloodResults?.tshNormal) {
+    // TSH: recommend if not yet checked, OR if checked and abnormal
+    const tshNotChecked = patient.bloodResults === null;
+    const tshAbnormal = patient.bloodResults !== null && patient.bloodResults.tshNormal === false;
+    if (tshNotChecked || tshAbnormal) {
       needed.push({
         investigation: 'thyroid',
         tier: 3,
         reason:
-          'TSH: untreated hyperthyroidism and T4 over-replacement cause bone loss.',
+          tshAbnormal
+            ? 'TSH abnormal — untreated hyperthyroidism and T4 over-replacement accelerate bone loss. Review and optimise thyroid status before or alongside bone protection treatment.'
+            : 'TSH not yet checked. Untreated hyperthyroidism and T4 over-replacement are secondary causes of bone loss — check as part of secondary cause workup.',
         urgency: 'routine',
       });
     }

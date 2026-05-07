@@ -126,14 +126,30 @@ export function generateTreatmentOutput(
     });
   }
 
+  // Compute AI lower-threshold override: T-score ≤-1.5 on aromatase inhibitor mandates treatment
+  // regardless of FRAX category (CTIBL guidelines / NOGG 2024 Section 7)
+  const aiLowerThresholdMet = (() => {
+    if (!patient.aromataseInhibitorUse || !patient.dexaResults) return false;
+    const scores = [
+      patient.dexaResults.lumbarSpineTScore,
+      patient.dexaResults.totalHipTScore,
+      patient.dexaResults.femoralNeckTScore,
+    ].filter((t): t is number => t != null);
+    return scores.length > 0 && Math.min(...scores) <= -1.5;
+  })();
+
   // Low risk — lifestyle only
-  if (riskCategory === 'low') {
+  // Bypass: recent fracture within 24 months (imminent risk → treat immediately without waiting for FRAX)
+  // Bypass: AI therapy with T-score ≤-1.5 (CTIBL threshold is independent of FRAX)
+  if (riskCategory === 'low' && !patient.recentFractureWithin2Years && !aiLowerThresholdMet) {
     return { recommendations: [], flags, referrals, supplements };
   }
 
   // Intermediate risk without DEXA — withhold pharmacological treatment pending BMD
   // NOGG 2024 Section 3.1: BMD required to reclassify amber before treatment decision
-  if (riskCategory === 'intermediate' && !patient.dexaResults && !patient.currentTreatment) {
+  // Bypass: recent fracture (treat immediately) or AI threshold met (DEXA not required to decide)
+  if (riskCategory === 'intermediate' && !patient.dexaResults && !patient.currentTreatment &&
+      !patient.recentFractureWithin2Years && !aiLowerThresholdMet) {
     flags.push({
       id: 'intermediate_await_dexa',
       severity: 'info',
@@ -343,7 +359,7 @@ function sequencing(
 
   // ── GI intolerance ──
   if (current.reasonStopped === 'gi_intolerance') {
-    return { ...giSwitch(current.agent, egfr, flags), referrals };
+    return { ...giSwitch(patient, current.agent, egfr, flags), referrals };
   }
 
   // ── Treatment failure ──
@@ -374,8 +390,12 @@ function sequencing(
         rationale: 'Spec Section 7.4: oral BP failure → IV zoledronate OR denosumab OR specialist for anabolic.',
         source: SRC_NOGG,
       });
-      if (canUse('zoledronate', egfr)) recs.push(zoledronate());
-      else recs.push(denosumab(egfr));
+      if (canUse('zoledronate', egfr)) {
+        recs.push(zoledronate());
+      } else {
+        addVitDBlock(patient, flags);
+        recs.push(denosumab(egfr));
+      }
     } else {
       // Denosumab failure or zoledronate failure → specialist
       referrals.push({
@@ -436,6 +456,7 @@ function sequencing(
         });
         // At very high risk after long-term bisphosphonate, offer denosumab switch
         if (riskCategory === 'very_high' && canUse('denosumab', egfr)) {
+          addVitDBlock(patient, flags);
           recs.push(denosumab(egfr));
           flags.push({
             id: 'bp_to_denosumab',
@@ -515,6 +536,7 @@ function shouldTakeBPHoliday(
 // ─── GI intolerance switch pathway ───────────────────────────────────────
 
 function giSwitch(
+  patient: PatientInput,
   stoppedAgent: TreatmentAgent,
   egfr: number | null,
   flags: ClinicalFlag[],
@@ -547,12 +569,20 @@ function giSwitch(
       source: SRC_HSE,
     });
     if (canUse('ibandronate', egfr)) recs.push(ibandronate());
-    if (canUse('zoledronate', egfr)) recs.push(zoledronate());
-    else if (!canUse('zoledronate', egfr)) recs.push(denosumab(egfr));
+    if (canUse('zoledronate', egfr)) {
+      recs.push(zoledronate());
+    } else {
+      addVitDBlock(patient, flags);
+      recs.push(denosumab(egfr));
+    }
   } else {
     // Any other agent — IV or denosumab
-    if (canUse('zoledronate', egfr)) recs.push(zoledronate());
-    else recs.push(denosumab(egfr));
+    if (canUse('zoledronate', egfr)) {
+      recs.push(zoledronate());
+    } else {
+      addVitDBlock(patient, flags);
+      recs.push(denosumab(egfr));
+    }
   }
 
   return { recommendations: recs, flags };
@@ -737,6 +767,37 @@ function earlyMenopause(
     source: SRC_BMS,
   });
 
+  // VTE / breast cancer safety checks — relevant for POI even though HRT is first-line
+  if (patient.vteHistory) {
+    flags.push({
+      id: 'poi_hrt_vte',
+      severity: 'warning',
+      message:
+        'VTE history in POI patient: TRANSDERMAL oestrogen (patch/gel) is mandatory — it does not increase VTE risk, unlike oral oestrogen. ' +
+        'Oral HRT is contraindicated. Specialist endocrinology/haematology input required before initiating.',
+      rationale:
+        'Transdermal oestrogen avoids first-pass hepatic metabolism and does not activate coagulation factors, ' +
+        'unlike oral oestrogen which is associated with increased VTE risk. ' +
+        'NICE NG23 / BMS 2024: transdermal route is the preferred option in women with VTE history.',
+      source: SRC_BMS,
+    });
+  }
+
+  if (patient.breastCancerHistory) {
+    flags.push({
+      id: 'poi_hrt_breast_cancer',
+      severity: 'warning',
+      message:
+        'Breast cancer history in POI patient: HRT use requires joint oncology and endocrinology input. ' +
+        'In women with BRCA1/2 mutations who have undergone risk-reducing surgery, HRT may be appropriate — individual risk-benefit assessment required. ' +
+        'Bisphosphonate (alendronate or zoledronate) should be used as bone protection if HRT is declined or contraindicated.',
+      rationale:
+        'NICE NG23 / BMS 2024: breast cancer history is not an absolute contraindication to HRT in POI, ' +
+        'but requires specialist risk-benefit assessment. The bone protection benefit of treating early oestrogen deficiency must be weighed against oncological risk.',
+      source: SRC_BMS,
+    });
+  }
+
   referrals.push({
     specialty: 'endocrinology',
     reason: 'Premature ovarian insufficiency — specialist management of POI, HRT choice, and long-term bone health (endocrinology or gynaecology).',
@@ -752,17 +813,37 @@ function earlyMenopause(
       'Continue until at least average age of natural menopause (~51 years), then reassess fracture risk with FRAX and DEXA.',
     strength: 'strong',
     contraindications: [
-      'Oestrogen-sensitive malignancy',
+      'Oestrogen-sensitive malignancy (specialist input required if uncertain)',
       'Undiagnosed vaginal bleeding',
       'Active or recent arterial thromboembolic event',
       'Severe active liver disease',
+      'Oral HRT in VTE history (transdermal route required)',
     ],
     monitoring: [
       'Annual blood pressure',
-      'Breast awareness',
+      'Breast awareness — advise patient to report any changes promptly',
       'DEXA at age 51 to guide decision on continuing or switching bone protection strategy',
     ],
     source: SRC_BMS,
+    patientEducation: {
+      whatItDoes:
+        'HRT (hormone replacement therapy) replaces the oestrogen your body is no longer making. In premature menopause, this protects your bones, heart, and brain — as well as managing menopausal symptoms.',
+      howToTake:
+        'Usually applied daily as a gel or patch to the skin (transdermal). If you have a womb, you will also need a progestogen to protect the womb lining. ' +
+        'Your specialist will advise on the exact preparation and dose. Continue until at least age 51, then reassess.',
+      sideEffects: [
+        'Breast tenderness (usually settles within a few months)',
+        'Irregular bleeding (common in the first few months)',
+        'Mild skin irritation at patch site',
+        'Bloating or mood changes',
+      ],
+      warnings: [
+        'Do not stop HRT suddenly without discussing with your doctor — bone protection diminishes rapidly after stopping.',
+        'If you have a personal or family history of VTE (blood clots), tell your doctor — a patch or gel (not tablets) will be used.',
+        'Report any new breast lump or nipple change promptly.',
+        'You will still need a DEXA scan around age 51 to reassess bone health and decide whether to continue HRT or switch to a different bone protection medicine.',
+      ],
+    },
   };
 
   return { recommendations: [rec], flags, referrals };
@@ -915,6 +996,7 @@ function giop(
   } else if (canUse('zoledronate', egfr)) {
     recs.push({ ...zoledronate(), rationale: 'IV zoledronate for GIOP when oral bisphosphonate is contraindicated or not tolerated.' });
   } else {
+    addVitDBlock(patient, flags);
     recs.push(denosumab(egfr));
     flags.push({
       id: 'giop_denosumab_conditional',
