@@ -279,7 +279,7 @@ function initiateTherapy(
     patient.sex === 'female' &&
     patient.age <= 60 &&
     (riskCategory === 'high' || riskCategory === 'very_high') &&
-    !patient.earlyMenopause // POI handled separately
+    !isEarlyMenopausePre50(patient) // POI (<50) handled separately; ≥50 with early menopause history still eligible
   ) {
     if (patient.vteHistory || patient.breastCancerHistory) {
       flags.push({
@@ -350,6 +350,20 @@ function initiateTherapy(
 
   // Alendronate first-line per HSE MMP Ireland
   if (canUse('alendronate', egfr)) {
+    // Borderline renal function: zoledronate should be avoided at eGFR <45
+    if (egfr !== null && egfr < 50) {
+      flags.push({
+        id: 'zoledronate_borderline_egfr',
+        severity: 'info',
+        message:
+          `eGFR ${egfr} ml/min: IV zoledronate should be used with caution or avoided when eGFR is borderline (<45 ml/min). ` +
+          'Oral bisphosphonate (alendronate or risedronate) is preferred at this level of renal function. Monitor eGFR at least annually.',
+        rationale:
+          'SmPC (Aclasta/zoledronate): caution required in renal impairment; consider avoiding if eGFR <45 ml/min. ' +
+          'Oral bisphosphonates do not accumulate in renal impairment at the same rate and are preferred when eGFR is borderline.',
+        source: SRC_NICE,
+      });
+    }
     recs.push(alendronate());
     return recs;
   }
@@ -466,6 +480,14 @@ function sequencing(
         urgency: 'soon',
       });
     }
+  }
+
+  // ── Currently on denosumab (stable — no treatment failure): show continuation + transition plan ──
+  // denosumabReboundFlags() has already added the cessation plan flag explaining transition options.
+  if (current.agent === 'denosumab' && current.currentlyOn && !isTreatmentFailure) {
+    addVitDBlock(patient, flags);
+    recs.push(denosumab(egfr));
+    return { recommendations: recs, flags, referrals };
   }
 
   // ── Bisphosphonate reassessment (NOGG 2024 Rec 17) ──
@@ -1050,7 +1072,7 @@ function giop(
     referrals.push({
       specialty: 'rheumatology',
       reason: 'Very high risk GIOP — teriparatide preferred; requires specialist (High-Tech) prescription in Ireland.',
-      urgency: 'soon',
+      urgency: 'urgent',
     });
   }
 

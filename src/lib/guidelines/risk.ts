@@ -63,6 +63,40 @@ export function stratifyRisk(patient: PatientInput): RiskStratification {
     }
   }
 
+  // Lower intervention thresholds: high-risk exposures that warrant treatment at T-scores above the WHO -2.5 cut-off.
+  // These mirror NOGG 2024 Section 7 guidance on context-specific lower thresholds.
+
+  // Aromatase inhibitor: T-score ≤ -1.5 warrants treatment (CTIBL guidelines / NOGG 2024 Section 7.1)
+  if (patient.aromataseInhibitorUse && patient.dexaResults) {
+    const lowest = lowestTScore(patient.dexaResults);
+    if (lowest <= -1.5) {
+      return result('high', 'red', threshold.lowerMOF, threshold.upperMOF, rawMOF, rawHip, adjustedMOF, adjustedHip, adjustments,
+        `Aromatase inhibitor use with T-score ${lowest}: lower intervention threshold (≤-1.5) applies. ` +
+        'Accelerated cancer treatment–induced bone loss (CTIBL) warrants antiresorptive treatment (NOGG 2024 Section 7.1).');
+    }
+  }
+
+  // Early menopause history (now age ≥50): T-score ≤ -1.5 warrants treatment (IOS 2024 / NOGG 2024)
+  // Patients are age ≥50 here (age <50 path handled above) — early menopause = lifetime cumulative bone deficit
+  if (patient.sex === 'female' && patient.earlyMenopause && patient.dexaResults) {
+    const lowest = lowestTScore(patient.dexaResults);
+    if (lowest <= -1.5) {
+      return result('high', 'red', threshold.lowerMOF, threshold.upperMOF, rawMOF, rawHip, adjustedMOF, adjustedHip, adjustments,
+        `History of early menopause with T-score ${lowest}: lower intervention threshold (≤-1.5) applies. ` +
+        'Early oestrogen deficiency causes cumulative bone loss beyond normal age-related risk (IOS 2024 / NOGG 2024).');
+    }
+  }
+
+  // Androgen deprivation therapy: T-score ≤ -2.0 warrants treatment (NOGG 2024 Section 7.2)
+  if (patient.adtUse && patient.dexaResults) {
+    const lowest = lowestTScore(patient.dexaResults);
+    if (lowest <= -2.0) {
+      return result('high', 'red', threshold.lowerMOF, threshold.upperMOF, rawMOF, rawHip, adjustedMOF, adjustedHip, adjustments,
+        `ADT use with T-score ${lowest}: lower intervention threshold (≤-2.0) applies. ` +
+        'ADT-induced hypogonadism causes rapid bone loss — treatment indicated at this BMD level (NOGG 2024 Section 7.2).');
+    }
+  }
+
   // Previous hip or vertebral fracture → treat regardless of FRAX (NOGG 2024 Rec 8)
   if (patient.priorHipFracture || patient.priorVertebralFracture) {
     return result('high', 'red', threshold.lowerMOF, threshold.upperMOF, rawMOF, rawHip, adjustedMOF, adjustedHip, adjustments,
@@ -144,12 +178,12 @@ function veryHighRiskReason(
     criteria.push(`high-dose glucocorticoid (${patient.glucocorticoidUse.dose} dose, ${patient.glucocorticoidUse.durationMonths} months)`);
   }
 
-  // FRAX MOF ≥ 30% (after adjustments)
+  // FRAX MOF ≥ 32.5% (NOGG 2024 Table 5: VHRT at 70+ = IT 20.3% × 1.60)
   if (adjustedMOF !== null && adjustedMOF >= VERY_HIGH_RISK.fraxMOF) {
     criteria.push(`adjusted FRAX MOF ${adjustedMOF}% ≥ ${VERY_HIGH_RISK.fraxMOF}%`);
   }
 
-  // FRAX hip ≥ 10% (after adjustments)
+  // FRAX hip ≥ 8.6% (NOGG 2024 Table 5: VHRT at 70+ = IT 5.4% × 1.60)
   if (adjustedHip !== null && adjustedHip >= VERY_HIGH_RISK.fraxHip) {
     criteria.push(`adjusted FRAX hip ${adjustedHip}% ≥ ${VERY_HIGH_RISK.fraxHip}%`);
   }

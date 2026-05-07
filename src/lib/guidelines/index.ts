@@ -38,16 +38,16 @@ export function runClinicalDecision(patient: PatientInput): ClinicalDecision {
   const { recommendations, flags, referrals, supplements } =
     generateTreatmentOutput(patient, riskCategory);
 
-  // Age ≥85: FRAX 10-year probability may exceed remaining life expectancy
-  if (patient.age >= 85) {
+  // Age ≥80: FRAX 10-year probability may exceed remaining life expectancy
+  if (patient.age >= 80) {
     const fraxLifeFlag: ClinicalFlag = {
       id: 'frax_life_expectancy_caveat',
       severity: 'info',
       message:
-        'Patient aged ≥85: FRAX 10-year fracture probability may exceed remaining life expectancy. ' +
+        'Patient aged ≥80: FRAX 10-year fracture probability may exceed remaining life expectancy. ' +
         'Apply clinical judgement — absolute fracture prevention benefit and treatment tolerability must be weighed individually.',
       rationale:
-        'NOGG 2024: FRAX calculates 10-year fracture probability. In very elderly patients, remaining life expectancy ' +
+        'NOGG 2024: FRAX calculates 10-year fracture probability. In elderly patients aged ≥80, remaining life expectancy ' +
         'may be shorter than 10 years — the clinical significance of the FRAX percentage should be interpreted accordingly.',
       source: GUIDELINE_VERSIONS.nogg,
     };

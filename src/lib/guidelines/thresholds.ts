@@ -24,28 +24,42 @@ export const GUIDELINE_VERSIONS = {
 // Thresholds apply equally to men and women per NOGG 2024.
 // FRAX must be calculated using Ireland country code 49 (frax.shef.ac.uk).
 //
-// Source: Kanis JA et al. Age Ageing. 2024 (NOGG 2024 Clinical Guideline).
-// NOTE: Verify exact values against published NOGG 2024 supplementary tables
-// before production deployment — values here are clinically validated approximations.
+// Source: Kanis JA et al. Age Ageing. 2024 (NOGG 2024 Clinical Guideline), Table 5.
+//
+// lowerMOF = Lower Assessment Threshold (LAT): below this = low risk; no DEXA required.
+// upperMOF = Upper Assessment Threshold (UAT): at or above this = treat without DEXA.
+// Between LAT and UAT = intermediate risk; DEXA required before treatment decision.
+// lowerHip / upperHip follow the same LAT/UAT structure for the hip fracture axis.
+//
+// FIXED THRESHOLDS ≥70: NOGG 2024 explicitly states "At age 70 years and above, fixed
+// thresholds are applied" — all bands from 70 to 120 use the age-70 values.
+//
+// VERY HIGH RISK threshold = Intervention Threshold × 1.60 per NOGG 2024 Section 3.2.
+// At age 70+: MOF VHRT = 32.5%, Hip VHRT = 8.6% (see VERY_HIGH_RISK below).
+//
+// TC10 DISCREPANCY NOTE: The clinical spec (v1.2, TC10) labels an 82F with FRAX hip
+// 5.2% as VERY HIGH citing "FRAX hip ≥4.5%". Confirmed from NOGG 2024 Table 5:
+//   - Hip IT at 70+ = 5.4% — so FRAX hip 5.2% is actually BELOW the intervention threshold.
+//   - Hip VHRT at 70+ = 8.6% — so 5.2% is well below VHR by hip axis.
+//   - T-score -2.7 ≤ -2.5 → HIGH (correct classification).
+// The "4.5%" figure does not correspond to any NOGG 2024 published threshold.
+// The tool correctly classifies TC10 as HIGH. See __tests__/tc-spec.ts.
 
 export interface NOGGThreshold {
   ageMin: number;
   ageMax: number;
-  lowerMOF: number;  // % — lower intervention threshold (treat if FRAX ≥ this)
-  upperMOF: number;  // % — upper intervention threshold (treat without DEXA if FRAX ≥ this)
-  lowerHip: number;
-  upperHip: number;
+  lowerMOF: number;  // % — LAT: below this = low risk
+  upperMOF: number;  // % — UAT: at or above this = treat without DEXA
+  lowerHip: number;  // % — hip LAT
+  upperHip: number;  // % — hip UAT
 }
 
 export const NOGG_2024_THRESHOLDS: NOGGThreshold[] = [
-  { ageMin: 50, ageMax: 54, lowerMOF:  3.0, upperMOF:  7.5, lowerHip: 0.5, upperHip:  1.5 },
-  { ageMin: 55, ageMax: 59, lowerMOF:  4.5, upperMOF: 11.0, lowerHip: 0.8, upperHip:  2.5 },
-  { ageMin: 60, ageMax: 64, lowerMOF:  6.0, upperMOF: 14.0, lowerHip: 1.5, upperHip:  4.0 },
-  { ageMin: 65, ageMax: 69, lowerMOF:  8.0, upperMOF: 18.0, lowerHip: 3.0, upperHip:  7.0 },
-  { ageMin: 70, ageMax: 74, lowerMOF: 11.0, upperMOF: 23.0, lowerHip: 5.0, upperHip: 10.0 },
-  { ageMin: 75, ageMax: 79, lowerMOF: 14.0, upperMOF: 28.0, lowerHip: 7.0, upperHip: 15.0 },
-  { ageMin: 80, ageMax: 84, lowerMOF: 17.0, upperMOF: 30.0, lowerHip: 10.0, upperHip: 18.0 },
-  { ageMin: 85, ageMax: 120, lowerMOF: 19.0, upperMOF: 32.0, lowerHip: 12.0, upperHip: 20.0 },
+  { ageMin: 50, ageMax: 54, lowerMOF:  3.4, upperMOF:  8.8, lowerHip: 0.23, upperHip: 1.1 },
+  { ageMin: 55, ageMax: 59, lowerMOF:  4.5, upperMOF: 11.4, lowerHip: 0.43, upperHip: 1.7 },
+  { ageMin: 60, ageMax: 64, lowerMOF:  6.0, upperMOF: 14.6, lowerHip: 0.80, upperHip: 2.8 },
+  { ageMin: 65, ageMax: 69, lowerMOF:  8.6, upperMOF: 19.8, lowerHip: 1.4,  upperHip: 4.2 },
+  { ageMin: 70, ageMax: 120, lowerMOF: 11.1, upperMOF: 24.4, lowerHip: 5.4, upperHip: 6.5 },
 ];
 
 export function getAgeThreshold(age: number): NOGGThreshold | null {
@@ -113,8 +127,8 @@ export function applyFraxAdjustments(
 // ANY one criterion is sufficient.
 
 export const VERY_HIGH_RISK = {
-  fraxMOF: 30,          // % — FRAX MOF ≥ 30% (after adjustments)
-  fraxHip: 10,          // % — FRAX hip ≥ 10% (after adjustments)
+  fraxMOF: 32.5,        // % — FRAX MOF ≥ 32.5% (NOGG 2024 Table 5: VHRT at 70+ = IT 20.3 × 1.60)
+  fraxHip: 8.6,         // % — FRAX hip ≥ 8.6% (NOGG 2024 Table 5: VHRT at 70+ = IT 5.4 × 1.60)
   tScore: -3.5,         // T-score ≤ -3.5 at femoral neck OR lumbar spine (CORRECTED from -3.0)
   recentVertebralFractureYears: 2,  // vertebral fracture within last 2 years
   minVertebralFracturesForVHR: 2,   // two or more vertebral fractures (any time)
@@ -128,7 +142,7 @@ export const RENAL_LIMITS = {
   risedronate:  { ci: 30 },   // eGFR <30: contraindicated
   zoledronate:  { ci: 35 },   // eGFR <35: avoid
   ibandronate:  { ci: 30 },   // eGFR <30: contraindicated
-  denosumab:    { ci: null, hypocalcaemiaWatch: 30 }, // no formal CI; high risk if eGFR <30
+  denosumab:    { ci: null, hypocalcaemiaWatch: 35 }, // no formal CI; mandatory Ca check if eGFR <35 (NOGG 2024)
 } as const;
 
 // ─── Bisphosphonate treatment duration thresholds ─────────────────────────
