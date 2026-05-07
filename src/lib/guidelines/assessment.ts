@@ -45,7 +45,7 @@ export function assessInvestigationsNeeded(
       investigation: 'calcium',
       tier: 1,
       reason:
-        '[Tier 1 — mandatory pre-treatment] Adjusted serum calcium: hypocalcaemia must be corrected before ' +
+        'Adjusted serum calcium: hypocalcaemia must be corrected before ' +
         'bisphosphonate or denosumab; hypercalcaemia may indicate primary hyperparathyroidism (refer endocrinology).',
       urgency: 'routine',
     });
@@ -59,19 +59,19 @@ export function assessInvestigationsNeeded(
       tier: 1,
       reason:
         vitD === null
-          ? `[Tier 1 — mandatory pre-treatment] Serum 25-OHD not checked. Target ≥${BLOOD_RANGES.vitaminD.target} nmol/L. ` +
+          ? `Serum 25-OHD not checked. Target ≥${BLOOD_RANGES.vitaminD.target} nmol/L. ` +
             'If severely deficient (<25 nmol/L): Irish loading protocol — 50,000 IU cholecalciferol weekly × 6 weeks, then maintenance. ' +
             'Do NOT start bisphosphonate or denosumab until replete.'
           : vitD < 25
-          ? `[Tier 1 — mandatory pre-treatment] Severe vitamin D deficiency (${vitD} nmol/L). ` +
+          ? `Severe vitamin D deficiency (${vitD} nmol/L). ` +
             'Irish loading protocol: 50,000 IU cholecalciferol weekly × 6 weeks (300,000 IU total). ' +
             `Do NOT start antiresorptive therapy until replete (target ≥${BLOOD_RANGES.vitaminD.target} nmol/L). ` +
             'Do NOT administer denosumab until Vit D ≥50 nmol/L.'
           : vitD < BLOOD_RANGES.vitaminD.deficient
-          ? `[Tier 1 — mandatory pre-treatment] Vitamin D deficient (${vitD} nmol/L). ` +
+          ? `Vitamin D deficient (${vitD} nmol/L). ` +
             `Load with 50,000 IU weekly × 8 weeks; target ≥${BLOOD_RANGES.vitaminD.target} nmol/L before starting treatment. ` +
             'Do NOT administer denosumab until Vit D ≥50 nmol/L.'
-          : `[Tier 1] Vitamin D insufficient (${vitD} nmol/L, target ≥${BLOOD_RANGES.vitaminD.target} nmol/L). ` +
+          : `Vitamin D insufficient (${vitD} nmol/L, target ≥${BLOOD_RANGES.vitaminD.target} nmol/L). ` +
             'Supplement alongside bone protection therapy.',
       urgency: severelyDeficient ? 'soon' : vitD !== null && vitD < BLOOD_RANGES.vitaminD.deficient ? 'soon' : 'routine',
     });
@@ -83,7 +83,7 @@ export function assessInvestigationsNeeded(
       investigation: 'egfr',
       tier: 1,
       reason:
-        '[Tier 1 — mandatory pre-treatment] eGFR required to select safe agent: ' +
+        'eGFR required to select safe agent: ' +
         'alendronate/zoledronate CI if eGFR <35; risedronate CI if eGFR <30. ' +
         'eGFR <35 with denosumab: mandatory corrected calcium check 2 weeks after every injection.',
       urgency: 'routine',
@@ -97,7 +97,7 @@ export function assessInvestigationsNeeded(
       investigation: 'alp',
       tier: 2,
       reason:
-        '[Tier 2 — routine baseline] ALP: bone turnover marker; elevated ALP + low calcium/vit D suggests osteomalacia; ' +
+        'ALP: bone turnover marker; elevated ALP + low calcium/vit D suggests osteomalacia; ' +
         'markedly elevated ALP may indicate Paget\'s — investigate before starting treatment. ' +
         'Unexplained raised ALP is a contraindication to teriparatide.',
       urgency: 'routine',
@@ -109,7 +109,7 @@ export function assessInvestigationsNeeded(
       investigation: 'fbc',
       tier: 2,
       reason:
-        '[Tier 2 — routine baseline] FBC: exclude haematological malignancy (myeloma) — especially with anaemia, ' +
+        'FBC: exclude haematological malignancy (myeloma) — especially with anaemia, ' +
         'vertebral fracture without clear cause, or elevated ESR. If abnormal, add SPEP/UPEP.',
       urgency: 'routine',
     });
@@ -129,7 +129,7 @@ export function assessInvestigationsNeeded(
         investigation: 'testosterone',
         tier: 3,
         reason:
-          '[Tier 3 — secondary cause] Morning serum testosterone: hypogonadism is the most common secondary cause of osteoporosis in men.',
+          'Morning serum testosterone: hypogonadism is the most common secondary cause of osteoporosis in men.',
         urgency: 'routine',
       });
     }
@@ -139,7 +139,7 @@ export function assessInvestigationsNeeded(
         investigation: 'lh_fsh',
         tier: 3,
         reason:
-          '[Tier 3 — secondary cause] LH and FSH: confirm premature ovarian insufficiency (POI). ' +
+          'LH and FSH: confirm premature ovarian insufficiency (POI). ' +
           'HRT is first-line bone protection in this group.',
         urgency: 'routine',
       });
@@ -150,7 +150,7 @@ export function assessInvestigationsNeeded(
         investigation: 'pth',
         tier: 3,
         reason:
-          '[Tier 3 — secondary cause] PTH: abnormal calcium or ALP — exclude primary hyperparathyroidism. ' +
+          'PTH: abnormal calcium or ALP — exclude primary hyperparathyroidism. ' +
           'Elevated PTH with normal or high calcium → refer endocrinology. ' +
           'Note: forearm-only osteoporosis (33% radius ≤-2.5) should prompt PTH + calcium workup.',
         urgency: 'routine',
@@ -162,7 +162,7 @@ export function assessInvestigationsNeeded(
         investigation: 'thyroid',
         tier: 3,
         reason:
-          '[Tier 3 — secondary cause] TSH: untreated hyperthyroidism and T4 over-replacement cause bone loss.',
+          'TSH: untreated hyperthyroidism and T4 over-replacement cause bone loss.',
         urgency: 'routine',
       });
     }
@@ -179,7 +179,7 @@ export function assessInvestigationsNeeded(
       investigation: 'spep_upep',
       tier: 3,
       reason:
-        '[Tier 3 — secondary cause] SPEP/UPEP: exclude myeloma — particularly with abnormal FBC, anaemia, ' +
+        'SPEP/UPEP: exclude myeloma — particularly with abnormal FBC, anaemia, ' +
         'or vertebral fracture with no clear secondary cause.',
       urgency: fhcAbnormal ? 'soon' : 'routine',
     });
@@ -199,7 +199,7 @@ export function assessInvestigationsNeeded(
       investigation: 'pth',
       tier: 3,
       reason:
-        '[Tier 3 — forearm-only osteoporosis] T-score ≤-2.5 at 33% radius with no low-T-score at standard sites. ' +
+        'T-score ≤-2.5 at 33% radius with no low-T-score at standard sites. ' +
         'Rule out primary hyperparathyroidism before starting treatment: check calcium, ALP, PTH. ' +
         'Note: FRAX cannot accept forearm BMD — femoral neck BMD must be used for FRAX calculation.',
       urgency: 'soon',

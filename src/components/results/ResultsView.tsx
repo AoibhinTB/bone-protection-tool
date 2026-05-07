@@ -252,41 +252,76 @@ export function ResultsView({ result, onReset, onBack }: Props) {
       )}
 
       {/* Investigations */}
-      {sortedInvestigations.length > 0 && (
-        <section>
-          <SectionTitle>Investigations needed</SectionTitle>
-          <div className="space-y-2">
-            {sortedInvestigations.map((inv, i) => {
-              const uc = URGENCY_CONFIG[inv.urgency];
-              return (
-                <div
-                  key={i}
-                  className="flex items-start gap-3 bg-white border border-slate-200 rounded-lg px-4 py-3"
-                >
-                  <Badge className={uc.color}>{uc.label}</Badge>
-                  <div>
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <p className="text-sm font-medium text-slate-800">
-                        {inv.investigation.toUpperCase().replace(/_/g, ' ')}
-                      </p>
-                      {inv.tier && (
-                        <span className={`text-xs px-1.5 py-0.5 rounded font-medium ${
-                          inv.tier === 1 ? 'bg-red-100 text-red-700' :
-                          inv.tier === 2 ? 'bg-amber-100 text-amber-700' :
-                          'bg-slate-100 text-slate-600'
-                        }`}>
-                          Tier {inv.tier}
-                        </span>
-                      )}
-                    </div>
-                    <p className="text-xs text-slate-500">{inv.reason}</p>
-                  </div>
+      {sortedInvestigations.length > 0 && (() => {
+        const noTier   = sortedInvestigations.filter(i => !i.tier);
+        const tier1    = sortedInvestigations.filter(i => i.tier === 1);
+        const tier2    = sortedInvestigations.filter(i => i.tier === 2);
+        const tier3    = sortedInvestigations.filter(i => i.tier === 3);
+
+        function InvCard({ inv }: { inv: typeof sortedInvestigations[0] }) {
+          const uc = URGENCY_CONFIG[inv.urgency];
+          return (
+            <div className="flex items-start gap-3 bg-white border border-slate-200 rounded-lg px-4 py-3">
+              {inv.urgency !== 'routine' && (
+                <Badge className={uc.color}>{uc.label}</Badge>
+              )}
+              <div>
+                <p className="text-sm font-medium text-slate-800">
+                  {inv.investigation.toUpperCase().replace(/_/g, ' ')}
+                </p>
+                <p className="text-xs text-slate-500">{inv.reason}</p>
+              </div>
+            </div>
+          );
+        }
+
+        function SubHeading({ label, color }: { label: string; color: string }) {
+          return (
+            <p className={`text-xs font-semibold uppercase tracking-wide mb-2 mt-4 first:mt-0 ${color}`}>
+              {label}
+            </p>
+          );
+        }
+
+        return (
+          <section>
+            <SectionTitle>Investigations needed</SectionTitle>
+
+            {noTier.length > 0 && (
+              <div className="space-y-2">
+                {noTier.map((inv, i) => <InvCard key={i} inv={inv} />)}
+              </div>
+            )}
+
+            {tier1.length > 0 && (
+              <>
+                <SubHeading label="Mandatory pre-treatment bloods" color="text-red-700" />
+                <div className="space-y-2">
+                  {tier1.map((inv, i) => <InvCard key={i} inv={inv} />)}
                 </div>
-              );
-            })}
-          </div>
-        </section>
-      )}
+              </>
+            )}
+
+            {tier2.length > 0 && (
+              <>
+                <SubHeading label="Recommended baseline bloods" color="text-amber-700" />
+                <div className="space-y-2">
+                  {tier2.map((inv, i) => <InvCard key={i} inv={inv} />)}
+                </div>
+              </>
+            )}
+
+            {tier3.length > 0 && (
+              <>
+                <SubHeading label="Further investigations — if clinically indicated" color="text-slate-500" />
+                <div className="space-y-2">
+                  {tier3.map((inv, i) => <InvCard key={i} inv={inv} />)}
+                </div>
+              </>
+            )}
+          </section>
+        );
+      })()}
 
       {/* Referrals */}
       {sortedReferrals.length > 0 && (
