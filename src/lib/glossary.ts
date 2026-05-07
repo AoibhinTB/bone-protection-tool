@@ -3,6 +3,7 @@
 
 export type GlossaryTerm =
   | 'MOF'
+  | 'Hip'
   | 'FRAX'
   | 'BMD'
   | 'T-score'
@@ -28,7 +29,8 @@ export type GlossaryTerm =
   | 'HSE MMP';
 
 export const GLOSSARY: Record<GlossaryTerm, string> = {
-  'MOF':       'Major Osteoporotic Fracture — the 10-year probability of fracture at the spine, hip, forearm, or humerus.',
+  'MOF':       'Major Osteoporotic Fracture (MOF) — the 10-year probability of fracture at any of four specific sites: clinical spine (symptomatic vertebral fracture only — not incidental radiological findings), hip, forearm (wrist/distal radius), or humerus (upper arm). Note: ankle, rib, and other peripheral fractures are NOT included in the MOF definition used by FRAX, even if they are fragility fractures. Radiological vertebral fractures found incidentally without symptoms are also not counted. Source: FRAX methodology; NOGG 2024.',
+  'Hip':       'Hip fracture (10-year probability) — assessed separately from MOF even though hip is one of the four MOF sites. This is because hip fractures carry disproportionately higher mortality and morbidity than other fragility fracture sites and warrant independent assessment. NOGG 2024 uses separate age-specific hip thresholds alongside MOF thresholds. Classification rule: if MOF and hip axes give different risk categories, always use the higher risk category. This means a patient can be classified as high risk by hip axis even if their overall MOF probability is intermediate. Source: NOGG 2024 Section 4; FRAX methodology.',
   'FRAX':      'Fracture Risk Assessment Tool — calculate at frax.shef.ac.uk using country code 49 for Ireland.',
   'BMD':       'Bone Mineral Density — measured by DEXA scanning; reported as a T-score.',
   'T-score':   'Standard deviations from peak young-adult bone mass. ≤−2.5 = osteoporosis; −1.0 to −2.5 = osteopenia; ≥−1.0 = normal.',

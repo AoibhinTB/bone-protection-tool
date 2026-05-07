@@ -7,6 +7,7 @@ import { assessInvestigationsNeeded } from './assessment';
 import { stratifyRisk } from './risk';
 import { generateTreatmentOutput } from './treatment';
 import { generateBloodFlags } from './bloodFlags';
+import { generateRiskFactorsIdentified } from './riskFactorsSummary';
 import { GUIDELINE_VERSIONS } from './thresholds';
 
 export function runClinicalDecision(patient: PatientInput): ClinicalDecision {
@@ -76,10 +77,13 @@ export function runClinicalDecision(patient: PatientInput): ClinicalDecision {
 
   const deduplicatedReferrals = deduplicateReferrals(referrals);
 
+  const riskFactorsIdentified = generateRiskFactorsIdentified(patient, { riskStratification, flags });
+
   return {
     patientSummary:           buildSummary(patient, riskCategory),
     outOfScope:               false,
     riskStratification,
+    riskFactorsIdentified,
     investigationsNeeded,
     flags,
     treatmentRecommendations: recommendations,
@@ -188,6 +192,7 @@ function buildOutOfScopeDecision(
       rationale: reason,
       source: GUIDELINE_VERSIONS.nogg,
     },
+    riskFactorsIdentified: [],
     investigationsNeeded: [],
     flags: [{
       id: 'out_of_scope',

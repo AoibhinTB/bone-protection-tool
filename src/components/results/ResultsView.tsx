@@ -4,15 +4,18 @@ import { useState } from 'react';
 import type {
   ClinicalDecision,
   ClinicalFlag,
+  PatientInput,
   TrafficLight,
   FlagSeverity,
   Urgency,
   PatientEducation,
 } from '@/lib/guidelines/types';
 import { Term } from '@/components/Tooltip';
+import { BLOOD_RANGES } from '@/lib/guidelines/thresholds';
 
 interface Props {
   result: ClinicalDecision;
+  patient: PatientInput;
   onReset: () => void;
   onBack: () => void;
 }
@@ -121,6 +124,323 @@ function Disclosure({
   );
 }
 
+// ─── Collapsible card with one-line summary header ────────────────────────
+
+function CollapsibleCard({
+  summary,
+  defaultOpen = false,
+  children,
+}: {
+  summary: React.ReactNode;
+  defaultOpen?: boolean;
+  children: React.ReactNode;
+}) {
+  const [open, setOpen] = useState(defaultOpen);
+  return (
+    <div className="bg-white border border-slate-200 rounded-lg overflow-hidden">
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        className="w-full flex items-center justify-between gap-3 px-4 py-3 text-left active:bg-slate-50 hover:bg-slate-50 transition-colors min-h-[44px]"
+        aria-expanded={open}
+      >
+        <span className="text-sm text-slate-800 flex-1 min-w-0">{summary}</span>
+        <span className="text-slate-400 text-xs shrink-0">{open ? '▴' : '▾'}</span>
+      </button>
+      {open && <div className="px-4 pb-3 pt-1 border-t border-slate-100">{children}</div>}
+    </div>
+  );
+}
+
+// ─── Blood test result entries ───────────────────────────────────────────
+
+interface BloodEntry {
+  name: string;
+  value: string;
+  status: 'normal' | 'abnormal';
+  statusLabel: string; // "insufficient", "elevated", "normal", etc.
+  bullets: string[];
+}
+
+function buildBloodEntries(patient: PatientInput): BloodEntry[] {
+  const entries: BloodEntry[] = [];
+  const b = patient.bloodResults;
+  if (!b) return entries;
+
+  // Vitamin D
+  if (b.vitaminDNmol !== null) {
+    const v = b.vitaminDNmol;
+    if (v < BLOOD_RANGES.vitaminD.deficient) {
+      entries.push({
+        name: 'Vitamin D (25-OH)',
+        value: `${v} nmol/L`,
+        status: 'abnormal',
+        statusLabel: 'severe deficiency',
+        bullets: [
+          'Loading required: 50,000 IU cholecalciferol weekly × 6 weeks',
+          'Recheck 25-OHD after loading (target ≥75 nmol/L)',
+          'Do NOT start any antiresorptive until Vit D adequate',
+          'Do NOT administer denosumab until Vit D ≥50 nmol/L',
+        ],
+      });
+    } else if (v < BLOOD_RANGES.vitaminD.insufficient) {
+      entries.push({
+        name: 'Vitamin D (25-OH)',
+        value: `${v} nmol/L`,
+        status: 'abnormal',
+        statusLabel: 'insufficient',
+        bullets: [
+          'Start 800–1000 IU/day cholecalciferol immediately',
+          'Oral bisphosphonate can start alongside supplementation',
+          'Do NOT administer denosumab until Vit D ≥50 nmol/L',
+          'Recheck at 3 months; target ≥75 nmol/L',
+        ],
+      });
+    } else if (v < BLOOD_RANGES.vitaminD.target) {
+      entries.push({
+        name: 'Vitamin D (25-OH)',
+        value: `${v} nmol/L`,
+        status: 'normal',
+        statusLabel: 'adequate, below target',
+        bullets: [
+          '800–1000 IU/day maintenance',
+          'Antiresorptive therapy can proceed',
+          'Recheck in 6–12 months',
+        ],
+      });
+    } else {
+      entries.push({
+        name: 'Vitamin D (25-OH)',
+        value: `${v} nmol/L`,
+        status: 'normal',
+        statusLabel: 'target met',
+        bullets: ['800 IU/day maintenance', 'No loading required'],
+      });
+    }
+  }
+
+  // Adjusted calcium
+  if (b.adjustedCalciumMmol !== null) {
+    const c = b.adjustedCalciumMmol;
+    if (c > BLOOD_RANGES.adjustedCalcium.high) {
+      entries.push({
+        name: 'Adjusted calcium',
+        value: `${c} mmol/L`,
+        status: 'abnormal',
+        statusLabel: 'hypercalcaemia',
+        bullets: [
+          'Investigate cause (PTH, malignancy) BEFORE bone treatment',
+          'Bisphosphonate / denosumab contraindicated in untreated hypercalcaemia of malignancy',
+          'Refer endocrinology if PTH-driven',
+        ],
+      });
+    } else if (c < BLOOD_RANGES.adjustedCalcium.low) {
+      entries.push({
+        name: 'Adjusted calcium',
+        value: `${c} mmol/L`,
+        status: 'abnormal',
+        statusLabel: 'hypocalcaemia',
+        bullets: [
+          'Correct before bisphosphonate or denosumab',
+          'Likely cause: vitamin D deficiency / secondary hyperparathyroidism',
+          'Replace Vit D first; recheck calcium at 6–8 weeks',
+          'Consider PTH measurement',
+        ],
+      });
+    } else {
+      entries.push({
+        name: 'Adjusted calcium',
+        value: `${c} mmol/L`,
+        status: 'normal',
+        statusLabel: 'normal',
+        bullets: ['Within reference range (2.10–2.60 mmol/L)', 'No barrier to antiresorptive therapy'],
+      });
+    }
+  }
+
+  // eGFR
+  const egfr = patient.renalFunction?.egfr ?? b.egfr ?? null;
+  if (egfr !== null) {
+    if (egfr <= 35) {
+      entries.push({
+        name: 'eGFR',
+        value: `${egfr} ml/min/1.73 m²`,
+        status: 'abnormal',
+        statusLabel: 'bisphosphonate boundary',
+        bullets: [
+          'Alendronate / zoledronate contraindicated at this level',
+          'Risedronate contraindicated below 30',
+          'Denosumab preferred (not renally cleared)',
+          'Mandatory adjusted calcium check 2 weeks after every denosumab injection',
+        ],
+      });
+    } else if (egfr < 50) {
+      entries.push({
+        name: 'eGFR',
+        value: `${egfr} ml/min/1.73 m²`,
+        status: 'abnormal',
+        statusLabel: 'borderline renal function',
+        bullets: [
+          'Oral bisphosphonate (alendronate or risedronate) preferred over IV zoledronate',
+          'Avoid IV zoledronate when eGFR <45',
+          'Monitor eGFR at least annually',
+        ],
+      });
+    } else {
+      entries.push({
+        name: 'eGFR',
+        value: `${egfr} ml/min/1.73 m²`,
+        status: 'normal',
+        statusLabel: 'adequate',
+        bullets: ['No renal restrictions on bisphosphonate or denosumab'],
+      });
+    }
+  }
+
+  // ALP
+  if (b.alp !== null) {
+    const a = b.alp;
+    if (a > 200) {
+      entries.push({
+        name: 'ALP',
+        value: `${a} U/L`,
+        status: 'abnormal',
+        statusLabel: 'markedly elevated',
+        bullets: [
+          'Exclude Paget\'s disease and osteomalacia BEFORE bone treatment',
+          'Check LFTs, vitamin D, calcium, PTH, isoenzymes',
+          'Unexplained raised ALP is a contraindication to teriparatide',
+        ],
+      });
+    } else if (a > 130) {
+      entries.push({
+        name: 'ALP',
+        value: `${a} U/L`,
+        status: 'abnormal',
+        statusLabel: 'mildly elevated',
+        bullets: [
+          'Non-specific — consider Vit D deficiency, recent fracture, mild liver disease',
+          'Check LFTs / GGT to differentiate hepatic vs bone source',
+          'Recheck after Vit D repletion',
+        ],
+      });
+    } else if (a < 30) {
+      entries.push({
+        name: 'ALP',
+        value: `${a} U/L`,
+        status: 'abnormal',
+        statusLabel: 'low',
+        bullets: [
+          'Consider hypophosphatasia (heritable) — bisphosphonate may worsen',
+          'Also: zinc deficiency, malnutrition, hypothyroidism',
+          'Discuss with specialist before antiresorptive',
+        ],
+      });
+    } else {
+      entries.push({
+        name: 'ALP',
+        value: `${a} U/L`,
+        status: 'normal',
+        statusLabel: 'normal',
+        bullets: ['Within reference range (30–130 U/L)'],
+      });
+    }
+  }
+
+  // TSH
+  if (b.tshMUL !== null) {
+    const t = b.tshMUL;
+    const onLevo = patient.onThyroidReplacement;
+    if (t < 0.1) {
+      entries.push({
+        name: 'TSH',
+        value: `${t} mU/L`,
+        status: 'abnormal',
+        statusLabel: 'fully suppressed',
+        bullets: onLevo
+          ? [
+              'Levothyroxine over-replacement — reduce dose',
+              'Recheck TSH in 6 weeks',
+              'Bone density gains follow dose reduction',
+            ]
+          : [
+              'Investigate hyperthyroidism BEFORE bone treatment',
+              'Endogenous causes: Graves, toxic nodule',
+              'Refer endocrinology',
+            ],
+      });
+    } else if (t < 0.4) {
+      entries.push({
+        name: 'TSH',
+        value: `${t} mU/L`,
+        status: 'abnormal',
+        statusLabel: 'mildly suppressed',
+        bullets: [
+          'Subclinical hyperthyroidism — increased fracture risk in older adults',
+          onLevo ? 'Consider levothyroxine dose reduction' : 'Recheck in 6–8 weeks',
+          'Endocrinology input if persistent',
+        ],
+      });
+    } else if (t > 10) {
+      entries.push({
+        name: 'TSH',
+        value: `${t} mU/L`,
+        status: 'abnormal',
+        statusLabel: 'markedly elevated',
+        bullets: onLevo
+          ? [
+              'Levothyroxine under-replacement — increase dose',
+              'Recheck in 6 weeks',
+              'Optimise thyroid status before/alongside bone therapy',
+            ]
+          : [
+              'Likely overt hypothyroidism',
+              'Treat before or alongside bone therapy',
+              'Recheck after thyroid optimisation',
+            ],
+      });
+    } else if (t > 4.0) {
+      entries.push({
+        name: 'TSH',
+        value: `${t} mU/L`,
+        status: 'abnormal',
+        statusLabel: 'mildly elevated',
+        bullets: [
+          'Subclinical hypothyroidism',
+          onLevo ? 'Consider dose increase; recheck in 6 weeks' : 'Recheck and consider treatment if persistent or symptomatic',
+        ],
+      });
+    } else {
+      entries.push({
+        name: 'TSH',
+        value: `${t} mU/L`,
+        status: 'normal',
+        statusLabel: 'normal',
+        bullets: ['Within reference range (0.4–4.0 mU/L)'],
+      });
+    }
+  }
+
+  // FBC (boolean)
+  if (b.fbc !== null) {
+    entries.push({
+      name: 'FBC',
+      value: b.fbc ? 'Normal' : 'Abnormal / not done',
+      status: b.fbc ? 'normal' : 'abnormal',
+      statusLabel: b.fbc ? 'normal' : 'abnormal',
+      bullets: b.fbc
+        ? ['No haematological flag']
+        : [
+            'Investigate anaemia or cytopenia',
+            'Add SPEP/UPEP — exclude myeloma',
+            'Particularly if vertebral fracture without clear cause',
+          ],
+    });
+  }
+
+  return entries;
+}
+
 function PatientEducationPanel({ edu }: { edu: PatientEducation }) {
   const [open, setOpen] = useState(false);
   return (
@@ -169,7 +489,8 @@ function PatientEducationPanel({ edu }: { edu: PatientEducation }) {
   );
 }
 
-export function ResultsView({ result, onReset, onBack }: Props) {
+export function ResultsView({ result, patient, onReset, onBack }: Props) {
+  const bloodEntries = buildBloodEntries(patient);
   const rs = result.riskStratification;
   const tl = TL_CONFIG[rs.trafficLight];
 
@@ -210,10 +531,7 @@ export function ResultsView({ result, onReset, onBack }: Props) {
           <div className="mt-3 flex flex-wrap gap-x-5 gap-y-1 text-sm">
             {rs.fraxMOFPercent !== null && (
               <div>
-                <Term term="MOF">
-                  <span className={`${tl.text} opacity-70`}>MOF</span>
-                </Term>
-                <span className={`${tl.text} opacity-70`}> </span>
+                <span className={`${tl.text} opacity-70`}>MOF </span>
                 <span className={`font-bold ${tl.text}`}>{rs.fraxMOFPercent.toFixed(1)}%</span>
                 {mofChanged && (
                   <span className={`${tl.text} opacity-70`}>
@@ -224,7 +542,10 @@ export function ResultsView({ result, onReset, onBack }: Props) {
             )}
             {rs.fraxHipPercent !== null && (
               <div>
-                <span className={`${tl.text} opacity-70`}>Hip </span>
+                <Term term="Hip">
+                  <span className={`${tl.text} opacity-70`}>Hip</span>
+                </Term>
+                <span className={`${tl.text} opacity-70`}> </span>
                 <span className={`font-bold ${tl.text}`}>{rs.fraxHipPercent.toFixed(1)}%</span>
                 {hipChanged && (
                   <span className={`${tl.text} opacity-70`}>
@@ -249,6 +570,26 @@ export function ResultsView({ result, onReset, onBack }: Props) {
         <p className="text-[11px] text-slate-500 uppercase tracking-wide font-semibold mb-1">Patient</p>
         <p className="text-sm text-slate-800">{result.patientSummary}</p>
       </div>
+
+      {/* Risk factors identified — only those that materially changed the recommendation */}
+      {result.riskFactorsIdentified.length > 0 && (
+        <section className="bg-white border border-slate-200 rounded-lg px-4 py-3">
+          <p className="text-[11px] text-slate-500 uppercase tracking-wide font-semibold mb-2">
+            Risk factors identified
+          </p>
+          <ul className="space-y-1.5">
+            {result.riskFactorsIdentified.map((rf, i) => (
+              <li key={i} className="flex items-start gap-2 text-sm text-slate-800 leading-snug">
+                <span className="text-indigo-500 mt-0.5 shrink-0 font-bold">•</span>
+                <span>
+                  <span className="font-semibold">{rf.factor}</span>
+                  <span className="text-slate-600"> — {rf.effect}</span>
+                </span>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
 
       {/* TREATMENT FIRST — clinician sees what to prescribe at the top */}
       {result.treatmentRecommendations.length > 0 && (
@@ -354,13 +695,33 @@ export function ResultsView({ result, onReset, onBack }: Props) {
           const tier2 = sortedInvestigations.filter((i) => i.tier === 2);
           const tier3 = sortedInvestigations.filter((i) => i.tier === 3);
 
+          function formatInvestigationName(id: string): string {
+            // Preserve canonical capitalisation (e.g. eGFR), expand abbreviations as needed.
+            switch (id) {
+              case 'egfr':       return 'eGFR';
+              case 'frax':       return 'FRAX';
+              case 'dexa':       return 'DEXA';
+              case 'vfa':        return 'VFA';
+              case 'alp':        return 'ALP';
+              case 'fbc':        return 'FBC';
+              case 'pth':        return 'PTH';
+              case 'lh_fsh':     return 'LH / FSH';
+              case 'spep_upep':  return 'SPEP / UPEP';
+              case 'thyroid':    return 'Thyroid (TSH ± T4)';
+              case 'testosterone': return 'Testosterone';
+              case 'vitamin_d':  return 'Vitamin D';
+              case 'calcium':    return 'Adjusted calcium';
+              default:           return id.replace(/_/g, ' ');
+            }
+          }
+
           function InvCard({ inv }: { inv: typeof sortedInvestigations[0] }) {
             const uc = URGENCY_CONFIG[inv.urgency];
             return (
               <div className="bg-white border border-slate-200 rounded-lg px-4 py-3">
                 <div className="flex items-center gap-2 mb-1 flex-wrap">
                   <p className="text-sm font-bold text-slate-900">
-                    {inv.investigation.toUpperCase().replace(/_/g, ' ')}
+                    {formatInvestigationName(inv.investigation)}
                   </p>
                   {inv.urgency !== 'routine' && <Badge className={uc.color}>{uc.label}</Badge>}
                 </div>
@@ -454,19 +815,63 @@ export function ResultsView({ result, onReset, onBack }: Props) {
         </section>
       )}
 
-      {/* Supplements — bullet format */}
+      {/* Blood test results — collapsible per-test entries */}
+      {bloodEntries.length > 0 && (
+        <section>
+          <SectionTitle>Blood test results</SectionTitle>
+          <div className="space-y-2">
+            {bloodEntries.map((e, i) => (
+              <CollapsibleCard
+                key={i}
+                summary={
+                  <span>
+                    <span className="font-semibold text-slate-900">{e.name}</span>
+                    <span className="text-slate-700"> — {e.value}</span>
+                    <span
+                      className={`ml-1 text-xs ${
+                        e.status === 'abnormal' ? 'text-red-700 font-semibold' : 'text-slate-500'
+                      }`}
+                    >
+                      ({e.statusLabel})
+                    </span>
+                  </span>
+                }
+                defaultOpen={false}
+              >
+                <ul className="space-y-1 mt-2">
+                  {e.bullets.map((b, j) => (
+                    <li key={j} className="flex items-start gap-2 text-xs text-slate-700 leading-snug">
+                      <span className="text-indigo-500 mt-0.5 shrink-0 font-bold">•</span>
+                      <span>{b}</span>
+                    </li>
+                  ))}
+                </ul>
+              </CollapsibleCard>
+            ))}
+          </div>
+        </section>
+      )}
+
+      {/* Supplements — bullet format, collapsed by default with one-line summary */}
       {result.supplements.length > 0 && (
         <section>
           <SectionTitle>Supplements</SectionTitle>
           <div className="space-y-2">
             {result.supplements.map((s, i) => (
-              <div key={i} className="bg-white border border-slate-200 rounded-lg px-4 py-3">
-                <p className="text-sm font-bold text-slate-900 mb-1">
-                  {s.supplement === 'calcium' ? 'Calcium' : 'Vitamin D'}
-                </p>
-                <p className="text-sm font-semibold text-slate-800 mb-2 leading-snug">{s.headline}</p>
+              <CollapsibleCard
+                key={i}
+                summary={
+                  <span>
+                    <span className="font-semibold text-slate-900">
+                      {s.supplement === 'calcium' ? 'Calcium' : 'Vitamin D'}
+                    </span>
+                    <span className="text-slate-700"> — {s.headline}</span>
+                  </span>
+                }
+                defaultOpen={false}
+              >
                 {s.bullets.length > 0 && (
-                  <ul className="space-y-1">
+                  <ul className="space-y-1 mt-2">
                     {s.bullets.map((b, j) => (
                       <li key={j} className="flex items-start gap-2 text-xs text-slate-700 leading-snug">
                         <span className="text-indigo-500 mt-0.5 shrink-0 font-bold">•</span>
@@ -478,24 +883,34 @@ export function ResultsView({ result, onReset, onBack }: Props) {
                 <Disclosure label="rationale">
                   <p className="text-xs text-slate-500 leading-snug">{s.rationale}</p>
                 </Disclosure>
-              </div>
+              </CollapsibleCard>
             ))}
           </div>
         </section>
       )}
 
-      {/* Lifestyle advice */}
+      {/* Lifestyle advice — collapsed by default */}
       {result.lifestyleAdvice.length > 0 && (
         <section>
           <SectionTitle>Lifestyle advice</SectionTitle>
-          <ul className="space-y-2 bg-white border border-slate-200 rounded-lg px-4 py-3">
-            {result.lifestyleAdvice.map((a, i) => (
-              <li key={i} className="flex items-start gap-2 text-sm text-slate-700 leading-snug">
-                <span className="text-indigo-500 mt-0.5 shrink-0 font-bold">•</span>
-                <span>{a}</span>
-              </li>
-            ))}
-          </ul>
+          <CollapsibleCard
+            summary={
+              <span>
+                <span className="font-semibold text-slate-900">Lifestyle advice</span>
+                <span className="text-slate-700"> — {result.lifestyleAdvice.length} points (exercise, falls prevention, calcium, Vit D)</span>
+              </span>
+            }
+            defaultOpen={false}
+          >
+            <ul className="space-y-2 mt-2">
+              {result.lifestyleAdvice.map((a, i) => (
+                <li key={i} className="flex items-start gap-2 text-sm text-slate-700 leading-snug">
+                  <span className="text-indigo-500 mt-0.5 shrink-0 font-bold">•</span>
+                  <span>{a}</span>
+                </li>
+              ))}
+            </ul>
+          </CollapsibleCard>
         </section>
       )}
 

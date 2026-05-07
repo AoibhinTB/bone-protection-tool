@@ -173,6 +173,19 @@ export interface PatientInput {
 
   // Thyroid context (gates the thyroid Tier 3 investigation recommendation)
   onThyroidReplacement: boolean; // currently on levothyroxine
+
+  // Patient preference — refuses all injection-based treatments
+  // (denosumab SC, zoledronate IV, teriparatide SC, romosozumab SC)
+  refusesInjections: boolean;
+}
+
+// ─── Risk factor summary ──────────────────────────────────────────────────
+// Surfaced in the output as 'Risk factors identified' — only factors that
+// materially changed the recommendation are included.
+
+export interface RiskFactorEffect {
+  factor: string;       // e.g. "Falls ≥2/year"
+  effect: string;       // e.g. "FRAX hip probability adjusted ×1.3"
 }
 
 // ─── Output types ──────────────────────────────────────────────────────────
@@ -271,6 +284,7 @@ export interface ClinicalDecision {
   patientSummary: string;
   outOfScope: boolean;
   riskStratification: RiskStratification;
+  riskFactorsIdentified: RiskFactorEffect[]; // factors that materially changed the recommendation
   investigationsNeeded: InvestigationRecommendation[];
   flags: ClinicalFlag[];
   treatmentRecommendations: TreatmentRecommendation[];

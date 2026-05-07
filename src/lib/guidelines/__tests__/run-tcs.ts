@@ -54,6 +54,7 @@ function basePatient(overrides: Partial<PatientInput>): PatientInput {
     completedAnabolicCourse: false,
     thighOrGroinPain: false,
     onThyroidReplacement: false,
+    refusesInjections: false,
   };
   return { ...base, ...overrides };
 }
@@ -339,9 +340,274 @@ function tc10(): TCResult {
   return { name: 'TC10 — 82F T-2.7 borderline CKD', passed: failures.length === 0, failures, decision };
 }
 
+// ─── TC11 ─────────────────────────────────────────────────────────────────
+// 66M GIOP (pred 15mg/day, started 2mo, planned ≥6mo) + previous alendronate GI intolerance
+// Expected: HIGH (GIOP), oral BP CI, IV zoledronate, FRAX adjustments noted
+
+function tc11(): TCResult {
+  const failures: string[] = [];
+  const patient = basePatient({
+    age: 66,
+    sex: 'male',
+    rheumatoidArthritis: true, // implicit — RA on prednisolone for RA
+    glucocorticoidUse: { current: true, durationMonths: 2, dose: 'high' },
+    dexaResults: { lumbarSpineTScore: -2.1, totalHipTScore: -2.0, femoralNeckTScore: -2.1, forearmTScore: null },
+    renalFunction: { egfr: 55 },
+    bloodResults: { adjustedCalciumMmol: 2.3, vitaminDNmol: 50, egfr: 55, alp: 80, tshMUL: 2.0, fbc: true },
+    previousTreatments: [{ agent: 'alendronate', durationMonths: 6, reasonStopped: 'gi_intolerance', currentlyOn: false }],
+  });
+  const decision = runClinicalDecision(patient);
+  check(failures, 'GIOP pathway flag fired', hasFlag(decision, 'giop'));
+  check(failures, 'IV after GI intolerance flag fired', hasFlag(decision, 'giop_iv_after_gi_intolerance'));
+  check(failures, 'recommends zoledronate', hasAgent(decision, 'zoledronate'));
+  check(failures, 'NO alendronate (GI intolerance)', !hasAgent(decision, 'alendronate'));
+  check(failures, 'NO risedronate (GI intolerance)', !hasAgent(decision, 'risedronate'));
+  check(failures, 'GC high-dose surface flag', hasFlag(decision, 'gc_high_dose_giop_surface'));
+  return { name: 'TC11 — 66M GIOP + prior oral BP GI intolerance', passed: failures.length === 0, failures, decision };
+}
+
+// ─── TC12 ─────────────────────────────────────────────────────────────────
+// 52F T-score osteoporosis but FRAX low — discordance
+// Expected: HIGH (T-score drives), alendronate, secondary cause workup
+
+function tc12(): TCResult {
+  const failures: string[] = [];
+  const patient = basePatient({
+    age: 52,
+    sex: 'female',
+    dexaResults: { lumbarSpineTScore: -2.6, totalHipTScore: -2.4, femoralNeckTScore: -2.4, forearmTScore: null },
+    renalFunction: { egfr: 75 },
+    bloodResults: { adjustedCalciumMmol: 2.32, vitaminDNmol: 65, egfr: 75, alp: 80, tshMUL: 2.0, fbc: true },
+    fraxMOFPercent: 6.8,
+    fraxHipPercent: 0.7,
+  });
+  const decision = runClinicalDecision(patient);
+  check(failures, 'risk = high (T-score drives despite low FRAX)', decision.riskStratification.category === 'high', `got ${decision.riskStratification.category}`);
+  check(failures, 'recommends alendronate', hasAgent(decision, 'alendronate'));
+  // Young + osteoporosis + no obvious cause → broad workup (PTH at minimum)
+  check(failures, 'PTH investigation triggered (young unexplained)', decision.investigationsNeeded.some(i => i.investigation === 'pth'));
+  return { name: 'TC12 — 52F osteoporosis + low FRAX (discordance)', passed: failures.length === 0, failures, decision };
+}
+
+// ─── TC13 ─────────────────────────────────────────────────────────────────
+// 74F T-3.0 + recent wrist fx + Vit D 18 + Ca 2.05 — TWO safety blockers
+// Expected: SAFETY BLOCK, no antiresorptive recommendation until corrected
+
+function tc13(): TCResult {
+  const failures: string[] = [];
+  const patient = basePatient({
+    age: 74,
+    sex: 'female',
+    priorFragilityFracture: true,
+    recentFractureWithin2Years: true,
+    dexaResults: { lumbarSpineTScore: -3.0, totalHipTScore: -2.8, femoralNeckTScore: -2.8, forearmTScore: null },
+    renalFunction: { egfr: 60 },
+    bloodResults: { adjustedCalciumMmol: 2.05, vitaminDNmol: 18, egfr: 60, alp: 80, tshMUL: 2.0, fbc: true },
+  });
+  const decision = runClinicalDecision(patient);
+  check(failures, 'risk = high', decision.riskStratification.category === 'high', `got ${decision.riskStratification.category}`);
+  check(failures, 'two-safety-blockers urgent flag', hasFlag(decision, 'two_safety_blockers'));
+  check(failures, 'NO treatment recommendation while blocked', decision.treatmentRecommendations.length === 0);
+  // bloodFlags should also fire individually
+  check(failures, 'hypocalcaemia flag', hasFlag(decision, 'hypocalcaemia'));
+  return { name: 'TC13 — 74F severe Vit D + hypocalcaemia (dual blockers)', passed: failures.length === 0, failures, decision };
+}
+
+// ─── TC14 ─────────────────────────────────────────────────────────────────
+// 59F on HRT 4y, T -2.8 — review HRT first, can add alendronate
+function tc14(): TCResult {
+  const failures: string[] = [];
+  const patient = basePatient({
+    age: 59,
+    sex: 'female',
+    dexaResults: { lumbarSpineTScore: -2.8, totalHipTScore: -2.6, femoralNeckTScore: -2.6, forearmTScore: null },
+    renalFunction: { egfr: 72 },
+    bloodResults: { adjustedCalciumMmol: 2.32, vitaminDNmol: 70, egfr: 72, alp: 80, tshMUL: 2.0, fbc: true },
+    currentTreatment: { agent: 'hrt', durationMonths: 48, reasonStopped: null, currentlyOn: true },
+  });
+  const decision = runClinicalDecision(patient);
+  check(failures, 'risk = high (T ≤ -2.5 despite HRT)', decision.riskStratification.category === 'high', `got ${decision.riskStratification.category}`);
+  check(failures, 'HRT-on-board review flag', hasFlag(decision, 'hrt_on_board_review'));
+  check(failures, 'recommends alendronate alongside HRT', hasAgent(decision, 'alendronate'));
+  return { name: 'TC14 — 59F on HRT + T -2.8', passed: failures.length === 0, failures, decision };
+}
+
+// ─── TC15 ─────────────────────────────────────────────────────────────────
+// 91F frail care home, hip fx 3mo, eGFR 35, Vit D 22, dementia
+// Expected: VERY HIGH (recent hip fx within 24mo), denosumab preferred, urgent Vit D loading
+
+function tc15(): TCResult {
+  const failures: string[] = [];
+  const patient = basePatient({
+    age: 91,
+    sex: 'female',
+    priorFragilityFracture: true,
+    priorHipFracture: true,
+    recentFractureWithin2Years: true,
+    dexaResults: { lumbarSpineTScore: -3.4, totalHipTScore: -3.4, femoralNeckTScore: -3.4, forearmTScore: null },
+    renalFunction: { egfr: 35 },
+    bloodResults: { adjustedCalciumMmol: 2.30, vitaminDNmol: 22, egfr: 35, alp: 80, tshMUL: 2.0, fbc: true },
+  });
+  const decision = runClinicalDecision(patient);
+  check(failures, 'risk = very_high (recent hip fx)', decision.riskStratification.category === 'very_high', `got ${decision.riskStratification.category}`);
+  check(failures, 'recommends denosumab (eGFR 35 borderline)', hasAgent(decision, 'denosumab'));
+  check(failures, 'NO alendronate at eGFR 35', !hasAgent(decision, 'alendronate'));
+  check(failures, 'age ≥80 FRAX caveat', hasFlag(decision, 'frax_life_expectancy_caveat'));
+  check(failures, 'denosumab Vit D block (severe deficiency)', hasFlag(decision, 'denosumab_vitd_block'));
+  return { name: 'TC15 — 91F frail, recent hip fx, eGFR 35, Vit D 22', passed: failures.length === 0, failures, decision };
+}
+
+// ─── TC16 ─────────────────────────────────────────────────────────────────
+// 61F on AI, T -1.8 (osteopenia), FRAX 11.5% — AI-specific lower threshold
+function tc16(): TCResult {
+  const failures: string[] = [];
+  const patient = basePatient({
+    age: 61,
+    sex: 'female',
+    aromataseInhibitorUse: true,
+    dexaResults: { lumbarSpineTScore: -1.8, totalHipTScore: -1.7, femoralNeckTScore: -1.7, forearmTScore: null },
+    renalFunction: { egfr: 68 },
+    bloodResults: { adjustedCalciumMmol: 2.32, vitaminDNmol: 55, egfr: 68, alp: 80, tshMUL: 2.0, fbc: true },
+    fraxMOFPercent: 11.5,
+    fraxHipPercent: 1.5,
+  });
+  const decision = runClinicalDecision(patient);
+  check(failures, 'risk = high (AI lower threshold T ≤ -1.5)', decision.riskStratification.category === 'high', `got ${decision.riskStratification.category}`);
+  check(failures, 'AI CTIBL flag', hasFlag(decision, 'ai_ctibl'));
+  check(failures, 'recommends alendronate or zoledronate', hasAgent(decision, 'alendronate') || hasAgent(decision, 'zoledronate'));
+  return { name: 'TC16 — 61F AI lower threshold', passed: failures.length === 0, failures, decision };
+}
+
+// ─── TC17 ─────────────────────────────────────────────────────────────────
+// 71F BP holiday — fx during holiday — restart immediately
+function tc17(): TCResult {
+  const failures: string[] = [];
+  const patient = basePatient({
+    age: 71,
+    sex: 'female',
+    priorFragilityFracture: true,
+    recentFractureWithin2Years: true,
+    dexaResults: { lumbarSpineTScore: -2.3, totalHipTScore: -2.3, femoralNeckTScore: -2.3, forearmTScore: null },
+    renalFunction: { egfr: 62 },
+    bloodResults: { adjustedCalciumMmol: 2.32, vitaminDNmol: 72, egfr: 62, alp: 80, tshMUL: 2.0, fbc: true },
+    previousTreatments: [{ agent: 'alendronate', durationMonths: 60, reasonStopped: 'treatment_holiday', currentlyOn: false }],
+  });
+  const decision = runClinicalDecision(patient);
+  check(failures, 'risk = high (recent fragility fracture)', decision.riskStratification.category === 'high', `got ${decision.riskStratification.category}`);
+  check(failures, 'imminent fracture flag', hasFlag(decision, 'imminent_fracture_risk'));
+  check(failures, 'recommends alendronate (restart)', hasAgent(decision, 'alendronate'));
+  return { name: 'TC17 — 71F fx during BP holiday', passed: failures.length === 0, failures, decision };
+}
+
+// ─── TC18 ─────────────────────────────────────────────────────────────────
+// 67F denosumab 8 months since last — urgent
+function tc18(): TCResult {
+  const failures: string[] = [];
+  const patient = basePatient({
+    age: 67,
+    sex: 'female',
+    dexaResults: { lumbarSpineTScore: -2.9, totalHipTScore: -2.8, femoralNeckTScore: -2.8, forearmTScore: null },
+    renalFunction: { egfr: 65 },
+    bloodResults: { adjustedCalciumMmol: 2.32, vitaminDNmol: 60, egfr: 65, alp: 80, tshMUL: 2.0, fbc: true },
+    currentTreatment: { agent: 'denosumab', durationMonths: 24, reasonStopped: null, currentlyOn: true },
+    denosumabMonthsSinceLastDose: 8,
+  });
+  const decision = runClinicalDecision(patient);
+  check(failures, 'urgent overdue injection flag', hasFlag(decision, 'denosumab_overdue_injection'));
+  check(failures, 'continues denosumab recommendation', hasAgent(decision, 'denosumab'));
+  return { name: 'TC18 — 67F denosumab 8mo overdue', passed: failures.length === 0, failures, decision };
+}
+
+// ─── TC19 ─────────────────────────────────────────────────────────────────
+// 58M GIOP low-dose pred 4mg/day for polymyalgia, T -1.7
+function tc19(): TCResult {
+  const failures: string[] = [];
+  const patient = basePatient({
+    age: 58,
+    sex: 'male',
+    glucocorticoidUse: { current: true, durationMonths: 4, dose: 'low' },
+    dexaResults: { lumbarSpineTScore: -1.7, totalHipTScore: -1.6, femoralNeckTScore: -1.6, forearmTScore: null },
+    renalFunction: { egfr: 70 },
+    bloodResults: { adjustedCalciumMmol: 2.32, vitaminDNmol: 45, egfr: 70, alp: 80, tshMUL: 2.0, fbc: true },
+  });
+  const decision = runClinicalDecision(patient);
+  check(failures, 'risk = high (GIOP context, T ≤ -1.5)', decision.riskStratification.category === 'high', `got ${decision.riskStratification.category}`);
+  check(failures, 'recommends alendronate', hasAgent(decision, 'alendronate'));
+  check(failures, 'GIOP lower-threshold flag fires', hasFlag(decision, 'giop_lower_threshold'));
+  return { name: 'TC19 — 58M GIOP low-dose, T -1.7', passed: failures.length === 0, failures, decision };
+}
+
+// ─── TC20 ─────────────────────────────────────────────────────────────────
+// 58M hypogonadism + incidental VF + T -2.7 + Vit D 35
+function tc20(): TCResult {
+  const failures: string[] = [];
+  const patient = basePatient({
+    age: 58,
+    sex: 'male',
+    priorFragilityFracture: true,
+    priorVertebralFracture: true,
+    secondaryOsteoporosis: ['hypogonadism'],
+    dexaResults: { lumbarSpineTScore: -2.7, totalHipTScore: -2.5, femoralNeckTScore: -2.5, forearmTScore: null },
+    renalFunction: { egfr: 72 },
+    bloodResults: { adjustedCalciumMmol: 2.30, vitaminDNmol: 35, egfr: 72, alp: 80, tshMUL: 2.0, fbc: true },
+  });
+  const decision = runClinicalDecision(patient);
+  check(failures, 'risk = high', decision.riskStratification.category === 'high', `got ${decision.riskStratification.category}`);
+  check(failures, 'testosterone investigation triggered', decision.investigationsNeeded.some(i => i.investigation === 'testosterone'));
+  check(failures, 'recommends alendronate', hasAgent(decision, 'alendronate'));
+  check(failures, 'Vit D insufficient text', hasSupplementText(decision, 'vitamin_d', 'insufficient'));
+  return { name: 'TC20 — 58M hypogonadism + VF + osteoporosis', passed: failures.length === 0, failures, decision };
+}
+
+// ─── TC21 ─────────────────────────────────────────────────────────────────
+// 48F perimenopausal, T -2.6 — out of scope
+function tc21(): TCResult {
+  const failures: string[] = [];
+  const patient = basePatient({
+    age: 48,
+    sex: 'female',
+    dexaResults: { lumbarSpineTScore: -2.6, totalHipTScore: -2.4, femoralNeckTScore: -2.4, forearmTScore: null },
+    renalFunction: { egfr: 78 },
+    bloodResults: { adjustedCalciumMmol: 2.32, vitaminDNmol: 50, egfr: 78, alp: 80, tshMUL: 2.0, fbc: true },
+  });
+  const decision = runClinicalDecision(patient);
+  check(failures, 'out of scope', decision.outOfScope === true);
+  check(failures, 'NO drug recommendation', decision.treatmentRecommendations.length === 0);
+  check(failures, 'specialist referral (endocrinology)', hasReferral(decision, 'endocrinology'));
+  return { name: 'TC21 — 48F perimenopausal (out of scope)', passed: failures.length === 0, failures, decision };
+}
+
+// ─── TC22 ─────────────────────────────────────────────────────────────────
+// 78F VHR (T -3.6 + 2 VFs + recent VF 10mo), refuses injections
+function tc22(): TCResult {
+  const failures: string[] = [];
+  const patient = basePatient({
+    age: 78,
+    sex: 'female',
+    priorFragilityFracture: true,
+    priorVertebralFracture: true,
+    recentVertebralFractureYears: 0.83, // 10 months
+    numberOfPriorFractures: 2,
+    dexaResults: { lumbarSpineTScore: -3.6, totalHipTScore: -3.5, femoralNeckTScore: -3.5, forearmTScore: null },
+    renalFunction: { egfr: 58 },
+    bloodResults: { adjustedCalciumMmol: 2.32, vitaminDNmol: 55, egfr: 58, alp: 80, tshMUL: 2.0, fbc: true },
+    refusesInjections: true,
+  });
+  const decision = runClinicalDecision(patient);
+  check(failures, 'risk = very_high', decision.riskStratification.category === 'very_high', `got ${decision.riskStratification.category}`);
+  check(failures, 'refuses-injections flag fires', hasFlag(decision, 'patient_refuses_injections'));
+  check(failures, 'NO denosumab (refuses injections)', !hasAgent(decision, 'denosumab'));
+  check(failures, 'NO zoledronate (refuses injections)', !hasAgent(decision, 'zoledronate'));
+  check(failures, 'recommends alendronate (oral)', hasAgent(decision, 'alendronate'));
+  return { name: 'TC22 — 78F VHR refuses injections', passed: failures.length === 0, failures, decision };
+}
+
 // ─── Runner ───────────────────────────────────────────────────────────────
 
-const TCs: Array<() => TCResult> = [tc1, tc2, tc3, tc4, tc5, tc6, tc7, tc8, tc9, tc10];
+const TCs: Array<() => TCResult> = [
+  tc1, tc2, tc3, tc4, tc5, tc6, tc7, tc8, tc9, tc10,
+  tc11, tc12, tc13, tc14, tc15, tc16, tc17, tc18, tc19, tc20, tc21, tc22,
+];
 
 const results = TCs.map(fn => fn());
 const passed = results.filter(r => r.passed).length;

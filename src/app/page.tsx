@@ -69,6 +69,7 @@ export default function Home() {
           <div className="max-w-3xl mx-auto">
             <ResultsView
               result={result}
+              patient={patient}
               onReset={handleReset}
               onBack={() => { setResult(null); setStep(STEP_TITLES.length - 1); }}
             />

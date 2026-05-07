@@ -121,6 +121,17 @@ export function Step7TreatmentHistory({ data, onChange }: Props) {
         </>
       )}
 
+      <SectionHeading>Patient preference</SectionHeading>
+      <Field
+        label="Refuses all injections"
+        hint="Filters out denosumab, zoledronate, teriparatide, romosozumab — oral options only"
+      >
+        <YesNo
+          value={data.refusesInjections}
+          onChange={v => onChange({ refusesInjections: v })}
+        />
+      </Field>
+
       <SectionHeading>Post-anabolic sequencing</SectionHeading>
       <Field
         label="Recently completed anabolic course"

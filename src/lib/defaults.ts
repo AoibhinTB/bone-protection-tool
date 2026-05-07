@@ -47,4 +47,5 @@ export const defaultPatient: PatientInput = {
   completedAnabolicCourse: false,
   thighOrGroinPain: false,
   onThyroidReplacement: false,
+  refusesInjections: false,
 };

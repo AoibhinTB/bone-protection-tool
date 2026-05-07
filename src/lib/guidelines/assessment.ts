@@ -129,10 +129,13 @@ export function assessInvestigationsNeeded(
   // Tier 3 investigations — each fires only on its own specific clinical criteria,
   // not as a blanket suggestion for every secondary-workup-eligible patient.
 
-  // Testosterone — only when hypogonadism is suspected or already listed.
+  // Testosterone — when hypogonadism is suspected/listed, severe unexplained osteoporosis in men,
+  // or young men <55 with osteoporosis (broad secondary workup).
   if (
     patient.sex === 'male' &&
     (patient.secondaryOsteoporosis.includes('hypogonadism') ||
+      (patient.age < 55 && patient.dexaResults !== null && lowestTScore(patient.dexaResults) <= -2.5 &&
+        patient.secondaryOsteoporosis.length === 0 && !patient.glucocorticoidUse?.current) ||
       // Severe unexplained osteoporosis in a man — testosterone is the main reversible cause to exclude
       (patient.dexaResults !== null &&
         lowestTScore(patient.dexaResults) <= -3.0 &&
@@ -161,8 +164,25 @@ export function assessInvestigationsNeeded(
     });
   }
 
-  // PTH — only on abnormal calcium / ALP / explicit hyperparathyroidism flag (forearm-only handled below)
-  if (alpAbnormal || calciumAbnormal || patient.secondaryOsteoporosis.includes('hyperparathyroidism')) {
+  // ── Young age + osteoporosis with no obvious cause: broad secondary workup ──
+  // Patients <55 with osteoporosis (T ≤ −2.5) and minimal known risk factors warrant a broad
+  // secondary cause screen (PTH, TFTs, calcium, Vit D, testosterone in men, coeliac, SPEP).
+  const lowestT = patient.dexaResults ? lowestTScore(patient.dexaResults) : 0;
+  const youngOpUnexplained =
+    patient.age < 55 &&
+    lowestT <= -2.5 &&
+    patient.secondaryOsteoporosis.length === 0 &&
+    !patient.glucocorticoidUse?.current &&
+    !patient.adtUse &&
+    !patient.aromataseInhibitorUse;
+
+  // PTH — fires on abnormal Ca/ALP, hyperparathyroidism flag, or young unexplained osteoporosis
+  if (
+    alpAbnormal ||
+    calciumAbnormal ||
+    patient.secondaryOsteoporosis.includes('hyperparathyroidism') ||
+    youngOpUnexplained
+  ) {
     needed.push({
       investigation: 'pth',
       tier: 3,

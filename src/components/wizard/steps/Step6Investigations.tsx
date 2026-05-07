@@ -25,7 +25,7 @@ export function Step6Investigations({ data, onChange }: Props) {
       {/* Auto-calculated estimate */}
       <div className="bg-indigo-50 border border-indigo-200 rounded-lg px-4 py-3 mb-4">
         <p className="text-xs font-medium text-indigo-700 mb-1">
-          Estimated <Term term="FRAX">FRAX</Term> — Ireland (no <Term term="BMD">BMD</Term>)
+          Estimated FRAX — Ireland (no <Term term="BMD">BMD</Term>)
         </p>
         <div className="flex gap-6 text-sm">
           <div>
@@ -35,12 +35,15 @@ export function Step6Investigations({ data, onChange }: Props) {
             <span className="font-bold text-indigo-900">{fraxEst.mof}%</span>
           </div>
           <div>
-            <span className="text-indigo-500">Hip </span>
+            <Term term="Hip">
+              <span className="text-indigo-500">Hip</span>
+            </Term>
+            <span className="text-indigo-500"> </span>
             <span className="font-bold text-indigo-900">{fraxEst.hip}%</span>
           </div>
         </div>
         <p className="text-xs text-indigo-500 mt-1">
-          Calculated from risk factors above · Based on published <Term term="NOGG">NOGG</Term>/<Term term="FRAX">FRAX</Term> algorithm (Kanis et al.)
+          Calculated from risk factors above · Based on published NOGG/FRAX algorithm (Kanis et al.)
         </p>
       </div>
 
@@ -93,9 +96,7 @@ export function Step6Investigations({ data, onChange }: Props) {
         </>
       )}
 
-      <SectionHeading>
-        <Term term="DEXA">DEXA</Term>
-      </SectionHeading>
+      <SectionHeading>DEXA</SectionHeading>
       <Field label="DEXA results available">
         <YesNo
           value={hasDexa}
@@ -193,17 +194,14 @@ export function Step6Investigations({ data, onChange }: Props) {
             />
           </Field>
           <Field label="eGFR" hint="ml/min/1.73 m² — kidney function" indent>
-            <div className="flex items-center gap-2">
-              <NumInput
-                value={data.bloodResults.egfr}
-                onChange={v => onChange({ bloodResults: { ...data.bloodResults!, egfr: v } })}
-                min={1}
-                max={130}
-                unit="ml/min"
-                width="w-24"
-              />
-              <Term term="eGFR" />
-            </div>
+            <NumInput
+              value={data.bloodResults.egfr}
+              onChange={v => onChange({ bloodResults: { ...data.bloodResults!, egfr: v } })}
+              min={1}
+              max={130}
+              unit="ml/min"
+              width="w-24"
+            />
           </Field>
           <Field label="ALP" hint="U/L — normal 30–130; >200 markedly elevated" indent>
             <div className="flex items-center gap-2">

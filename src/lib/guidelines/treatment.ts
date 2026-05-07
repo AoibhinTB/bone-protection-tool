@@ -53,6 +53,27 @@ export function generateTreatmentOutput(
     return { recommendations: [], flags, referrals, supplements };
   }
 
+  // ── Safety gate: severe Vit D deficiency + hypocalcaemia together blocks all antiresorptive ──
+  // Both must be corrected before any bisphosphonate or denosumab — risk of severe acute hypocalcaemia.
+  const vitDLevel = patient.bloodResults?.vitaminDNmol ?? null;
+  const caLevel = patient.bloodResults?.adjustedCalciumMmol ?? null;
+  const severeVitDDef = vitDLevel !== null && vitDLevel < BLOOD_RANGES.vitaminD.deficient;
+  const hypocalcaemia = caLevel !== null && caLevel < BLOOD_RANGES.adjustedCalcium.low;
+  if (severeVitDDef && hypocalcaemia) {
+    flags.push({
+      id: 'two_safety_blockers',
+      severity: 'urgent',
+      message:
+        `DO NOT START ANTIRESORPTIVE — severe Vit D deficiency (${vitDLevel} nmol/L) + hypocalcaemia (${caLevel} mmol/L). Correct both first.`,
+      rationale:
+        'Two simultaneous blockers. Likely cause: severe Vit D deficiency driving secondary hyperparathyroidism and low calcium — ' +
+        'correcting Vit D should normalise calcium. Loading: 50,000 IU cholecalciferol weekly × 6 weeks. Recheck calcium AND Vit D ' +
+        'at 6–8 weeks. Consider PTH given hypocalcaemia. Once Vit D ≥50 and Ca ≥2.10, start alendronate (or other antiresorptive).',
+      source: SRC_NOGG,
+    });
+    return { recommendations: [], flags, referrals, supplements };
+  }
+
   // ── Imminent fracture risk (fracture within last 24 months) ──
   if (patient.recentFractureWithin2Years) {
     flags.push({
@@ -67,16 +88,81 @@ export function generateTreatmentOutput(
     });
   }
 
-  // ── RA + secondary osteoporosis double-counting warning ──
-  if (patient.rheumatoidArthritis && patient.secondaryOsteoporosis.length > 0 && patient.fraxMOFPercent !== null) {
+  // ── RA double-counting warning — fires whenever RA is ticked ──
+  if (patient.rheumatoidArthritis) {
     flags.push({
       id: 'ra_double_count',
       severity: 'warning',
       message:
-        'FRAX: do not tick "Secondary Osteoporosis" for RA — RA is already a separate FRAX field; double-counting overestimates risk.',
+        'RA is already a FRAX input — do not also tick Secondary Osteoporosis as this double-counts the risk.',
       rationale:
-        'FRAX includes RA as a named risk factor separate from secondary osteoporosis. ' +
+        'FRAX includes Rheumatoid Arthritis as a named risk factor separate from "Secondary Osteoporosis". ' +
         'Ticking both inflates the FRAX score and may lead to inappropriate treatment escalation.',
+      source: SRC_NOGG,
+    });
+  }
+
+  // ── Early menopause / POI surface flag — FRAX underestimates ──
+  if (patient.earlyMenopause) {
+    flags.push({
+      id: 'early_menopause_frax_underestimate',
+      severity: 'info',
+      message:
+        'Early menopause / POI — FRAX may underestimate fracture risk in this population; lower treatment thresholds apply.',
+      rationale:
+        'Early oestrogen loss causes cumulative bone deficit beyond what FRAX clinical risk factors capture. ' +
+        'NOGG 2024 / IOS 2024: lower BMD treatment threshold (T-score ≤−1.5) applies. HRT is first-line bone protection ' +
+        'in women under 50 (POI); first-line for women ≤60 with high fracture risk and no VTE/breast cancer history.',
+      source: SRC_IOS,
+    });
+  }
+
+  // ── Glucocorticoids ≥7.5 mg/day surface flag — GIOP pathway, FRAX adjusted ──
+  // Fires on current high-dose use regardless of elapsed duration (planned ≥3 mo per Rec 22).
+  if (
+    patient.glucocorticoidUse?.current &&
+    (patient.glucocorticoidUse.dose === 'medium' || patient.glucocorticoidUse.dose === 'high')
+  ) {
+    flags.push({
+      id: 'gc_high_dose_giop_surface',
+      severity: 'warning',
+      message:
+        'Glucocorticoids ≥7.5 mg/day for ≥3 months — GIOP pathway applied; FRAX MOF ×1.15 / hip ×1.20.',
+      rationale:
+        'NOGG 2024 Rec 22 (Strong): start bone protection at the same time as glucocorticoids; do not wait for DEXA. ' +
+        'NOGG arithmetic adjustment compensates for FRAX underestimation at high doses.',
+      source: SRC_NOGG,
+    });
+  }
+
+  // ── Malabsorption surface flag — Ca and Vit D absorption may be impaired ──
+  const hasMalabsorption =
+    patient.secondaryOsteoporosis.includes('malabsorption') ||
+    patient.secondaryOsteoporosis.includes('celiac_disease') ||
+    patient.secondaryOsteoporosis.includes('inflammatory_bowel_disease');
+  if (hasMalabsorption) {
+    flags.push({
+      id: 'malabsorption_supplement_warning',
+      severity: 'warning',
+      message:
+        'Malabsorption (coeliac/IBD/bariatric) — dietary calcium and vitamin D absorption may be impaired; check levels and supplement.',
+      rationale:
+        'Malabsorptive states reduce intestinal absorption of calcium, vitamin D, and oral bisphosphonates. ' +
+        'Check 25-OHD and adjusted calcium; supplement aggressively. Consider IV zoledronate or denosumab if oral bisphosphonate response is poor.',
+      source: SRC_NOGG,
+    });
+  }
+
+  // ── Patient refuses injections — surface flag ──
+  if (patient.refusesInjections) {
+    flags.push({
+      id: 'patient_refuses_injections',
+      severity: 'warning',
+      message:
+        'Patient refuses injections — denosumab, zoledronate, teriparatide, romosozumab cannot be offered. Oral bisphosphonate only.',
+      rationale:
+        'Document discussion of clinical risk, particularly in very high risk patients where anabolic-first or denosumab is preferred. ' +
+        'Re-engage at follow-up — preferences may change. Specialist referral remains appropriate where injection-only options are clinically indicated.',
       source: SRC_NOGG,
     });
   }
@@ -239,7 +325,22 @@ export function generateTreatmentOutput(
   }
 
   // ── New treatment initiation ──
-  const recommendations = initiateTherapy(patient, riskCategory, flags, referrals);
+  let recommendations = initiateTherapy(patient, riskCategory, flags, referrals);
+
+  // ── Patient refuses injections — strip injection-based agents from output ──
+  if (patient.refusesInjections) {
+    const oralAgents = new Set(['alendronate', 'risedronate', 'ibandronate']);
+    recommendations = recommendations.filter(r => oralAgents.has(r.agent));
+    if (recommendations.length === 0) {
+      // No oral options remaining — escalate to specialist
+      referrals.push({
+        specialty: 'metabolic_bone',
+        reason: 'Patient refuses injections and no oral antiresorptive available — specialist input required to negotiate options.',
+        urgency: 'soon',
+      });
+    }
+  }
+
   return { recommendations, flags, referrals, supplements };
 }
 
@@ -341,8 +442,36 @@ function initiateTherapy(
     return recs;
   }
 
-  // Alendronate first-line per HSE MMP Ireland
-  if (canUse('alendronate', egfr)) {
+  // Currently on HRT with high risk: review HRT adequacy + add bisphosphonate option
+  if (
+    patient.currentTreatment?.agent === 'hrt' &&
+    patient.currentTreatment.currentlyOn &&
+    (riskCategory === 'high' || riskCategory === 'very_high')
+  ) {
+    flags.push({
+      id: 'hrt_on_board_review',
+      severity: 'info',
+      message:
+        'On HRT with high fracture risk — review HRT dose/compliance first; if BMD inadequate, add alendronate alongside HRT.',
+      rationale:
+        'NOGG 2024: HRT is first-line bone protection for women ≤60 with high risk. ' +
+        'When T-score remains ≤−2.5 despite HRT, additional antiresorptive may be warranted. ' +
+        'Plan for HRT review at 5 years total and reassess fracture risk.',
+      source: SRC_BMS,
+    });
+    if (canUse('alendronate', egfr)) {
+      recs.push({
+        ...alendronate(),
+        rationale:
+          'Add alendronate alongside HRT: T-score remains ≤−2.5 despite HRT, suggesting HRT alone is insufficient bone protection.',
+        priority: 'first-line',
+      });
+    }
+    return recs;
+  }
+
+  // Alendronate first-line per HSE MMP Ireland (skip when eGFR is at/below the CI threshold)
+  if (canUse('alendronate', egfr) && (egfr === null || egfr > RENAL_LIMITS.alendronate.ci)) {
     // Borderline renal function: zoledronate should be avoided at eGFR <45
     if (egfr !== null && egfr < 50) {
       flags.push({
@@ -361,8 +490,10 @@ function initiateTherapy(
     return recs;
   }
 
-  // Alendronate contraindicated — renal impairment
-  if (egfr !== null && egfr < RENAL_LIMITS.alendronate.ci) {
+  // Alendronate contraindicated — renal impairment (eGFR ≤35 ml/min triggers BP ban; below
+  // strict NOGG CI of <35 we still prefer denosumab at the boundary because BPs accumulate
+  // and denosumab is not renally cleared — the safer choice in borderline CKD).
+  if (egfr !== null && egfr <= RENAL_LIMITS.alendronate.ci) {
     flags.push({
       id: 'renal_bp_ci',
       severity: 'warning',
@@ -420,6 +551,30 @@ function sequencing(
   const current = patient.currentTreatment!;
   const egfr = resolveEGFR(patient);
   const recs: TreatmentRecommendation[] = [];
+
+  // ── On HRT with high fracture risk: review HRT adequacy + add bisphosphonate ──
+  if (current.agent === 'hrt' && current.currentlyOn) {
+    flags.push({
+      id: 'hrt_on_board_review',
+      severity: 'info',
+      message:
+        'On HRT with high fracture risk — review HRT dose/compliance first; if BMD inadequate, add alendronate alongside HRT.',
+      rationale:
+        'NOGG 2024: HRT is first-line bone protection for women ≤60 with high risk. ' +
+        'When T-score remains ≤−2.5 despite HRT, additional antiresorptive may be warranted. ' +
+        'Plan for HRT review at 5 years total and reassess fracture risk.',
+      source: SRC_BMS,
+    });
+    if (canUse('alendronate', egfr)) {
+      recs.push({
+        ...alendronate(),
+        rationale:
+          'Add alendronate alongside HRT: T-score remains ≤−2.5 despite HRT, suggesting HRT alone is insufficient bone protection.',
+        priority: 'first-line',
+      });
+    }
+    return { recommendations: recs, flags, referrals };
+  }
 
   // ── GI intolerance ──
   if (current.reasonStopped === 'gi_intolerance') {
@@ -916,8 +1071,10 @@ function isGIOP(patient: PatientInput): boolean {
 
   const { dose, durationMonths } = patient.glucocorticoidUse;
 
-  // High-dose threshold (≥7.5mg/day for ≥3 months)
-  if ((dose === 'medium' || dose === 'high') && durationMonths >= GIOP.highDoseMinMonths) return true;
+  // High-dose (≥7.5 mg/day prednisolone equivalent): NOGG Rec 22 says start bone protection
+  // immediately when planned ≥3 months — fire as soon as the dose is ticked, regardless of
+  // elapsed duration, so the engine catches early-course patients.
+  if (dose === 'medium' || dose === 'high') return true;
 
   // Lower-dose threshold: ≥5mg/day + age ≥65 or prior fragility fracture
   if (dose === 'low' && durationMonths >= GIOP.lowerDoseMinMonths) {
@@ -1045,8 +1202,20 @@ function giop(
     });
   }
 
-  // Standard GIOP: alendronate or zoledronate (skip if AFF history — permanent BP ban)
-  if (!hasAFFHistory(patient) && canUse('alendronate', egfr)) {
+  // Standard GIOP treatment selection. Skip oral BP if AFF history (permanent ban),
+  // prior GI intolerance, or patient refuses injections (note: oral BP is preferred for the latter).
+  const aff = hasAFFHistory(patient);
+  const giIntolerance = hasPreviousGIIntoleranceToBP(patient);
+  const onj = hasONJHistory(patient);
+  const refuses = patient.refusesInjections;
+
+  if (onj) {
+    // ONJ history is handled at a higher level; defensive — should not reach here.
+    return { recommendations: recs, flags, referrals };
+  }
+
+  if (!aff && !giIntolerance && canUse('alendronate', egfr)) {
+    // Oral first-line per HSE MMP / NOGG GIOP Rec 23
     recs.push({
       ...alendronate(),
       rationale:
@@ -1054,20 +1223,47 @@ function giop(
         'Initiate at same time as glucocorticoid if planned duration ≥3 months. ' +
         'Calcium 1000–1500 mg/day and vitamin D ≥800 IU/day required alongside.',
     });
-  } else if (!hasAFFHistory(patient) && canUse('zoledronate', egfr)) {
+  } else if (!aff && giIntolerance && !refuses && canUse('zoledronate', egfr)) {
+    // Prior oral GI intolerance — IV zoledronate bypasses GI tract
+    flags.push({
+      id: 'giop_iv_after_gi_intolerance',
+      severity: 'info',
+      message:
+        'Oral bisphosphonate contraindicated (prior GI intolerance) — IV zoledronate is the appropriate GIOP option.',
+      rationale:
+        'NOGG 2024 / HSE MMP: IV zoledronate has no GI exposure and is preferred when oral bisphosphonate has caused intolerance. ' +
+        'Pre-medicate with paracetamol and pre-hydrate.',
+      source: SRC_HSE,
+    });
+    recs.push({ ...zoledronate(), rationale: 'IV zoledronate for GIOP when oral bisphosphonate is contraindicated by prior intolerance.' });
+  } else if (!aff && !refuses && canUse('zoledronate', egfr)) {
     recs.push({ ...zoledronate(), rationale: 'IV zoledronate for GIOP when oral bisphosphonate is contraindicated or not tolerated.' });
   } else {
-    addVitDBlock(patient, flags);
-    recs.push(denosumab(egfr));
-    flags.push({
-      id: 'giop_denosumab_conditional',
-      severity: 'info',
-      message: hasAFFHistory(patient)
-        ? 'Denosumab used for GIOP: bisphosphonates permanently contraindicated (AFF history). Denosumab is an appropriate alternative (NOGG 2024 Rec 24).'
-        : 'Denosumab is an alternative treatment option for GIOP (NOGG 2024 Rec 24 — Conditional).',
-      rationale: 'Consider denosumab when bisphosphonates are contraindicated or not tolerated in GIOP.',
-      source: SRC_NOGG,
-    });
+    // BP options exhausted (AFF history, refusal of IV, or eGFR too low) — denosumab
+    if (refuses) {
+      flags.push({
+        id: 'giop_no_treatment_option',
+        severity: 'urgent',
+        message:
+          'GIOP with no acceptable treatment option (oral BP contraindicated/refused; injections refused). Specialist referral mandatory.',
+        rationale:
+          'Patient preference must be balanced against very high fracture risk in GIOP. Specialist input required to negotiate options.',
+        source: SRC_NOGG,
+      });
+      referrals.push({ specialty: 'metabolic_bone', reason: 'GIOP with no acceptable antiresorptive — patient preference vs clinical need.', urgency: 'urgent' });
+    } else {
+      addVitDBlock(patient, flags);
+      recs.push(denosumab(egfr));
+      flags.push({
+        id: 'giop_denosumab_conditional',
+        severity: 'info',
+        message: aff
+          ? 'Denosumab used for GIOP — bisphosphonates permanently contraindicated (AFF history).'
+          : 'Denosumab as GIOP alternative (NOGG 2024 Rec 24 — Conditional).',
+        rationale: 'Consider denosumab when bisphosphonates are contraindicated or not tolerated in GIOP.',
+        source: SRC_NOGG,
+      });
+    }
   }
 
   return { recommendations: recs, flags, referrals };

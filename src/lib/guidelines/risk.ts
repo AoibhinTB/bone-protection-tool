@@ -66,6 +66,18 @@ export function stratifyRisk(patient: PatientInput): RiskStratification {
   // Lower intervention thresholds: high-risk exposures that warrant treatment at T-scores above the WHO -2.5 cut-off.
   // These mirror NOGG 2024 Section 7 guidance on context-specific lower thresholds.
 
+  // GIOP lower threshold: any current glucocorticoid use + T-score ≤ -1.5 → high risk.
+  // Glucocorticoids increase fracture risk over and above their effect on BMD; NOGG applies
+  // a lower BMD treatment threshold of T ≤ -1.5 in this context.
+  if (patient.glucocorticoidUse?.current && patient.dexaResults) {
+    const lowest = lowestTScore(patient.dexaResults);
+    if (lowest <= -1.5) {
+      return result('high', 'red', threshold.lowerMOF, threshold.upperMOF, rawMOF, rawHip, adjustedMOF, adjustedHip, adjustments,
+        `Glucocorticoid therapy with T-score ${lowest}: lower intervention threshold (≤−1.5) applies. ` +
+        'Glucocorticoids increase fracture risk independently of BMD — treatment indicated at this BMD level (NOGG 2024 Rec 22).');
+    }
+  }
+
   // Aromatase inhibitor: T-score ≤ -1.5 warrants treatment (CTIBL guidelines / NOGG 2024 Section 7.1)
   if (patient.aromataseInhibitorUse && patient.dexaResults) {
     const lowest = lowestTScore(patient.dexaResults);
@@ -97,11 +109,18 @@ export function stratifyRisk(patient: PatientInput): RiskStratification {
     }
   }
 
-  // Previous hip or vertebral fracture → treat regardless of FRAX (NOGG 2024 Rec 8)
-  if (patient.priorHipFracture || patient.priorVertebralFracture) {
+  // Previous fragility fracture (any site) → treat regardless of FRAX (NOGG 2024 Rec 8).
+  // Hip and clinical vertebral fractures alone are sufficient for clinical diagnosis of osteoporosis
+  // without DEXA. Other fragility fracture sites also drive treatment per NOGG 2024.
+  if (patient.priorFragilityFracture || patient.priorHipFracture || patient.priorVertebralFracture) {
+    const site = patient.priorHipFracture
+      ? 'hip'
+      : patient.priorVertebralFracture
+      ? 'vertebral'
+      : 'fragility';
     return result('high', 'red', threshold.lowerMOF, threshold.upperMOF, rawMOF, rawHip, adjustedMOF, adjustedHip, adjustments,
-      `Prior ${patient.priorHipFracture ? 'hip' : 'vertebral'} fragility fracture — clinical diagnosis of osteoporosis; ` +
-      'treatment indicated per NOGG 2024 Rec 8 regardless of FRAX or T-score.');
+      `Prior ${site} fracture — treatment indicated regardless of FRAX (NOGG 2024 Rec 8). ` +
+      'Hip and clinical vertebral fractures provide clinical diagnosis of osteoporosis without DEXA.');
   }
 
   // FRAX-based stratification (always available here: estimate or manual)
@@ -152,6 +171,11 @@ function veryHighRiskReason(
     criteria.push(`vertebral fracture within the last ${patient.recentVertebralFractureYears} year(s)`);
   }
 
+  // Recent hip fracture within 24 months — imminent re-fracture risk; NOGG VHR criterion
+  if (patient.priorHipFracture && patient.recentFractureWithin2Years) {
+    criteria.push('hip fracture within the last 24 months (imminent re-fracture risk)');
+  }
+
   // Two or more vertebral fractures (any time)
   if (patient.priorVertebralFracture && patient.numberOfPriorFractures >= VERY_HIGH_RISK.minVertebralFracturesForVHR) {
     criteria.push('two or more vertebral fragility fractures');
@@ -178,14 +202,17 @@ function veryHighRiskReason(
     criteria.push(`high-dose glucocorticoid (${patient.glucocorticoidUse.dose} dose, ${patient.glucocorticoidUse.durationMonths} months)`);
   }
 
-  // FRAX MOF ≥ 32.5% (NOGG 2024 Table 5: VHRT at 70+ = IT 20.3% × 1.60)
-  if (adjustedMOF !== null && adjustedMOF >= VERY_HIGH_RISK.fraxMOF) {
-    criteria.push(`adjusted FRAX MOF ${adjustedMOF}% ≥ ${VERY_HIGH_RISK.fraxMOF}%`);
-  }
-
-  // FRAX hip ≥ 8.6% (NOGG 2024 Table 5: VHRT at 70+ = IT 5.4% × 1.60)
-  if (adjustedHip !== null && adjustedHip >= VERY_HIGH_RISK.fraxHip) {
-    criteria.push(`adjusted FRAX hip ${adjustedHip}% ≥ ${VERY_HIGH_RISK.fraxHip}%`);
+  // FRAX MOF / hip VHR triggers — only when FRAX is manually entered (not estimated).
+  // The estimator is too coarse for VHR designation; require an official FRAX value to
+  // avoid over-classification.
+  const fraxIsManual = patient.fraxMOFPercent !== null || patient.fraxHipPercent !== null;
+  if (fraxIsManual) {
+    if (adjustedMOF !== null && adjustedMOF >= VERY_HIGH_RISK.fraxMOF) {
+      criteria.push(`adjusted FRAX MOF ${adjustedMOF}% ≥ ${VERY_HIGH_RISK.fraxMOF}%`);
+    }
+    if (adjustedHip !== null && adjustedHip >= VERY_HIGH_RISK.fraxHip) {
+      criteria.push(`adjusted FRAX hip ${adjustedHip}% ≥ ${VERY_HIGH_RISK.fraxHip}%`);
+    }
   }
 
   // Fracture on adequate therapy — treatment failure

@@ -32,6 +32,12 @@ export function Step2FractureHistory({ data, onChange }: Props) {
 
       {data.priorFragilityFracture && (
         <>
+          <p className="text-xs text-slate-600 bg-amber-50 border-l-4 border-amber-300 rounded-r px-3 py-2 leading-snug -mt-1 mb-2">
+            For FRAX purposes, enter any low-trauma fracture at any site age &gt;50.
+            Note: hip and clinical vertebral fractures alone are sufficient for clinical
+            diagnosis of osteoporosis without DEXA — treatment can be started without
+            waiting for a scan.
+          </p>
           <Field label="Hip fracture" indent>
             <YesNo
               value={data.priorHipFracture}
