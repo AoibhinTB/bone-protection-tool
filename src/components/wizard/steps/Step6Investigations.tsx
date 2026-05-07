@@ -29,11 +29,17 @@ export function Step6Investigations({ data, onChange }: Props) {
         </p>
         <div className="flex gap-6 text-sm">
           <div>
-            <span className="text-indigo-500">MOF </span>
+            <Term term="MOF">
+              <span className="text-indigo-500">MOF</span>
+            </Term>
+            <span className="text-indigo-500"> </span>
             <span className="font-bold text-indigo-900">{fraxEst.mof}%</span>
           </div>
           <div>
-            <span className="text-indigo-500">Hip </span>
+            <Term term="Hip">
+              <span className="text-indigo-500">Hip</span>
+            </Term>
+            <span className="text-indigo-500"> </span>
             <span className="font-bold text-indigo-900">{fraxEst.hip}%</span>
           </div>
         </div>
@@ -60,7 +66,7 @@ export function Step6Investigations({ data, onChange }: Props) {
 
       {hasManualFrax && (
         <>
-          <Field label={<Term term="MOF">Official MOF (10-year)</Term>} indent>
+          <Field label="Official MOF (10-year)" indent>
             <NumInput
               value={data.fraxMOFPercent}
               onChange={v => onChange({ fraxMOFPercent: v })}
@@ -71,7 +77,7 @@ export function Step6Investigations({ data, onChange }: Props) {
               width="w-20"
             />
           </Field>
-          <Field label={<Term term="Hip">Official hip fracture (10-year)</Term>} indent>
+          <Field label="Official hip fracture (10-year)" indent>
             <NumInput
               value={data.fraxHipPercent}
               onChange={v => onChange({ fraxHipPercent: v })}
