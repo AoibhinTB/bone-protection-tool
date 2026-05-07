@@ -137,20 +137,69 @@ function CollapsibleCard({
 }) {
   const [open, setOpen] = useState(defaultOpen);
   return (
-    <div className="bg-white border border-slate-200 rounded-lg overflow-hidden">
+    <div
+      className={`bg-white border rounded-lg overflow-hidden transition-colors ${
+        open ? 'border-indigo-300' : 'border-slate-200'
+      }`}
+    >
       <button
         type="button"
         onClick={() => setOpen((o) => !o)}
-        className="w-full flex items-center justify-between gap-3 px-4 py-3 text-left active:bg-slate-50 hover:bg-slate-50 transition-colors min-h-[44px]"
+        className={`group w-full flex items-center justify-between gap-3 px-4 py-3 text-left active:bg-indigo-50 hover:bg-indigo-50/60 transition-colors min-h-[48px] ${
+          open ? 'bg-indigo-50/40' : ''
+        }`}
         aria-expanded={open}
       >
         <span className="text-sm text-slate-800 flex-1 min-w-0">{summary}</span>
-        <span className="text-slate-400 text-xs shrink-0">{open ? '▴' : '▾'}</span>
+        <span
+          className={`shrink-0 inline-flex h-7 w-7 items-center justify-center rounded-full border border-slate-300 bg-white text-slate-500 group-hover:border-indigo-400 group-hover:text-indigo-600 transition-transform ${
+            open ? 'rotate-180' : 'rotate-0'
+          }`}
+          aria-hidden="true"
+        >
+          <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
+            <path d="M2.5 4.5L6 8L9.5 4.5" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
+        </span>
       </button>
-      {open && <div className="px-4 pb-3 pt-1 border-t border-slate-100">{children}</div>}
+      {open && <div className="px-4 pb-3 pt-2 border-t border-slate-100">{children}</div>}
     </div>
   );
 }
+
+// ─── Bullet content for Tier 1 / Tier 2 blood investigation cards ─────────
+
+const INVESTIGATION_BULLETS: Partial<Record<string, string[]>> = {
+  calcium: [
+    'Hypocalcaemia (<2.1 mmol/L): correct before starting bisphosphonate or denosumab',
+    'Hypercalcaemia (>2.6 mmol/L): may indicate primary hyperparathyroidism — refer endocrinology',
+    'Normal range: 2.1–2.6 mmol/L',
+  ],
+  vitamin_d: [
+    'Not yet measured: check before starting antiresorptive therapy',
+    'Target: ≥75 nmol/L',
+    'Supplement 800–1000 IU/day pending result',
+    'Do NOT start bisphosphonate or denosumab until level known and adequate',
+    'Do NOT administer denosumab until Vit D ≥50 nmol/L',
+  ],
+  egfr: [
+    'Required to select safe agent',
+    'eGFR <35: alendronate and zoledronate contraindicated',
+    'eGFR <30: risedronate also contraindicated',
+    'eGFR <35 on denosumab: mandatory corrected calcium check 2 weeks after every injection',
+  ],
+  alp: [
+    'Bone turnover marker — useful baseline before treatment',
+    'Elevated ALP + low calcium / Vit D: consider osteomalacia',
+    'Markedly elevated ALP: investigate before starting treatment — may indicate Paget\'s disease',
+    'Unexplained raised ALP: contraindication to teriparatide',
+  ],
+  fbc: [
+    'Exclude haematological malignancy (myeloma)',
+    'Especially important if anaemia present, vertebral fracture with no clear cause, or elevated ESR',
+    'If abnormal: add SPEP/UPEP',
+  ],
+};
 
 // ─── Blood test result entries ───────────────────────────────────────────
 
@@ -717,6 +766,35 @@ export function ResultsView({ result, patient, onReset, onBack }: Props) {
 
           function InvCard({ inv }: { inv: typeof sortedInvestigations[0] }) {
             const uc = URGENCY_CONFIG[inv.urgency];
+            const bullets = INVESTIGATION_BULLETS[inv.investigation];
+
+            // Tier 1 / Tier 2 blood tests with curated bullet content render as collapsibles
+            if (bullets) {
+              return (
+                <CollapsibleCard
+                  summary={
+                    <span className="flex items-center gap-2 flex-wrap">
+                      <span className="font-bold text-slate-900">
+                        {formatInvestigationName(inv.investigation)}
+                      </span>
+                      {inv.urgency !== 'routine' && <Badge className={uc.color}>{uc.label}</Badge>}
+                    </span>
+                  }
+                  defaultOpen={false}
+                >
+                  <ul className="space-y-1 mt-1">
+                    {bullets.map((b, j) => (
+                      <li key={j} className="flex items-start gap-2 text-xs text-slate-700 leading-snug">
+                        <span className="text-indigo-500 mt-0.5 shrink-0 font-bold">•</span>
+                        <span>{b}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </CollapsibleCard>
+              );
+            }
+
+            // Other investigations (DEXA, VFA, FRAX, PTH, testosterone, etc.) keep the flat card
             return (
               <div className="bg-white border border-slate-200 rounded-lg px-4 py-3">
                 <div className="flex items-center gap-2 mb-1 flex-wrap">
