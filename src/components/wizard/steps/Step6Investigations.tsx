@@ -3,6 +3,7 @@
 import { estimateFrax } from '@/lib/fraxEstimate';
 import type { PatientInput } from '@/lib/guidelines/types';
 import { Field, NumInput, YesNo, SectionHeading } from '../FormPrimitives';
+import { Term } from '@/components/Tooltip';
 
 interface Props {
   data: PatientInput;
@@ -17,14 +18,20 @@ export function Step6Investigations({ data, onChange }: Props) {
 
   return (
     <div>
-      <SectionHeading>FRAX</SectionHeading>
+      <SectionHeading>
+        <Term term="FRAX">FRAX</Term>
+      </SectionHeading>
 
       {/* Auto-calculated estimate */}
       <div className="bg-indigo-50 border border-indigo-200 rounded-lg px-4 py-3 mb-4">
-        <p className="text-xs font-medium text-indigo-700 mb-1">Estimated FRAX — Ireland (no BMD)</p>
+        <p className="text-xs font-medium text-indigo-700 mb-1">
+          Estimated <Term term="FRAX">FRAX</Term> — Ireland (no <Term term="BMD">BMD</Term>)
+        </p>
         <div className="flex gap-6 text-sm">
           <div>
-            <span className="text-indigo-500">MOF </span>
+            <Term term="MOF">
+              <span className="text-indigo-500">MOF </span>
+            </Term>
             <span className="font-bold text-indigo-900">{fraxEst.mof}%</span>
           </div>
           <div>
@@ -33,7 +40,7 @@ export function Step6Investigations({ data, onChange }: Props) {
           </div>
         </div>
         <p className="text-xs text-indigo-500 mt-1">
-          Calculated from risk factors above · Based on published NOGG/FRAX algorithm (Kanis et al.)
+          Calculated from risk factors above · Based on published <Term term="NOGG">NOGG</Term>/<Term term="FRAX">FRAX</Term> algorithm (Kanis et al.)
         </p>
       </div>
 
@@ -86,7 +93,9 @@ export function Step6Investigations({ data, onChange }: Props) {
         </>
       )}
 
-      <SectionHeading>DEXA</SectionHeading>
+      <SectionHeading>
+        <Term term="DEXA">DEXA</Term>
+      </SectionHeading>
       <Field label="DEXA results available">
         <YesNo
           value={hasDexa}
@@ -141,6 +150,9 @@ export function Step6Investigations({ data, onChange }: Props) {
               width="w-20"
             />
           </Field>
+          <p className="text-xs text-slate-500 pl-4 sm:pl-6 -mt-1 mb-2">
+            <Term term="T-score">T-score</Term> reference: ≤−2.5 osteoporosis · −1.0 to −2.5 osteopenia · ≥−1.0 normal
+          </p>
         </>
       )}
 
@@ -151,7 +163,7 @@ export function Step6Investigations({ data, onChange }: Props) {
           onChange={v =>
             onChange({
               bloodResults: v
-                ? { adjustedCalciumMmol: null, vitaminDNmol: null, egfr: null, alp: null, tshNormal: null, fbc: null }
+                ? { adjustedCalciumMmol: null, vitaminDNmol: null, egfr: null, alp: null, tshMUL: null, fbc: null }
                 : null,
             })
           }
@@ -159,7 +171,7 @@ export function Step6Investigations({ data, onChange }: Props) {
       </Field>
       {hasBlood && data.bloodResults && (
         <>
-          <Field label="Adjusted calcium" hint="mmol/L" indent>
+          <Field label="Adjusted calcium" hint="mmol/L — normal 2.10–2.60" indent>
             <NumInput
               value={data.bloodResults.adjustedCalciumMmol}
               onChange={v => onChange({ bloodResults: { ...data.bloodResults!, adjustedCalciumMmol: v } })}
@@ -167,45 +179,67 @@ export function Step6Investigations({ data, onChange }: Props) {
               max={4}
               step={0.01}
               unit="mmol/L"
-              width="w-20"
+              width="w-24"
             />
           </Field>
-          <Field label="25-OH vitamin D" hint="nmol/L" indent>
+          <Field label="25-OH vitamin D" hint="nmol/L — target ≥75" indent>
             <NumInput
               value={data.bloodResults.vitaminDNmol}
               onChange={v => onChange({ bloodResults: { ...data.bloodResults!, vitaminDNmol: v } })}
               min={0}
               max={300}
               unit="nmol/L"
-              width="w-20"
+              width="w-24"
             />
           </Field>
-          <Field label="eGFR" hint="ml/min/1.73 m²" indent>
-            <NumInput
-              value={data.bloodResults.egfr}
-              onChange={v => onChange({ bloodResults: { ...data.bloodResults!, egfr: v } })}
-              min={1}
-              max={130}
-              unit="ml/min"
-              width="w-20"
-            />
+          <Field label="eGFR" hint="ml/min/1.73 m² — kidney function" indent>
+            <div className="flex items-center gap-2">
+              <NumInput
+                value={data.bloodResults.egfr}
+                onChange={v => onChange({ bloodResults: { ...data.bloodResults!, egfr: v } })}
+                min={1}
+                max={130}
+                unit="ml/min"
+                width="w-24"
+              />
+              <Term term="eGFR" />
+            </div>
           </Field>
-          <Field label="ALP" hint="U/L — bone turnover, Paget's, osteomalacia screen" indent>
-            <NumInput
-              value={data.bloodResults.alp}
-              onChange={v => onChange({ bloodResults: { ...data.bloodResults!, alp: v } })}
-              min={0}
-              max={1000}
-              unit="U/L"
-              width="w-20"
-            />
+          <Field label="ALP" hint="U/L — normal 30–130; >200 markedly elevated" indent>
+            <div className="flex items-center gap-2">
+              <NumInput
+                value={data.bloodResults.alp}
+                onChange={v => onChange({ bloodResults: { ...data.bloodResults!, alp: v } })}
+                min={0}
+                max={1000}
+                unit="U/L"
+                width="w-24"
+              />
+              <Term term="ALP" />
+            </div>
           </Field>
-          <Field label="TSH" indent>
+          <Field label="TSH" hint="mU/L — normal 0.4–4.0; <0.1 suppressed; >4.0 elevated" indent>
+            <div className="flex items-center gap-2">
+              <NumInput
+                value={data.bloodResults.tshMUL}
+                onChange={v => onChange({ bloodResults: { ...data.bloodResults!, tshMUL: v } })}
+                min={0}
+                max={50}
+                step={0.1}
+                unit="mU/L"
+                width="w-24"
+              />
+              <Term term="TSH" />
+            </div>
+          </Field>
+          <Field
+            label="On levothyroxine"
+            hint="Affects TSH interpretation — under/over-replacement contributes to bone loss"
+            indent
+          >
             <YesNo
-              value={data.bloodResults.tshNormal ?? false}
-              onChange={v => onChange({ bloodResults: { ...data.bloodResults!, tshNormal: v } })}
-              yesLabel="Normal"
-              noLabel="Abnormal"
+              value={data.onThyroidReplacement}
+              onChange={v => onChange({ onThyroidReplacement: v })}
             />
           </Field>
           <Field label="FBC" indent>

@@ -53,6 +53,7 @@ function basePatient(overrides: Partial<PatientInput>): PatientInput {
     denosumabMonthsSinceLastDose: null,
     completedAnabolicCourse: false,
     thighOrGroinPain: false,
+    onThyroidReplacement: false,
   };
   return { ...base, ...overrides };
 }
@@ -91,7 +92,12 @@ function hasReferral(decision: ClinicalDecision, specialty: string): boolean {
 
 function hasSupplementText(decision: ClinicalDecision, kind: 'vitamin_d' | 'calcium', text: string): boolean {
   const sup = decision.supplements.find(s => s.supplement === kind);
-  return !!sup && sup.dose.toLowerCase().includes(text.toLowerCase());
+  if (!sup) return false;
+  const lc = text.toLowerCase();
+  return (
+    sup.headline.toLowerCase().includes(lc) ||
+    sup.bullets.some(b => b.toLowerCase().includes(lc))
+  );
 }
 
 // ─── TC1 ──────────────────────────────────────────────────────────────────
@@ -104,7 +110,7 @@ function tc1(): TCResult {
     sex: 'female',
     dexaResults: { lumbarSpineTScore: -2.8, totalHipTScore: -2.2, femoralNeckTScore: -2.2, forearmTScore: null },
     renalFunction: { egfr: 58 },
-    bloodResults: { adjustedCalciumMmol: 2.3, vitaminDNmol: 40, egfr: 58, alp: 80, tshNormal: true, fbc: true },
+    bloodResults: { adjustedCalciumMmol: 2.3, vitaminDNmol: 40, egfr: 58, alp: 80, tshMUL: 2.0, fbc: true },
   });
   const decision = runClinicalDecision(patient);
   check(failures, 'risk = high', decision.riskStratification.category === 'high', `got ${decision.riskStratification.category}`);
@@ -148,7 +154,7 @@ function tc3(): TCResult {
     sex: 'male',
     dexaResults: { lumbarSpineTScore: -2.6, totalHipTScore: -2.6, femoralNeckTScore: -2.6, forearmTScore: null },
     renalFunction: { egfr: 30 },
-    bloodResults: { adjustedCalciumMmol: 2.3, vitaminDNmol: 60, egfr: 30, alp: 80, tshNormal: true, fbc: true },
+    bloodResults: { adjustedCalciumMmol: 2.3, vitaminDNmol: 60, egfr: 30, alp: 80, tshMUL: 2.0, fbc: true },
   });
   const decision = runClinicalDecision(patient);
   check(failures, 'risk = high', decision.riskStratification.category === 'high', `got ${decision.riskStratification.category}`);
@@ -171,7 +177,7 @@ function tc4(): TCResult {
     sex: 'female',
     dexaResults: { lumbarSpineTScore: -2.9, totalHipTScore: -2.9, femoralNeckTScore: -2.9, forearmTScore: null },
     renalFunction: { egfr: 62 },
-    bloodResults: { adjustedCalciumMmol: 2.3, vitaminDNmol: 80, egfr: 62, alp: 80, tshNormal: true, fbc: true },
+    bloodResults: { adjustedCalciumMmol: 2.3, vitaminDNmol: 80, egfr: 62, alp: 80, tshMUL: 2.0, fbc: true },
     previousTreatments: [{ agent: 'alendronate', durationMonths: 6, reasonStopped: 'gi_intolerance', currentlyOn: false }],
   });
   const decision = runClinicalDecision(patient);
@@ -220,7 +226,7 @@ function tc6(): TCResult {
     sex: 'female',
     dexaResults: { lumbarSpineTScore: -2.6, totalHipTScore: -2.4, femoralNeckTScore: -2.4, forearmTScore: null },
     renalFunction: { egfr: 75 },
-    bloodResults: { adjustedCalciumMmol: 2.3, vitaminDNmol: 45, egfr: 75, alp: 80, tshNormal: true, fbc: true },
+    bloodResults: { adjustedCalciumMmol: 2.3, vitaminDNmol: 45, egfr: 75, alp: 80, tshMUL: 2.0, fbc: true },
     currentTreatment: { agent: 'denosumab', durationMonths: 36, reasonStopped: null, currentlyOn: true },
     denosumabMonthsSinceLastDose: 5,
   });
@@ -246,7 +252,7 @@ function tc7(): TCResult {
     ageAtMenopause: 40,
     dexaResults: { lumbarSpineTScore: -1.8, totalHipTScore: -1.6, femoralNeckTScore: -1.6, forearmTScore: null },
     renalFunction: { egfr: 70 },
-    bloodResults: { adjustedCalciumMmol: 2.3, vitaminDNmol: 55, egfr: 70, alp: 80, tshNormal: true, fbc: true },
+    bloodResults: { adjustedCalciumMmol: 2.3, vitaminDNmol: 55, egfr: 70, alp: 80, tshMUL: 2.0, fbc: true },
   });
   const decision = runClinicalDecision(patient);
   check(failures, 'risk = high (early meno + T ≤ -1.5)', decision.riskStratification.category === 'high', `got ${decision.riskStratification.category}`);
@@ -293,12 +299,19 @@ function tc9(): TCResult {
     adtUse: true,
     dexaResults: { lumbarSpineTScore: -2.3, totalHipTScore: -2.1, femoralNeckTScore: -2.1, forearmTScore: null },
     renalFunction: { egfr: 65 },
-    bloodResults: { adjustedCalciumMmol: 2.3, vitaminDNmol: 30, egfr: 65, alp: 80, tshNormal: true, fbc: true },
+    bloodResults: { adjustedCalciumMmol: 2.3, vitaminDNmol: 30, egfr: 65, alp: 80, tshMUL: 2.0, fbc: true },
   });
   const decision = runClinicalDecision(patient);
   check(failures, 'risk = high (ADT + T-score ≤ -2.0)', decision.riskStratification.category === 'high', `got ${decision.riskStratification.category}`);
   check(failures, 'ADT bone loss flag with denosumab preference', hasFlag(decision, 'adt_bone_loss'));
-  check(failures, 'recommends alendronate (or denosumab via flag)', hasAgent(decision, 'alendronate') || hasAgent(decision, 'denosumab'));
+  // ADT-specific: denosumab must be primary first-line; alendronate appears as second-line alternative.
+  const denoRec = decision.treatmentRecommendations.find(r => r.agent === 'denosumab');
+  const alenRec = decision.treatmentRecommendations.find(r => r.agent === 'alendronate');
+  check(failures, 'denosumab is recommended', !!denoRec);
+  check(failures, 'denosumab is FIRST-line (primary)', !!denoRec && denoRec.priority !== 'alternative');
+  check(failures, 'denosumab appears before alendronate in list',
+    !!denoRec && !!alenRec && decision.treatmentRecommendations.indexOf(denoRec) < decision.treatmentRecommendations.indexOf(alenRec));
+  check(failures, 'alendronate is second-line alternative', !!alenRec && alenRec.priority === 'alternative');
   check(failures, 'Vit D insufficient text', hasSupplementText(decision, 'vitamin_d', 'insufficient'));
   return { name: 'TC9 — 69M ADT', passed: failures.length === 0, failures, decision };
 }
@@ -313,7 +326,7 @@ function tc10(): TCResult {
     sex: 'female',
     dexaResults: { lumbarSpineTScore: -2.7, totalHipTScore: -2.5, femoralNeckTScore: -2.5, forearmTScore: null },
     renalFunction: { egfr: 45 },
-    bloodResults: { adjustedCalciumMmol: 2.35, vitaminDNmol: null, egfr: 45, alp: null, tshNormal: true, fbc: true },
+    bloodResults: { adjustedCalciumMmol: 2.35, vitaminDNmol: null, egfr: 45, alp: null, tshMUL: 2.0, fbc: true },
     fraxHipPercent: 5.2,
   });
   const decision = runClinicalDecision(patient);

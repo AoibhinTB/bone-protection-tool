@@ -6,6 +6,7 @@ import type { PatientInput, ClinicalDecision, RiskCategory, ReferralRecommendati
 import { assessInvestigationsNeeded } from './assessment';
 import { stratifyRisk } from './risk';
 import { generateTreatmentOutput } from './treatment';
+import { generateBloodFlags } from './bloodFlags';
 import { GUIDELINE_VERSIONS } from './thresholds';
 
 export function runClinicalDecision(patient: PatientInput): ClinicalDecision {
@@ -37,6 +38,9 @@ export function runClinicalDecision(patient: PatientInput): ClinicalDecision {
 
   const { recommendations, flags, referrals, supplements } =
     generateTreatmentOutput(patient, riskCategory);
+
+  // Append biochemistry-driven flags (ALP, TSH, calcium)
+  flags.push(...generateBloodFlags(patient));
 
   // Age ≥80: FRAX 10-year probability may exceed remaining life expectancy
   if (patient.age >= 80) {

@@ -59,10 +59,7 @@ export function generateTreatmentOutput(
       id: 'imminent_fracture_risk',
       severity: 'urgent',
       message:
-        'IMMINENT FRACTURE RISK: fracture within the last 24 months. ' +
-        'Start bone protection treatment IMMEDIATELY — do not wait for DEXA. ' +
-        'The fracture itself is sufficient for clinical diagnosis and treatment initiation. ' +
-        'Risk of a further fracture is highest in the weeks to months after a fracture.',
+        'Start bone protection NOW — fracture within last 24 months. Do not wait for DEXA.',
       rationale:
         'NOGG 2024: fracture within 24 months = high imminent fracture risk. ' +
         'Immediate treatment is indicated — DEXA can be arranged concurrently but must not delay prescribing.',
@@ -76,9 +73,7 @@ export function generateTreatmentOutput(
       id: 'ra_double_count',
       severity: 'warning',
       message:
-        'FRAX double-counting risk: Rheumatoid Arthritis is already a specific FRAX risk factor. ' +
-        'If you also ticked "Secondary Osteoporosis" in the FRAX tool because of RA, this double-counts the risk and overestimates fracture probability. ' +
-        'Ensure secondary osteoporosis was ticked in FRAX for a reason OTHER than RA.',
+        'FRAX: do not tick "Secondary Osteoporosis" for RA — RA is already a separate FRAX field; double-counting overestimates risk.',
       rationale:
         'FRAX includes RA as a named risk factor separate from secondary osteoporosis. ' +
         'Ticking both inflates the FRAX score and may lead to inappropriate treatment escalation.',
@@ -87,17 +82,18 @@ export function generateTreatmentOutput(
   }
 
   // ── Dental check before IV zoledronate or denosumab ──
+  // Single merged alert (replaces previous dental_check_pre_treatment + onj_dental_pre_start overlap).
   const isNewStarter = !patient.currentTreatment && patient.previousTreatments.length === 0;
   if (isNewStarter) {
     flags.push({
       id: 'dental_check_pre_treatment',
       severity: 'info',
       message:
-        'Before starting IV zoledronate or denosumab: check whether the patient has any outstanding invasive dental work (extractions, implants, major restorations). ' +
-        'If yes, complete dental treatment BEFORE the first dose where clinically feasible, to minimise the very small risk of osteonecrosis of the jaw (ONJ).',
+        'Before starting IV zoledronate or denosumab: ask about outstanding invasive dental work. ' +
+        'Complete before first dose if clinically feasible. Advise patient to inform dentist of antiresorptive use before any future invasive procedure.',
       rationale:
-        'NOGG 2024 Section 7.3: ONJ risk is low at osteoporosis doses but is further minimised with pre-treatment dental review. ' +
-        'Particularly relevant for IV zoledronate and denosumab.',
+        'NOGG 2024 Section 7.3: ONJ risk is low at osteoporosis doses (oral BP <1:10,000 patient-years) ' +
+        'but is minimised by pre-treatment dental review and ongoing oral hygiene. Particularly relevant for IV zoledronate and denosumab.',
       source: SRC_NOGG,
     });
   }
@@ -116,10 +112,7 @@ export function generateTreatmentOutput(
       id: 'forearm_only_osteoporosis',
       severity: 'warning',
       message:
-        'Forearm-only osteoporosis (T-score ≤-2.5 at 33% radius with normal hip and spine BMD): ' +
-        'rule out primary hyperparathyroidism BEFORE starting treatment — check calcium, ALP, and PTH. ' +
-        'Note: FRAX cannot accept forearm BMD as input — femoral neck BMD must be used for FRAX calculation. ' +
-        'Treatment approach after ruling out secondary cause is the same as standard osteoporosis.',
+        'Forearm-only osteoporosis — rule out primary hyperparathyroidism (Ca, ALP, PTH) BEFORE starting treatment.',
       rationale:
         'Forearm-only osteoporosis has a specific differential diagnosis including primary hyperparathyroidism, ' +
         'which is characterised by preferential cortical bone loss (forearm/radius). ' +
@@ -189,7 +182,6 @@ export function generateTreatmentOutput(
   adtFlags(patient, flags);
   aiFlags(patient, flags);
   affFlags(patient, flags);
-  onjFlags(patient, flags);
 
   // ── Very high risk — anabolic consideration ──
   if (riskCategory === 'very_high') {
@@ -197,15 +189,7 @@ export function generateTreatmentOutput(
       id: 'vhr_anabolic_consideration',
       severity: 'warning',
       message:
-        'Very high fracture risk: specialist referral recommended. ' +
-        'Anabolic-first therapy (teriparatide or romosozumab) may be more appropriate than antiresorptive monotherapy. ' +
-        'Romosozumab (Evenity®) HSE MAP criteria — reimbursed from 1 Nov 2024: ' +
-        'postmenopausal women only; T-score ≤-2.5 at total hip, femoral neck, or lumbar spine; ' +
-        'major osteoporotic fracture within previous 24 months (hip, vertebral, distal radius, proximal humerus); ' +
-        'individual patient application required; approved consultant only (endocrinology, gerontology, or rheumatology); ' +
-        'High Tech Hub-generated prescription only — non-hub prescriptions are not reimbursed; ' +
-        '12 monthly doses (210 mg/month SC = 2×105 mg injections). ' +
-        'Contraindications: uncorrected hypocalcaemia, MI or stroke within preceding 12 months, hypersensitivity.',
+        'Very high risk — refer specialist. Anabolic-first (teriparatide or romosozumab) may be appropriate; GP cannot initiate High-Tech.',
       rationale:
         'NOGG 2024 Rec 11 (Conditional): consider referral to osteoporosis specialist for very high risk patients. ' +
         'Anabolic-first approach warranted particularly when multiple vertebral fractures are present. ' +
@@ -239,10 +223,7 @@ export function generateTreatmentOutput(
       id: 'aff_history_bp_permanent_ci',
       severity: 'urgent',
       message:
-        'PERMANENT BISPHOSPHONATE CONTRAINDICATION: this patient has a history of confirmed atypical femoral fracture (AFF). ' +
-        'Do NOT prescribe any bisphosphonate — oral (alendronate, risedronate, ibandronate) or IV (zoledronate). ' +
-        'Bone protection options: denosumab (preferred antiresorptive) or teriparatide (specialist-initiated, anabolic). ' +
-        'Refer to metabolic bone / endocrinology specialist.',
+        'DO NOT prescribe any bisphosphonate — confirmed AFF history. Use denosumab or teriparatide; refer specialist.',
       rationale:
         'AFF is a class effect of bisphosphonates due to suppression of bone remodelling at cortical stress sites. ' +
         'Rechallenge with any bisphosphonate carries recurrence risk and is contraindicated. ' +
@@ -286,11 +267,7 @@ function initiateTherapy(
         id: 'hrt_safety_concern',
         severity: 'warning',
         message:
-          'HRT safety concern identified: ' +
-          (patient.vteHistory ? 'personal or family history of VTE (DVT/PE). ' : '') +
-          (patient.breastCancerHistory ? 'personal history of breast cancer or high familial risk. ' : '') +
-          'HRT is NOT recommended as first-line bone protection in this patient. ' +
-          'Use bisphosphonate (alendronate) as first-line. Refer to specialist if HRT is being considered despite risk.',
+          `HRT not first-line — ${patient.vteHistory ? 'VTE history' : ''}${patient.vteHistory && patient.breastCancerHistory ? ' + ' : ''}${patient.breastCancerHistory ? 'breast cancer history' : ''}. Use alendronate; refer specialist if HRT still considered.`,
         rationale:
           'NOGG 2024: HRT is first-line for women ≤60 only where VTE and breast cancer risk are low. ' +
           'VTE history or breast cancer history are standard contraindications to HRT.',
@@ -301,9 +278,7 @@ function initiateTherapy(
         id: 'hrt_option_under60',
         severity: 'info',
         message:
-          'For postmenopausal women ≤60 with high fracture risk and no VTE or breast cancer history, ' +
-          'HRT is now explicitly first-line for bone protection (NOGG 2024 update). ' +
-          'Transdermal oestrogen preferred (lower VTE risk than oral). Discuss with patient.',
+          'HRT first-line option (postmenopausal ≤60, high risk, no VTE/breast Ca). Transdermal preferred.',
         rationale:
           'NOGG 2024 Section 5.2 update: HRT elevated to first-line in women ≤60 alongside bisphosphonates. ' +
           'HRT also addresses menopausal symptoms. Review at 5 years.',
@@ -323,6 +298,24 @@ function initiateTherapy(
       reason: 'AFF history — teriparatide is the preferred specialist-initiated alternative to denosumab if antiresorptive is not tolerated.',
       urgency: 'soon',
     });
+    return recs;
+  }
+
+  // ADT (men on androgen deprivation therapy): denosumab is first-line by RCT evidence
+  // (HALT trial, Smith et al. NEJM 2009 — 62% vertebral fracture reduction). Alendronate is
+  // an acceptable alternative but second-line in this specific population.
+  if (patient.adtUse && !hasAFFHistory(patient) && !hasPreviousGIIntoleranceToBP(patient)) {
+    addVitDBlock(patient, flags);
+    recs.push({ ...denosumab(egfr), priority: 'first-line' });
+    if (canUse('alendronate', egfr)) {
+      recs.push({
+        ...alendronate(),
+        priority: 'alternative',
+        rationale:
+          'Second-line alternative on ADT. Consider if denosumab not feasible (cost, adherence, patient preference). ' +
+          'Note: denosumab has the strongest fracture-reduction RCT evidence in this population (HALT trial, Smith et al. NEJM 2009).',
+      });
+    }
     return recs;
   }
 
@@ -374,7 +367,7 @@ function initiateTherapy(
       id: 'renal_bp_ci',
       severity: 'warning',
       message:
-        `Oral bisphosphonates and zoledronate contraindicated: eGFR ${egfr} ml/min (<${RENAL_LIMITS.alendronate.ci}).`,
+        `eGFR ${egfr} — bisphosphonates contraindicated (<${RENAL_LIMITS.alendronate.ci}). Use denosumab.`,
       rationale:
         'Bisphosphonates accumulate in severe renal impairment. ' +
         'Alendronate/zoledronate contraindicated if eGFR <35; risedronate if eGFR <30.',
@@ -386,9 +379,7 @@ function initiateTherapy(
         id: 'denosumab_ckd_hypocalcaemia',
         severity: 'warning',
         message:
-          `eGFR ${egfr} ml/min: high hypocalcaemia risk with denosumab. ` +
-          'Ensure vitamin D ≥50 nmol/L and calcium fully replete before injection. ' +
-          'Mandatory: check corrected calcium 2 weeks after EVERY injection.',
+          `eGFR ${egfr} — mandatory adjusted Ca check 2 weeks after EVERY denosumab injection. Vit D ≥50 + Ca replete first.`,
         rationale:
           'CKD impairs 1α-hydroxylase activity (active vitamin D production). ' +
           'Denosumab increases calcium uptake into bone, worsening hypocalcaemia in CKD.',
@@ -410,7 +401,7 @@ function initiateTherapy(
   flags.push({
     id: 'egfr_unknown',
     severity: 'warning',
-    message: 'Renal function not recorded. Confirm eGFR before prescribing bisphosphonate.',
+    message: 'Check eGFR before prescribing bisphosphonate — not recorded.',
     rationale: 'eGFR <35 contraindicates alendronate and zoledronate; eGFR <30 contraindicates risedronate.',
     source: SRC_HSE,
   });
@@ -445,9 +436,7 @@ function sequencing(
       id: 'treatment_failure',
       severity: 'warning',
       message:
-        'Possible treatment failure: new fragility fracture after ≥12 months adequate antiresorptive therapy. ' +
-        'First: review adherence, oral BP technique, vitamin D repletion, calcium intake, and ongoing risk factors. ' +
-        'If confirmed failure: switch treatment class.',
+        'Possible treatment failure — fracture on adequate therapy. Review adherence/Vit D first; if confirmed, switch class.',
       rationale:
         'Treatment failure = new fracture or significant BMD loss (>4–5% spine or >3% hip) despite good adherence and replete vitamin D. ' +
         'NOGG 2024 Rec 20: reassess fracture risk after any new fracture.',
@@ -691,9 +680,7 @@ function affProdrome(
     id: 'aff_prodrome_urgent',
     severity: 'urgent',
     message:
-      'URGENT: Thigh/groin pain on bisphosphonate therapy — suspected atypical femoral fracture. ' +
-      'WITHHOLD bisphosphonate immediately. Arrange bilateral femoral X-rays ± MRI. ' +
-      'Do not dismiss — prodromal pain precedes complete AFF in ~70% of cases.',
+      'STOP bisphosphonate. Image both femora (X-ray ± MRI) — suspected atypical femoral fracture.',
     rationale:
       '~30% of AFFs are bilateral — both femora must be imaged (NOGG 2024 Section 7.2; ASBMR Task Force).',
     source: SRC_NOGG,
@@ -702,12 +689,7 @@ function affProdrome(
     id: 'aff_post_diagnosis_options',
     severity: 'urgent',
     message:
-      'If AFF confirmed: STOP bisphosphonate permanently. ' +
-      'For ongoing bone protection: denosumab OR teriparatide (specialist-initiated). ' +
-      'Do NOT switch to another bisphosphonate. ' +
-      'If switching FROM denosumab TO teriparatide: expect BMD decline at lumbar spine (3–6 months) and hip (12 months) — ' +
-      'not advisable where severe hip or spine osteoporosis is present; confirm with specialist. ' +
-      'Note: teriparatide has modest effect on hip BMD and has not been shown to reduce hip fractures in RCTs.',
+      'If AFF confirmed: bisphosphonates permanently contraindicated. Switch to denosumab or specialist-initiated teriparatide.',
     rationale:
       'NOGG 2024 / NICE NG187: after AFF, bisphosphonates should generally be avoided. ' +
       'Teriparatide promotes cortical healing of incomplete AFF. ' +
@@ -755,10 +737,7 @@ function postAnabolicFlags(flags: ClinicalFlag[]): void {
     id: 'post_anabolic_antiresorptive',
     severity: 'urgent',
     message:
-      'CRITICAL: Patient has completed/is completing anabolic therapy (teriparatide/romosozumab/abaloparatide). ' +
-      'The sequential antiresorptive (alendronate or zoledronate) should be PRESCRIBED AND READY 1 month before the final anabolic dose, ' +
-      'to ensure zero gap in treatment. Start WITHOUT DELAY on completion. ' +
-      'Failure to do so results in rapid and complete loss of BMD gains within 12 months.',
+      'After anabolic therapy: start alendronate or zoledronate immediately — gap = rapid loss of BMD gains.',
     rationale:
       'NOGG 2024 Rec 14 (Strong): antiresorptive therapy must follow anabolic treatment immediately. ' +
       'Prescribing 1 month in advance of the final dose ensures no gap if there are dispensing or appointment delays.',
@@ -785,9 +764,7 @@ function denosumabReboundFlags(
         id: 'denosumab_injection_due',
         severity: 'warning',
         message:
-          `Denosumab injection is now ${patient.denosumabMonthsSinceLastDose} months overdue — arrange next dose immediately. ` +
-          'Fracture risk begins to increase beyond 6 months from the last injection. ' +
-          'The 7-month mark represents significant clinical risk.',
+          `Denosumab ${patient.denosumabMonthsSinceLastDose} months overdue — arrange next dose now. Risk rises after 6.5 months.`,
         rationale:
           'NOGG 2024 Rec 18: rebound fracture risk begins once the 6-month injection window is missed. ' +
           'Clinical urgency increases rapidly beyond 6.5 months.',
@@ -804,9 +781,7 @@ function denosumabReboundFlags(
         id: 'denosumab_overdue_injection',
         severity: 'urgent',
         message:
-          `URGENT: Denosumab injection is overdue (${patient.denosumabMonthsSinceLastDose} months since last dose; critical threshold 7 months). ` +
-          'Rapid BMD loss and rebound vertebral fracture risk is HIGH. ' +
-          'Give next injection immediately and counsel patient on strict 6-monthly schedule.',
+          `Give denosumab NOW — ${patient.denosumabMonthsSinceLastDose} months overdue (>7 mo = high rebound vertebral fracture risk).`,
         rationale:
           'NOGG 2024 Rec 18–19: gaps >7 months since last denosumab dose are associated with rebound vertebral fractures ' +
           'due to rapid resurgence of osteoclast activity.',
@@ -819,13 +794,7 @@ function denosumabReboundFlags(
       id: 'denosumab_cessation_plan',
       severity: 'warning',
       message:
-        'Stopping denosumab is associated with rapid BMD loss and increased fragility fracture risk (NOGG 2024, Evidence IIa). ' +
-        'Routine cessation is NOT supported — stopping should only occur when clinically necessary. ' +
-        'If cessation is required: transition WITHOUT DELAY to: ' +
-        '(1) Oral alendronate 70mg weekly started 6 months after last denosumab injection, OR ' +
-        '(2) Single IV zoledronate 5mg given 6 months after last denosumab injection. ' +
-        'Confirm DEXA 1–2 years after transition. ' +
-        'Advise patient of this risk before initiating denosumab.',
+        'Do NOT stop denosumab without sequential alendronate or single zoledronate (6 months after last dose) — rebound vertebral fractures.',
       rationale:
         'NOGG 2024 Rec 18 (Strong): inform patients of rebound fracture risk before initiating denosumab. ' +
         'Stopping is associated with rapid loss of BMD and increased risk of multiple vertebral fractures (Evidence IIa). ' +
@@ -1170,21 +1139,8 @@ function affFlags(patient: PatientInput, flags: ClinicalFlag[]): void {
   }
 }
 
-function onjFlags(patient: PatientInput, flags: ClinicalFlag[]): void {
-  const newStart = !patient.currentTreatment && patient.previousTreatments.length === 0;
-  if (!newStart) return;
-  flags.push({
-    id: 'onj_dental_pre_start',
-    severity: 'info',
-    message:
-      'Before starting bisphosphonate or denosumab: complete any outstanding invasive dental treatment first if possible, ' +
-      'ensure good dental hygiene, and advise patient to inform dentist of antiresorptive use before any future invasive dental procedure.',
-    rationale:
-      'NOGG 2024 Section 7.3: ONJ risk is low at osteoporosis doses (oral BP <1:10,000 patient-years) ' +
-      'but can be minimised with pre-treatment dental review and ongoing oral hygiene.',
-    source: SRC_NOGG,
-  });
-}
+// onjFlags removed — ONJ pre-start dental review is covered by the merged
+// dental_check_pre_treatment flag emitted in generateTreatmentOutput.
 
 // ─── Supplements ──────────────────────────────────────────────────────────
 
@@ -1193,69 +1149,98 @@ function getSupplements(patient: PatientInput): SupplementRecommendation[] {
   const vitD = patient.bloodResults?.vitaminDNmol ?? null;
   const isGIOPPatient = isGIOP(patient);
 
-  // Vitamin D — tiered by measured level
-  const vitDDose =
-    vitD === null
-      ? 'Level unknown — measure 25-OHD BEFORE starting antiresorptive therapy. ' +
-        'Supplement with 800–1000 IU/day cholecalciferol (e.g. Desunin 800IU) pending result. ' +
-        'Do NOT start bisphosphonate or denosumab until level is confirmed and corrected if deficient. ' +
-        'Do NOT administer denosumab until Vit D ≥50 nmol/L.'
-      : vitD < BLOOD_RANGES.vitaminD.deficient  // <25 nmol/L — severe deficiency
-      ? `Severe deficiency (${vitD} nmol/L): loading protocol required. ` +
-        'Irish standard: 50,000 IU cholecalciferol weekly × 6 weeks (300,000 IU total, e.g. Dekristol 20,000 IU × 15 doses). ' +
-        `Recheck 25-OHD after loading — target ≥${BLOOD_RANGES.vitaminD.target} nmol/L before starting antiresorptive. ` +
-        'Do NOT start bisphosphonate or denosumab until loading is complete and level confirmed adequate. ' +
-        'Do NOT administer denosumab until Vit D ≥50 nmol/L.'
-      : vitD < BLOOD_RANGES.vitaminD.insufficient  // 25–49 nmol/L — insufficient
-      ? `Insufficient (${vitD} nmol/L): no formal loading required. ` +
-        'Start 800–1000 IU/day cholecalciferol (e.g. Desunin 800IU or InVita D3 drops) immediately. ' +
-        'Antiresorptive therapy (oral bisphosphonate) can start alongside supplementation. ' +
-        'Do NOT administer denosumab until Vit D ≥50 nmol/L. ' +
-        `Recheck at 3 months; target ≥${BLOOD_RANGES.vitaminD.target} nmol/L.`
-      : vitD < BLOOD_RANGES.vitaminD.target  // 50–74 nmol/L — adequate but below target
-      ? `Adequate but below target (${vitD} nmol/L — target ≥${BLOOD_RANGES.vitaminD.target} nmol/L). ` +
-        'Continue or start 800–1000 IU/day maintenance (e.g. Desunin 800IU or combined Ca/D3 product). ' +
-        'Antiresorptive therapy can proceed. Recheck in 6–12 months.'
-      : `Target met (${vitD} nmol/L ≥${BLOOD_RANGES.vitaminD.target} nmol/L). ` +
-        'Continue 800 IU/day maintenance, or optimise dietary sources (oily fish, fortified foods, sunlight exposure). ' +
-        'No loading required.';
+  // ── Vitamin D ─────────────────────────────────────────────────────────
+  let vitDHeadline: string;
+  let vitDBullets: string[];
+
+  if (vitD === null) {
+    vitDHeadline = 'Vitamin D level unknown — check before treatment';
+    vitDBullets = [
+      'Measure 25-OHD before starting antiresorptive therapy',
+      'Pending result: 800–1000 IU/day cholecalciferol (e.g. Desunin 800 IU)',
+      'Do NOT start bisphosphonate or denosumab until level confirmed adequate',
+      'Do NOT administer denosumab until Vit D ≥50 nmol/L',
+    ];
+  } else if (vitD < BLOOD_RANGES.vitaminD.deficient) {
+    vitDHeadline = `Severe deficiency (${vitD} nmol/L) — loading required`;
+    vitDBullets = [
+      'Loading: 50,000 IU cholecalciferol weekly × 6 weeks (300,000 IU total)',
+      'Irish products: Dekristol 20,000 IU × 15 doses or equivalent',
+      `Recheck 25-OHD after loading; target ≥${BLOOD_RANGES.vitaminD.target} nmol/L`,
+      'Do NOT start any antiresorptive until loading complete and level adequate',
+      'Do NOT administer denosumab until Vit D ≥50 nmol/L',
+    ];
+  } else if (vitD < BLOOD_RANGES.vitaminD.insufficient) {
+    vitDHeadline = `Insufficient (${vitD} nmol/L) — start 800–1000 IU/day`;
+    vitDBullets = [
+      'No formal loading required',
+      'Start 800–1000 IU/day cholecalciferol immediately (e.g. Desunin 800 IU, InVita D3 drops)',
+      'Oral bisphosphonate can start alongside supplementation',
+      'Do NOT administer denosumab until Vit D ≥50 nmol/L',
+      `Recheck at 3 months; target ≥${BLOOD_RANGES.vitaminD.target} nmol/L`,
+    ];
+  } else if (vitD < BLOOD_RANGES.vitaminD.target) {
+    vitDHeadline = `Adequate (${vitD} nmol/L) — maintenance only`;
+    vitDBullets = [
+      `Below target (≥${BLOOD_RANGES.vitaminD.target} nmol/L)`,
+      '800–1000 IU/day maintenance (e.g. Desunin 800 IU or combined Ca/D3)',
+      'Antiresorptive therapy can proceed',
+      'Recheck in 6–12 months',
+    ];
+  } else {
+    vitDHeadline = `Target met (${vitD} nmol/L) — maintenance only`;
+    vitDBullets = [
+      `≥${BLOOD_RANGES.vitaminD.target} nmol/L target reached`,
+      '800 IU/day maintenance',
+      'Optimise dietary sources: oily fish, fortified foods, sunlight exposure',
+      'No loading required',
+    ];
+  }
 
   sups.push({
     supplement: 'vitamin_d',
-    dose: vitDDose,
+    headline: vitDHeadline,
+    bullets: vitDBullets,
     rationale:
       vitD !== null
         ? `Serum 25-OHD ${vitD} nmol/L — target ≥${BLOOD_RANGES.vitaminD.target} nmol/L (NOGG 2024 Rec 26). ` +
-          'Practically all older adults in Ireland are vitamin D insufficient given low-sunlight latitude and limited dietary sources.'
-        : `Vitamin D level not yet measured. Target ≥${BLOOD_RANGES.vitaminD.target} nmol/L (NOGG 2024 Rec 26). ` +
-          'Check before starting antiresorptive therapy.',
+          'Most older adults in Ireland are insufficient due to latitude and limited dietary sources.'
+        : `Target ≥${BLOOD_RANGES.vitaminD.target} nmol/L (NOGG 2024 Rec 26). Check before any antiresorptive.`,
   });
 
-  // Calcium — clinical conversation framework (serum calcium is not a useful marker of dietary intake)
-  sups.push({
-    supplement: 'calcium',
-    dose: isGIOPPatient
-      ? 'GIOP: 1000–1500 mg/day total calcium from all sources (diet + supplement) — higher requirement due to glucocorticoid-induced GI malabsorption and renal losses. ' +
-        'Supplement with Calcichew D3 Forte or Adcal-D3 if dietary intake is insufficient. ' +
-        'Dietary calcium always preferred.'
-      : 'IMPORTANT: serum calcium is NOT a useful marker of dietary calcium adequacy — it is tightly regulated ' +
-        'and stays within normal range even with a calcium-deficient diet. Assess dietary intake directly.\n\n' +
-        'Ask the patient about: dairy consumption (milk, cheese, yoghurt — each portion provides ~300 mg), ' +
-        'green vegetables (broccoli, kale, bok choy — ~100–160 mg/portion), and calcium-fortified foods (fortified cereals, plant milks).\n\n' +
-        'Practical guidance:\n' +
-        '• If patient eats 2–3 dairy portions daily + green vegetables regularly → dietary intake may be adequate; ' +
-        'consider a small supplement of 250–500 mg/day to meet the 1200 mg/day total target.\n' +
-        '• If dairy intake is low or absent → supplement 500–600 mg/day on top of whatever dietary sources are consumed.\n' +
-        '• Target: 1200 mg/day total from all sources combined (IOS 2024).\n' +
-        '• Avoid excess supplementation: >500–600 mg/day on top of an adequate diet is associated with cardiovascular risk ' +
-        '(Bolland et al. BMJ 2010/2011). Dietary calcium does not carry this risk and is always preferred over supplements.',
-    rationale: isGIOPPatient
-      ? 'Glucocorticoids reduce GI calcium absorption and increase renal calcium excretion — higher intake is needed (NOGG 2024 Rec 22; IOS 2024).'
-      : 'IOS 2024: 1200 mg/day is the target total intake for adults ≥50 with bone loss or osteoporosis. ' +
-        'Serum calcium reflects parathyroid regulation, not dietary adequacy. ' +
-        'Supplement only if dietary intake consistently falls below target. ' +
-        'Excess supplementation carries cardiovascular risk evidence not seen with dietary calcium (NOGG 2024 Rec 26).',
-  });
+  // ── Calcium ──────────────────────────────────────────────────────────
+  if (isGIOPPatient) {
+    sups.push({
+      supplement: 'calcium',
+      headline: 'GIOP: 1000–1500 mg/day total intake',
+      bullets: [
+        'Higher requirement on glucocorticoids (reduced GI absorption, increased renal loss)',
+        'Dietary sources first; supplement the deficit',
+        'Combined Ca + D3 product if needed (Calcichew D3 Forte, Adcal-D3)',
+        'Avoid >500–600 mg/day supplement on top of an adequate diet',
+      ],
+      rationale:
+        'Glucocorticoids reduce GI calcium absorption and increase renal calcium excretion — ' +
+        'higher intake is needed (NOGG 2024 Rec 22; IOS 2024).',
+    });
+  } else {
+    sups.push({
+      supplement: 'calcium',
+      headline: 'Target 1200 mg/day total intake',
+      bullets: [
+        'Dietary sources preferred — dairy ~300 mg/portion, green veg 100–160 mg/portion, fortified foods',
+        'Supplement only the deficit between dietary intake and 1200 mg/day target',
+        'Typical supplement dose: 250–600 mg/day depending on diet',
+        'Maximum: avoid >500–600 mg/day supplement on top of an adequate diet',
+        'CV-risk caveat: excess supplement (not dietary calcium) linked to cardiovascular events (Bolland BMJ 2010/11)',
+        'Note: serum calcium does NOT reflect dietary adequacy — assess intake directly',
+      ],
+      rationale:
+        'IOS 2024: 1200 mg/day total intake target for adults ≥50 with bone loss or osteoporosis. ' +
+        'Supplement only if dietary intake is below target. Excess supplementation carries cardiovascular risk ' +
+        'evidence not seen with dietary calcium (NOGG 2024 Rec 26).',
+    });
+  }
 
   return sups;
 }
@@ -1503,9 +1488,7 @@ function addVitDBlock(patient: PatientInput, flags: ClinicalFlag[]): void {
       id: 'denosumab_vitd_block',
       severity: 'urgent',
       message:
-        `HOLD denosumab: vitamin D is ${vitD} nmol/L (<50 nmol/L). ` +
-        'Correct deficiency FIRST — do not administer until Vit D ≥50 nmol/L. ' +
-        'Load with 50,000 IU cholecalciferol weekly × 6 weeks if severely deficient (<25 nmol/L), then recheck.',
+        `HOLD denosumab — Vit D ${vitD} nmol/L (<50). Correct first; do not administer until ≥50 nmol/L.`,
       rationale:
         'Denosumab reduces bone resorption acutely; if vitamin D and calcium are not replete, ' +
         'severe hypocalcaemia can occur. Mandatory to correct Vit D to ≥50 nmol/L before each dose.',

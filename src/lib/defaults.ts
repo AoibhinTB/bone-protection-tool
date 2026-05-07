@@ -46,4 +46,5 @@ export const defaultPatient: PatientInput = {
   denosumabMonthsSinceLastDose: null,
   completedAnabolicCourse: false,
   thighOrGroinPain: false,
+  onThyroidReplacement: false,
 };

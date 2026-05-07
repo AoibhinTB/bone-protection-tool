@@ -2,6 +2,7 @@
 
 import type { PatientInput } from '@/lib/guidelines/types';
 import { Field, NumInput, YesNo, SectionHeading } from '../FormPrimitives';
+import { Term } from '@/components/Tooltip';
 
 interface Props {
   data: PatientInput;
@@ -51,7 +52,9 @@ export function Step5Physical({ data, onChange }: Props) {
         />
       </Field>
 
-      <SectionHeading>Renal function</SectionHeading>
+      <SectionHeading>
+        Renal function (<Term term="eGFR">eGFR</Term>)
+      </SectionHeading>
       <Field label="eGFR known">
         <YesNo
           value={hasRenalFunction}

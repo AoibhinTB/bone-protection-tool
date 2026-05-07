@@ -53,19 +53,19 @@ export default function Home() {
 
   if (result) {
     return (
-      <div className="min-h-screen bg-slate-50 flex flex-col">
-        <header className="bg-white border-b border-slate-200 px-6 py-4">
+      <div className="min-h-[100dvh] bg-slate-50 flex flex-col">
+        <header className="bg-white border-b border-slate-200 px-4 sm:px-6 py-3 sm:py-4 safe-pt">
           <div className="max-w-3xl mx-auto">
-            <div className="flex items-baseline gap-3">
-              <h1 className="text-lg font-semibold text-slate-900">Bone Protection Tool</h1>
-              <span className="text-sm text-slate-500">Clinical Decision Support · Ireland</span>
+            <div className="flex items-baseline gap-2 sm:gap-3 flex-wrap">
+              <h1 className="text-base sm:text-lg font-semibold text-slate-900">Bone Protection Tool</h1>
+              <span className="hidden sm:inline text-sm text-slate-500">Clinical Decision Support · Ireland</span>
             </div>
-            <p className="text-xs text-slate-400 mt-0.5">
-              For use by registered healthcare professionals. Does not replace clinical judgement.
+            <p className="text-[11px] sm:text-xs text-slate-400 mt-0.5">
+              Healthcare professional use only. Does not replace clinical judgement.
             </p>
           </div>
         </header>
-        <main className="flex-1 px-6 py-8">
+        <main className="flex-1 px-4 sm:px-6 py-5 sm:py-8 safe-pb">
           <div className="max-w-3xl mx-auto">
             <ResultsView
               result={result}

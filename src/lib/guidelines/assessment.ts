@@ -126,54 +126,71 @@ export function assessInvestigationsNeeded(
     patient.bloodResults?.adjustedCalciumMmol !== undefined &&
     (patient.bloodResults.adjustedCalciumMmol > 2.6 || patient.bloodResults.adjustedCalciumMmol < 2.1);
 
-  if (secondaryWorkupIndicated(patient)) {
-    if (patient.sex === 'male') {
-      needed.push({
-        investigation: 'testosterone',
-        tier: 3,
-        reason:
-          'Morning serum testosterone: hypogonadism is the most common secondary cause of osteoporosis in men.',
-        urgency: 'routine',
-      });
-    }
+  // Tier 3 investigations — each fires only on its own specific clinical criteria,
+  // not as a blanket suggestion for every secondary-workup-eligible patient.
 
-    if (patient.sex === 'female' && patient.earlyMenopause) {
-      needed.push({
-        investigation: 'lh_fsh',
-        tier: 3,
-        reason:
-          'LH and FSH: confirm premature ovarian insufficiency (POI). ' +
-          'HRT is first-line bone protection in this group.',
-        urgency: 'routine',
-      });
-    }
+  // Testosterone — only when hypogonadism is suspected or already listed.
+  if (
+    patient.sex === 'male' &&
+    (patient.secondaryOsteoporosis.includes('hypogonadism') ||
+      // Severe unexplained osteoporosis in a man — testosterone is the main reversible cause to exclude
+      (patient.dexaResults !== null &&
+        lowestTScore(patient.dexaResults) <= -3.0 &&
+        patient.secondaryOsteoporosis.length === 0 &&
+        !patient.glucocorticoidUse?.current))
+  ) {
+    needed.push({
+      investigation: 'testosterone',
+      tier: 3,
+      reason:
+        patient.secondaryOsteoporosis.includes('hypogonadism')
+          ? 'Hypogonadism flagged — confirm with morning serum testosterone. Replacement reduces fracture risk.'
+          : 'Severe osteoporosis in a man with no identified cause — exclude hypogonadism with morning serum testosterone.',
+      urgency: 'routine',
+    });
+  }
 
-    if (alpAbnormal || calciumAbnormal || patient.secondaryOsteoporosis.includes('hyperparathyroidism')) {
-      needed.push({
-        investigation: 'pth',
-        tier: 3,
-        reason:
-          'PTH: abnormal calcium or ALP — exclude primary hyperparathyroidism. ' +
-          'Elevated PTH with normal or high calcium → refer endocrinology. ' +
-          'Note: forearm-only osteoporosis (33% radius ≤-2.5) should prompt PTH + calcium workup.',
-        urgency: 'routine',
-      });
-    }
+  // LH/FSH — only in women with early menopause flagged
+  if (patient.sex === 'female' && patient.earlyMenopause) {
+    needed.push({
+      investigation: 'lh_fsh',
+      tier: 3,
+      reason:
+        'Confirm premature ovarian insufficiency (POI) with LH and FSH. HRT is first-line bone protection.',
+      urgency: 'routine',
+    });
+  }
 
-    // TSH: recommend if not yet checked, OR if checked and abnormal
-    const tshNotChecked = patient.bloodResults === null;
-    const tshAbnormal = patient.bloodResults !== null && patient.bloodResults.tshNormal === false;
-    if (tshNotChecked || tshAbnormal) {
-      needed.push({
-        investigation: 'thyroid',
-        tier: 3,
-        reason:
-          tshAbnormal
-            ? 'TSH abnormal — untreated hyperthyroidism and T4 over-replacement accelerate bone loss. Review and optimise thyroid status before or alongside bone protection treatment.'
-            : 'TSH not yet checked. Untreated hyperthyroidism and T4 over-replacement are secondary causes of bone loss — check as part of secondary cause workup.',
-        urgency: 'routine',
-      });
-    }
+  // PTH — only on abnormal calcium / ALP / explicit hyperparathyroidism flag (forearm-only handled below)
+  if (alpAbnormal || calciumAbnormal || patient.secondaryOsteoporosis.includes('hyperparathyroidism')) {
+    needed.push({
+      investigation: 'pth',
+      tier: 3,
+      reason:
+        'Abnormal calcium or ALP — measure PTH to exclude primary hyperparathyroidism. ' +
+        'Elevated PTH with normal/high calcium → refer endocrinology.',
+      urgency: 'routine',
+    });
+  }
+
+  // Thyroid (TFTs) — only when (a) TSH already entered abnormal,
+  // (b) clinician has flagged thyroid disease via secondary causes, or
+  // (c) patient is on levothyroxine (over/under-replacement is a known driver of bone loss).
+  const tsh = patient.bloodResults?.tshMUL ?? null;
+  const tshAbnormal = tsh !== null && (tsh < 0.4 || tsh > 4.0);
+  const thyroidDiseaseFlagged =
+    patient.secondaryOsteoporosis.includes('untreated_hyperthyroidism');
+  if (tshAbnormal || thyroidDiseaseFlagged || patient.onThyroidReplacement) {
+    needed.push({
+      investigation: 'thyroid',
+      tier: 3,
+      reason: tshAbnormal
+        ? 'TSH outside reference range — optimise thyroid status before or alongside bone treatment.'
+        : patient.onThyroidReplacement
+        ? 'On levothyroxine — confirm TSH in range; over-replacement causes bone loss.'
+        : 'Thyroid disease flagged — confirm TSH and treat hyperthyroidism before bone therapy.',
+      urgency: 'routine',
+    });
   }
 
   // SPEP/UPEP — Tier 3: if FBC abnormal, anaemia suspected, or vertebral fracture without clear cause
@@ -332,16 +349,6 @@ function vfaIndicationReason(patient: PatientInput): string | null {
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────
-
-function secondaryWorkupIndicated(patient: PatientInput): boolean {
-  return (
-    patient.sex === 'male' ||
-    patient.earlyMenopause ||
-    patient.secondaryOsteoporosis.length > 0 ||
-    patient.priorFragilityFracture ||
-    (patient.dexaResults !== null && lowestTScore(patient.dexaResults) <= -2.0)
-  );
-}
 
 function lowestTScore(dexa: NonNullable<PatientInput['dexaResults']>): number {
   const scores = [dexa.lumbarSpineTScore, dexa.totalHipTScore, dexa.femoralNeckTScore]

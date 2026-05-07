@@ -55,8 +55,8 @@ export interface BloodResults {
   adjustedCalciumMmol: number | null; // mmol/L
   vitaminDNmol: number | null;        // nmol/L (25-OHD)
   egfr: number | null;                // ml/min/1.73 m²
-  alp: number | null;                 // U/L — bone turnover, Paget's, osteomalacia screen
-  tshNormal: boolean | null;          // flag — abnormal TSH triggers referral/treatment review
+  alp: number | null;                 // U/L — bone turnover, Paget's, osteomalacia screen (normal 30–130)
+  tshMUL: number | null;              // mU/L — TSH (normal 0.4–4.0)
   fbc: boolean | null;                // true = done and normal; false = done and abnormal
 }
 
@@ -170,6 +170,9 @@ export interface PatientInput {
 
   // AFF prodrome
   thighOrGroinPain: boolean;
+
+  // Thyroid context (gates the thyroid Tier 3 investigation recommendation)
+  onThyroidReplacement: boolean; // currently on levothyroxine
 }
 
 // ─── Output types ──────────────────────────────────────────────────────────
@@ -227,6 +230,8 @@ export interface TreatmentRecommendation {
   irishPrescribingNote?: string;
   source: GuidelineSource;
   patientEducation?: PatientEducation;
+  /** First-line vs alternative (e.g. ADT: denosumab first, alendronate alternative). Defaults to first-line. */
+  priority?: 'first-line' | 'alternative';
 }
 
 export interface ReferralRecommendation {
@@ -237,7 +242,8 @@ export interface ReferralRecommendation {
 
 export interface SupplementRecommendation {
   supplement: 'calcium' | 'vitamin_d';
-  dose: string;
+  headline: string;     // one-line summary (e.g. "Insufficient — 800–1000 IU/day")
+  bullets: string[];    // scannable detail points
   rationale: string;
 }
 
