@@ -88,7 +88,11 @@ export function runClinicalDecision(patient: PatientInput): ClinicalDecision {
       `HSE MMP Ireland ${GUIDELINE_VERSIONS.hse_mmp.year}`,
       `NICE NG187 (${GUIDELINE_VERSIONS.nice.year})`,
       `Irish Osteoporosis Society ${GUIDELINE_VERSIONS.ios.year}`,
+      `ISCD Official Positions ${GUIDELINE_VERSIONS.iscd.year}`,
       'FRAX — country code 49 (Ireland), frax.shef.ac.uk',
+      `HSE Managed Access Protocol — Romosozumab (Evenity) ${GUIDELINE_VERSIONS.hse_map_romo.year}`,
+      GUIDELINE_VERSIONS.mccarroll_2023.guideline,
+      GUIDELINE_VERSIONS.mccarroll_2025.guideline,
     ],
   };
 }

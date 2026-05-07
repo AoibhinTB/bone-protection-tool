@@ -6,12 +6,16 @@ import type { GuidelineSource, FraxAdjustment, PatientInput } from './types';
 // ─── Guideline versions ────────────────────────────────────────────────────
 
 export const GUIDELINE_VERSIONS = {
-  nogg:    { guideline: 'NOGG',                      version: '2024', year: 2024 } as GuidelineSource,
-  hse_mmp: { guideline: 'HSE MMP Ireland',            version: '2023', year: 2023 } as GuidelineSource,
-  nice:    { guideline: 'NICE NG187',                 version: '2023', year: 2023 } as GuidelineSource,
-  ios:     { guideline: 'Irish Osteoporosis Society', version: '2024', year: 2024 } as GuidelineSource,
-  bsr:     { guideline: 'BSR/BHPR GIOP Guidelines',  version: '2022', year: 2022 } as GuidelineSource,
-  acr:     { guideline: 'ACR GIOP Guidelines',        version: '2022', year: 2022 } as GuidelineSource,
+  nogg:           { guideline: 'NOGG',                                                                    version: '2024', year: 2024 } as GuidelineSource,
+  hse_mmp:        { guideline: 'HSE MMP Ireland',                                                         version: '2023', year: 2023 } as GuidelineSource,
+  nice:           { guideline: 'NICE NG187',                                                              version: '2023', year: 2023 } as GuidelineSource,
+  ios:            { guideline: 'Irish Osteoporosis Society',                                               version: '2024', year: 2024 } as GuidelineSource,
+  bsr:            { guideline: 'BSR/BHPR GIOP Guidelines',                                                version: '2022', year: 2022 } as GuidelineSource,
+  acr:            { guideline: 'ACR GIOP Guidelines',                                                     version: '2022', year: 2022 } as GuidelineSource,
+  iscd:           { guideline: 'ISCD Official Positions',                                                  version: '2023', year: 2023 } as GuidelineSource,
+  mccarroll_2023: { guideline: 'McCarroll K. Osteoporosis: Diagnosis and Management (CPD). Medical Independent', version: '2023', year: 2023 } as GuidelineSource,
+  mccarroll_2025: { guideline: 'McCarroll K. Osteoporosis: Review and Update. Medical Independent',       version: '2025', year: 2025 } as GuidelineSource,
+  hse_map_romo:   { guideline: 'HSE Managed Access Protocol — Romosozumab (Evenity)',                     version: '2024', year: 2024, section: 'assets.hse.ie/media/documents/HSE_Managed_Access_Protocol_Romosozumab.pdf' } as GuidelineSource,
 };
 
 // ─── NOGG 2024 intervention thresholds ────────────────────────────────────

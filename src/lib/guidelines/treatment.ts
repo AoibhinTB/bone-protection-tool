@@ -21,11 +21,13 @@ import {
   GUIDELINE_VERSIONS,
 } from './thresholds';
 
-const SRC_HSE    = GUIDELINE_VERSIONS.hse_mmp;
-const SRC_NOGG   = GUIDELINE_VERSIONS.nogg;
-const SRC_NICE   = GUIDELINE_VERSIONS.nice;
-const SRC_BSR    = GUIDELINE_VERSIONS.bsr;
-const SRC_IOS    = GUIDELINE_VERSIONS.ios;
+const SRC_HSE      = GUIDELINE_VERSIONS.hse_mmp;
+const SRC_NOGG     = GUIDELINE_VERSIONS.nogg;
+const SRC_NICE     = GUIDELINE_VERSIONS.nice;
+const SRC_BSR      = GUIDELINE_VERSIONS.bsr;
+const SRC_IOS      = GUIDELINE_VERSIONS.ios;
+const SRC_ISCD     = GUIDELINE_VERSIONS.iscd;
+const SRC_ROMO_MAP = GUIDELINE_VERSIONS.hse_map_romo;
 const SRC_CTIBL: GuidelineSource = { guideline: 'ASCO/ASBMR CTIBL Guidelines', version: '2023', year: 2023 };
 const SRC_BMS:   GuidelineSource = { guideline: 'BMS / NOGG', version: '2024', year: 2024 };
 
@@ -121,8 +123,9 @@ export function generateTreatmentOutput(
       rationale:
         'Forearm-only osteoporosis has a specific differential diagnosis including primary hyperparathyroidism, ' +
         'which is characterised by preferential cortical bone loss (forearm/radius). ' +
-        'Treating without ruling this out may miss a treatable systemic cause.',
-      source: SRC_NOGG,
+        'Treating without ruling this out may miss a treatable systemic cause. ' +
+        'ISCD 2023: 33% radius (1/3 distal radius) is the standard forearm site for DXA reporting.',
+      source: SRC_ISCD,
     });
   }
 
@@ -207,8 +210,9 @@ export function generateTreatmentOutput(
         'NOGG 2024 Rec 11 (Conditional): consider referral to osteoporosis specialist for very high risk patients. ' +
         'Anabolic-first approach warranted particularly when multiple vertebral fractures are present. ' +
         'HSE MAP (effective 1 Nov 2024): romosozumab reimbursed for postmenopausal women meeting the criteria above — ' +
-        'individual patient application required through approved consultant; non-hub prescriptions not reimbursed.',
-      source: SRC_NOGG,
+        'individual patient application required through approved consultant; non-hub prescriptions not reimbursed. ' +
+        'Source: HSE Managed Access Protocol — Romosozumab (Evenity), available at assets.hse.ie/media/documents/HSE_Managed_Access_Protocol_Romosozumab.pdf',
+      source: SRC_ROMO_MAP,
     });
     referrals.push({
       specialty: 'metabolic_bone',
@@ -224,8 +228,27 @@ export function generateTreatmentOutput(
     return { ...affProdrome(patient, flags, referrals), supplements };
   }
 
-  if (patient.currentTreatment?.reasonStopped === 'onj') {
+  // ONJ history — covers both current AND previous treatments
+  if (hasONJHistory(patient)) {
     return { ...onjHistory(flags, referrals), supplements };
+  }
+
+  // AFF history — permanent bisphosphonate CI; push flag here so it appears in all subsequent paths
+  if (hasAFFHistory(patient)) {
+    flags.push({
+      id: 'aff_history_bp_permanent_ci',
+      severity: 'urgent',
+      message:
+        'PERMANENT BISPHOSPHONATE CONTRAINDICATION: this patient has a history of confirmed atypical femoral fracture (AFF). ' +
+        'Do NOT prescribe any bisphosphonate — oral (alendronate, risedronate, ibandronate) or IV (zoledronate). ' +
+        'Bone protection options: denosumab (preferred antiresorptive) or teriparatide (specialist-initiated, anabolic). ' +
+        'Refer to metabolic bone / endocrinology specialist.',
+      rationale:
+        'AFF is a class effect of bisphosphonates due to suppression of bone remodelling at cortical stress sites. ' +
+        'Rechallenge with any bisphosphonate carries recurrence risk and is contraindicated. ' +
+        'NOGG 2024 Section 7.2 / ASBMR Task Force: after confirmed AFF, bisphosphonates should generally be avoided permanently.',
+      source: SRC_NOGG,
+    });
   }
 
   // ── Existing treatment — sequencing logic ──
@@ -287,6 +310,42 @@ function initiateTherapy(
         source: SRC_NOGG,
       });
     }
+  }
+
+  // ── Previous treatment contraindication checks ──
+
+  // AFF history: permanent ban on ALL bisphosphonates — go directly to denosumab
+  if (hasAFFHistory(patient)) {
+    addVitDBlock(patient, flags);
+    recs.push(denosumab(egfr));
+    referrals.push({
+      specialty: 'metabolic_bone',
+      reason: 'AFF history — teriparatide is the preferred specialist-initiated alternative to denosumab if antiresorptive is not tolerated.',
+      urgency: 'soon',
+    });
+    return recs;
+  }
+
+  // Previous GI intolerance to oral bisphosphonate: skip oral BPs, offer IV or denosumab
+  if (hasPreviousGIIntoleranceToBP(patient)) {
+    flags.push({
+      id: 'prev_gi_intolerance_bp',
+      severity: 'info',
+      message:
+        'Previous oral bisphosphonate stopped due to GI intolerance — oral bisphosphonates are contraindicated for this patient. ' +
+        'IV zoledronate (bypasses GI tract entirely) is the preferred option. Denosumab is an alternative if IV is not feasible.',
+      rationale:
+        'GI intolerance to oral bisphosphonate is a contraindication to that route, not to the drug class overall. ' +
+        'IV zoledronate has no GI exposure and is appropriate after oral bisphosphonate GI intolerance (NOGG 2024 Rec 13; HSE MMP).',
+      source: SRC_HSE,
+    });
+    if (canUse('zoledronate', egfr)) {
+      recs.push(zoledronate());
+    } else {
+      addVitDBlock(patient, flags);
+      recs.push(denosumab(egfr));
+    }
+    return recs;
   }
 
   // Alendronate first-line per HSE MMP Ireland
@@ -381,16 +440,19 @@ function sequencing(
       source: SRC_NOGG,
     });
     // Offer IV/denosumab before escalating to specialist (per spec Section 7.4)
+    // AFF history: cannot offer zoledronate — go directly to denosumab
     if (isBisphosphonate(current.agent) && current.agent !== 'zoledronate') {
       flags.push({
         id: 'treatment_failure_switch',
         severity: 'info',
         message:
-          'Oral bisphosphonate failure: switch to IV zoledronate or denosumab before considering anabolic escalation.',
+          hasAFFHistory(patient)
+            ? 'Oral bisphosphonate failure with AFF history: IV zoledronate is contraindicated (AFF — permanent BP ban). Switch to denosumab.'
+            : 'Oral bisphosphonate failure: switch to IV zoledronate or denosumab before considering anabolic escalation.',
         rationale: 'Spec Section 7.4: oral BP failure → IV zoledronate OR denosumab OR specialist for anabolic.',
         source: SRC_NOGG,
       });
-      if (canUse('zoledronate', egfr)) {
+      if (canUse('zoledronate', egfr) && !hasAFFHistory(patient)) {
         recs.push(zoledronate());
       } else {
         addVitDBlock(patient, flags);
@@ -543,33 +605,41 @@ function giSwitch(
 ): Omit<TreatmentOutput, 'supplements' | 'referrals'> {
   const recs: TreatmentRecommendation[] = [];
 
+  const affCI = hasAFFHistory(patient);
+
   if (stoppedAgent === 'alendronate') {
     flags.push({
       id: 'gi_alendronate_switch',
       severity: 'info',
-      message:
-        'GI intolerance to alendronate. Switch options (in order): ' +
-        '(1) Risedronate 35mg weekly — better upper GI tolerability; ' +
-        '(2) Ibandronate 150mg monthly — fewer dosing events; ' +
-        '(3) Zoledronate 5mg IV annually — bypasses GI entirely.',
+      message: affCI
+        ? 'GI intolerance to alendronate with AFF history: all bisphosphonates are permanently contraindicated. Switch to denosumab.'
+        : 'GI intolerance to alendronate. Switch options (in order): ' +
+          '(1) Risedronate 35mg weekly — better upper GI tolerability; ' +
+          '(2) Ibandronate 150mg monthly — fewer dosing events; ' +
+          '(3) Zoledronate 5mg IV annually — bypasses GI entirely.',
       rationale: 'HSE MMP / NOGG 2024 Rec 13: switch oral bisphosphonate or move to IV if GI not tolerated.',
       source: SRC_HSE,
     });
-    if (canUse('risedronate', egfr)) recs.push(risedronate());
-    if (canUse('ibandronate', egfr)) recs.push(ibandronate());
-    if (canUse('zoledronate', egfr)) recs.push(zoledronate());
+    if (!affCI && canUse('risedronate', egfr)) recs.push(risedronate());
+    if (!affCI && canUse('ibandronate', egfr)) recs.push(ibandronate());
+    if (!affCI && canUse('zoledronate', egfr)) recs.push(zoledronate());
+    if (affCI || (!canUse('risedronate', egfr) && !canUse('ibandronate', egfr) && !canUse('zoledronate', egfr))) {
+      addVitDBlock(patient, flags);
+      recs.push(denosumab(egfr));
+    }
   } else if (stoppedAgent === 'risedronate') {
     flags.push({
       id: 'gi_risedronate_switch',
       severity: 'info',
-      message:
-        'GI intolerance to risedronate after alendronate failure. ' +
-        'Switch to: Ibandronate 150mg monthly OR Zoledronate 5mg IV annually (bypasses GI).',
+      message: affCI
+        ? 'GI intolerance to risedronate with AFF history: all bisphosphonates are permanently contraindicated. Switch to denosumab.'
+        : 'GI intolerance to risedronate after alendronate failure. ' +
+          'Switch to: Ibandronate 150mg monthly OR Zoledronate 5mg IV annually (bypasses GI).',
       rationale: 'After failure of two oral bisphosphonates due to GI effects, IV or monthly oral is appropriate.',
       source: SRC_HSE,
     });
-    if (canUse('ibandronate', egfr)) recs.push(ibandronate());
-    if (canUse('zoledronate', egfr)) {
+    if (!affCI && canUse('ibandronate', egfr)) recs.push(ibandronate());
+    if (!affCI && canUse('zoledronate', egfr)) {
       recs.push(zoledronate());
     } else {
       addVitDBlock(patient, flags);
@@ -577,7 +647,7 @@ function giSwitch(
     }
   } else {
     // Any other agent — IV or denosumab
-    if (canUse('zoledronate', egfr)) {
+    if (!affCI && canUse('zoledronate', egfr)) {
       recs.push(zoledronate());
     } else {
       addVitDBlock(patient, flags);
@@ -984,8 +1054,8 @@ function giop(
     });
   }
 
-  // Standard GIOP: alendronate or zoledronate
-  if (canUse('alendronate', egfr)) {
+  // Standard GIOP: alendronate or zoledronate (skip if AFF history — permanent BP ban)
+  if (!hasAFFHistory(patient) && canUse('alendronate', egfr)) {
     recs.push({
       ...alendronate(),
       rationale:
@@ -993,7 +1063,7 @@ function giop(
         'Initiate at same time as glucocorticoid if planned duration ≥3 months. ' +
         'Calcium 1000–1500 mg/day and vitamin D ≥800 IU/day required alongside.',
     });
-  } else if (canUse('zoledronate', egfr)) {
+  } else if (!hasAFFHistory(patient) && canUse('zoledronate', egfr)) {
     recs.push({ ...zoledronate(), rationale: 'IV zoledronate for GIOP when oral bisphosphonate is contraindicated or not tolerated.' });
   } else {
     addVitDBlock(patient, flags);
@@ -1001,7 +1071,9 @@ function giop(
     flags.push({
       id: 'giop_denosumab_conditional',
       severity: 'info',
-      message: 'Denosumab is an alternative treatment option for GIOP (NOGG 2024 Rec 24 — Conditional).',
+      message: hasAFFHistory(patient)
+        ? 'Denosumab used for GIOP: bisphosphonates permanently contraindicated (AFF history). Denosumab is an appropriate alternative (NOGG 2024 Rec 24).'
+        : 'Denosumab is an alternative treatment option for GIOP (NOGG 2024 Rec 24 — Conditional).',
       rationale: 'Consider denosumab when bisphosphonates are contraindicated or not tolerated in GIOP.',
       source: SRC_NOGG,
     });
@@ -1099,25 +1171,32 @@ function getSupplements(patient: PatientInput): SupplementRecommendation[] {
   const vitD = patient.bloodResults?.vitaminDNmol ?? null;
   const isGIOPPatient = isGIOP(patient);
 
-  // Vitamin D
-  const severeVitDDeficiency = vitD !== null && vitD < 25;
+  // Vitamin D — tiered by measured level
   const vitDDose =
     vitD === null
-      ? '50,000 IU cholecalciferol weekly × 8 weeks loading (e.g. Dekristol 20,000 IU × 4 weekly doses, or equivalent), ' +
-        'then 800–1000 IU/day maintenance. Do NOT start antiresorptive until replete. ' +
+      ? 'Level unknown — measure 25-OHD BEFORE starting antiresorptive therapy. ' +
+        'Supplement with 800–1000 IU/day cholecalciferol (e.g. Desunin 800IU) pending result. ' +
+        'Do NOT start bisphosphonate or denosumab until level is confirmed and corrected if deficient. ' +
         'Do NOT administer denosumab until Vit D ≥50 nmol/L.'
-      : severeVitDDeficiency
-      ? `Severe deficiency (${vitD} nmol/L): Irish standard loading protocol — ` +
-        '50,000 IU cholecalciferol weekly × 6 weeks (300,000 IU total load, e.g. Dekristol). ' +
-        'Recheck 25-OHD 6–8 weeks after loading. ' +
-        `Then maintenance 800–1000 IU/day. Target ≥${BLOOD_RANGES.vitaminD.target} nmol/L. ` +
-        'Do NOT start antiresorptive until replete. Do NOT administer denosumab until Vit D ≥50 nmol/L.'
-      : vitD < BLOOD_RANGES.vitaminD.deficient
-      ? `Deficient (${vitD} nmol/L): 50,000 IU weekly × 8–12 weeks loading, then 800–1000 IU/day maintenance. ` +
-        `Target ≥${BLOOD_RANGES.vitaminD.target} nmol/L. Do NOT administer denosumab until Vit D ≥50 nmol/L.`
-      : vitD < BLOOD_RANGES.vitaminD.target
-      ? '800–1000 IU/day (cholecalciferol — Desunin 800IU or InVita D3 drops)'
-      : '800 IU/day (maintenance — Desunin 800IU or combined Ca/D3 product)';
+      : vitD < BLOOD_RANGES.vitaminD.deficient  // <25 nmol/L — severe deficiency
+      ? `Severe deficiency (${vitD} nmol/L): loading protocol required. ` +
+        'Irish standard: 50,000 IU cholecalciferol weekly × 6 weeks (300,000 IU total, e.g. Dekristol 20,000 IU × 15 doses). ' +
+        `Recheck 25-OHD after loading — target ≥${BLOOD_RANGES.vitaminD.target} nmol/L before starting antiresorptive. ` +
+        'Do NOT start bisphosphonate or denosumab until loading is complete and level confirmed adequate. ' +
+        'Do NOT administer denosumab until Vit D ≥50 nmol/L.'
+      : vitD < BLOOD_RANGES.vitaminD.insufficient  // 25–49 nmol/L — insufficient
+      ? `Insufficient (${vitD} nmol/L): no formal loading required. ` +
+        'Start 800–1000 IU/day cholecalciferol (e.g. Desunin 800IU or InVita D3 drops) immediately. ' +
+        'Antiresorptive therapy (oral bisphosphonate) can start alongside supplementation. ' +
+        'Do NOT administer denosumab until Vit D ≥50 nmol/L. ' +
+        `Recheck at 3 months; target ≥${BLOOD_RANGES.vitaminD.target} nmol/L.`
+      : vitD < BLOOD_RANGES.vitaminD.target  // 50–74 nmol/L — adequate but below target
+      ? `Adequate but below target (${vitD} nmol/L — target ≥${BLOOD_RANGES.vitaminD.target} nmol/L). ` +
+        'Continue or start 800–1000 IU/day maintenance (e.g. Desunin 800IU or combined Ca/D3 product). ' +
+        'Antiresorptive therapy can proceed. Recheck in 6–12 months.'
+      : `Target met (${vitD} nmol/L ≥${BLOOD_RANGES.vitaminD.target} nmol/L). ` +
+        'Continue 800 IU/day maintenance, or optimise dietary sources (oily fish, fortified foods, sunlight exposure). ' +
+        'No loading required.';
 
   sups.push({
     supplement: 'vitamin_d',
@@ -1125,26 +1204,35 @@ function getSupplements(patient: PatientInput): SupplementRecommendation[] {
     rationale:
       vitD !== null
         ? `Serum 25-OHD ${vitD} nmol/L — target ≥${BLOOD_RANGES.vitaminD.target} nmol/L (NOGG 2024 Rec 26). ` +
-          'Practically all older adults in Ireland are vitamin D insufficient given low-sunlight latitude.'
-        : `Vitamin D status unknown — supplement pending result. Target ≥${BLOOD_RANGES.vitaminD.target} nmol/L.`,
+          'Practically all older adults in Ireland are vitamin D insufficient given low-sunlight latitude and limited dietary sources.'
+        : `Vitamin D level not yet measured. Target ≥${BLOOD_RANGES.vitaminD.target} nmol/L (NOGG 2024 Rec 26). ` +
+          'Check before starting antiresorptive therapy.',
   });
 
-  // Calcium
+  // Calcium — clinical conversation framework (serum calcium is not a useful marker of dietary intake)
   sups.push({
     supplement: 'calcium',
     dose: isGIOPPatient
-      ? '1000–1500 mg/day total (diet + supplement) — higher requirement in GIOP. ' +
+      ? 'GIOP: 1000–1500 mg/day total calcium from all sources (diet + supplement) — higher requirement due to glucocorticoid-induced GI malabsorption and renal losses. ' +
         'Supplement with Calcichew D3 Forte or Adcal-D3 if dietary intake is insufficient. ' +
-        'Dietary calcium always preferred over supplements.'
-      : '1200 mg/day total dietary target (IOS 2024) for all patients ≥50 with bone loss. ' +
-        'Supplements should only be used if dietary calcium is consistently insufficient — ' +
-        'dietary calcium is always preferred. ' +
-        'Excess supplementation (>500–600 mg/day on top of an adequate diet) carries cardiovascular risk evidence and should be avoided.',
+        'Dietary calcium always preferred.'
+      : 'IMPORTANT: serum calcium is NOT a useful marker of dietary calcium adequacy — it is tightly regulated ' +
+        'and stays within normal range even with a calcium-deficient diet. Assess dietary intake directly.\n\n' +
+        'Ask the patient about: dairy consumption (milk, cheese, yoghurt — each portion provides ~300 mg), ' +
+        'green vegetables (broccoli, kale, bok choy — ~100–160 mg/portion), and calcium-fortified foods (fortified cereals, plant milks).\n\n' +
+        'Practical guidance:\n' +
+        '• If patient eats 2–3 dairy portions daily + green vegetables regularly → dietary intake may be adequate; ' +
+        'consider a small supplement of 250–500 mg/day to meet the 1200 mg/day total target.\n' +
+        '• If dairy intake is low or absent → supplement 500–600 mg/day on top of whatever dietary sources are consumed.\n' +
+        '• Target: 1200 mg/day total from all sources combined (IOS 2024).\n' +
+        '• Avoid excess supplementation: >500–600 mg/day on top of an adequate diet is associated with cardiovascular risk ' +
+        '(Bolland et al. BMJ 2010/2011). Dietary calcium does not carry this risk and is always preferred over supplements.',
     rationale: isGIOPPatient
-      ? 'Glucocorticoids reduce GI calcium absorption and increase renal excretion — higher supplementation needed (NOGG 2024 Rec 22).'
-      : 'IOS 2024: 1200 mg/day is the target total intake for adults ≥50 with bone loss. ' +
-        'Dietary sources (dairy, fortified foods, green vegetables) are preferred. ' +
-        'Supplements are indicated only when dietary intake consistently falls below the target (NOGG 2024 Rec 26).',
+      ? 'Glucocorticoids reduce GI calcium absorption and increase renal calcium excretion — higher intake is needed (NOGG 2024 Rec 22; IOS 2024).'
+      : 'IOS 2024: 1200 mg/day is the target total intake for adults ≥50 with bone loss or osteoporosis. ' +
+        'Serum calcium reflects parathyroid regulation, not dietary adequacy. ' +
+        'Supplement only if dietary intake consistently falls below target. ' +
+        'Excess supplementation carries cardiovascular risk evidence not seen with dietary calcium (NOGG 2024 Rec 26).',
   });
 
   return sups;
@@ -1356,7 +1444,10 @@ function denosumab(egfr: number | null): TreatmentRecommendation {
     ],
     irishPrescribingNote:
       'GMS High-Tech (Prolia / biosimilar e.g. Jublia) — any doctor can prescribe. ' +
-      'Widely available through community pharmacies in Ireland on the High-Tech drug scheme; dispensed via PCRS direct payment. Patient pays nothing.',
+      'Dispensed via community pharmacy on the High-Tech drug scheme. ' +
+      'GMS cardholders: no cost for the medication. ' +
+      'DPS patients: standard monthly DPS threshold applies (currently €80/month ceiling for out-of-pocket costs). ' +
+      'Private patients: full cost of the medication unless covered by private health insurance.',
     source: SRC_NOGG,
     patientEducation: {
       whatItDoes:
@@ -1429,4 +1520,29 @@ function lowestDexaTScore(dexa: NonNullable<PatientInput['dexaResults']>): numbe
   const scores = [dexa.lumbarSpineTScore, dexa.totalHipTScore, dexa.femoralNeckTScore]
     .filter((t): t is number => t != null);
   return scores.length > 0 ? Math.min(...scores) : 0;
+}
+
+// ─── Treatment history contraindication helpers ───────────────────────────
+
+function allTreatments(patient: PatientInput): PatientInput['previousTreatments'] {
+  return [
+    ...(patient.currentTreatment ? [patient.currentTreatment] : []),
+    ...patient.previousTreatments,
+  ];
+}
+
+function hasAFFHistory(patient: PatientInput): boolean {
+  return allTreatments(patient).some(
+    t => isBisphosphonate(t.agent) && t.reasonStopped === 'aff_confirmed',
+  );
+}
+
+function hasONJHistory(patient: PatientInput): boolean {
+  return allTreatments(patient).some(t => t.reasonStopped === 'onj');
+}
+
+function hasPreviousGIIntoleranceToBP(patient: PatientInput): boolean {
+  return patient.previousTreatments.some(
+    t => isBisphosphonate(t.agent) && t.reasonStopped === 'gi_intolerance',
+  );
 }

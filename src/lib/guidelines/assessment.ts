@@ -53,27 +53,30 @@ export function assessInvestigationsNeeded(
 
   const vitD = patient.bloodResults?.vitaminDNmol ?? null;
   if (vitD === null || vitD < BLOOD_RANGES.vitaminD.target) {
-    const severelyDeficient = vitD !== null && vitD < 25;
+    const urgentVitD = vitD !== null && vitD < BLOOD_RANGES.vitaminD.deficient; // <25 nmol/L
     needed.push({
       investigation: 'vitamin_d',
       tier: 1,
       reason:
         vitD === null
-          ? `Serum 25-OHD not checked. Target ≥${BLOOD_RANGES.vitaminD.target} nmol/L. ` +
-            'If severely deficient (<25 nmol/L): Irish loading protocol — 50,000 IU cholecalciferol weekly × 6 weeks, then maintenance. ' +
-            'Do NOT start bisphosphonate or denosumab until replete.'
-          : vitD < 25
+          ? `Serum 25-OHD not yet measured. Check BEFORE starting antiresorptive therapy. ` +
+            `Target ≥${BLOOD_RANGES.vitaminD.target} nmol/L. ` +
+            'Supplement with 800–1000 IU/day pending result. ' +
+            'Do NOT start bisphosphonate or denosumab until level is known and adequate. ' +
+            'Do NOT administer denosumab until Vit D ≥50 nmol/L.'
+          : vitD < BLOOD_RANGES.vitaminD.deficient  // <25 nmol/L
           ? `Severe vitamin D deficiency (${vitD} nmol/L). ` +
-            'Irish loading protocol: 50,000 IU cholecalciferol weekly × 6 weeks (300,000 IU total). ' +
-            `Do NOT start antiresorptive therapy until replete (target ≥${BLOOD_RANGES.vitaminD.target} nmol/L). ` +
+            'Loading protocol required: 50,000 IU cholecalciferol weekly × 6 weeks (300,000 IU total, Irish standard). ' +
+            `Recheck 25-OHD after loading; do NOT start antiresorptive until level ≥${BLOOD_RANGES.vitaminD.target} nmol/L. ` +
             'Do NOT administer denosumab until Vit D ≥50 nmol/L.'
-          : vitD < BLOOD_RANGES.vitaminD.deficient
-          ? `Vitamin D deficient (${vitD} nmol/L). ` +
-            `Load with 50,000 IU weekly × 8 weeks; target ≥${BLOOD_RANGES.vitaminD.target} nmol/L before starting treatment. ` +
-            'Do NOT administer denosumab until Vit D ≥50 nmol/L.'
-          : `Vitamin D insufficient (${vitD} nmol/L, target ≥${BLOOD_RANGES.vitaminD.target} nmol/L). ` +
-            'Supplement alongside bone protection therapy.',
-      urgency: severelyDeficient ? 'soon' : vitD !== null && vitD < BLOOD_RANGES.vitaminD.deficient ? 'soon' : 'routine',
+          : vitD < BLOOD_RANGES.vitaminD.insufficient  // 25–49 nmol/L
+          ? `Insufficient (${vitD} nmol/L). ` +
+            'Start 800–1000 IU/day cholecalciferol immediately. ' +
+            'Oral bisphosphonate can start alongside supplementation. ' +
+            `Do NOT administer denosumab until Vit D ≥50 nmol/L. Recheck at 3 months; target ≥${BLOOD_RANGES.vitaminD.target} nmol/L.`
+          : `Adequate but below target (${vitD} nmol/L — target ≥${BLOOD_RANGES.vitaminD.target} nmol/L). ` +
+            '800–1000 IU/day maintenance alongside bone protection therapy. Recheck in 6–12 months.',
+      urgency: urgentVitD ? 'soon' : 'routine',
     });
   }
 
