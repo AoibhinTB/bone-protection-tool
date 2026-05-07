@@ -59,22 +59,6 @@ export function runClinicalDecision(patient: PatientInput): ClinicalDecision {
     flags.unshift(fraxLifeFlag);
   }
 
-  // NOGG threshold caveat for borderline (intermediate) risk — thresholds are age-dependent
-  if (riskCategory === 'intermediate') {
-    const noggThresholdFlag: ClinicalFlag = {
-      id: 'nogg_threshold_caveat',
-      severity: 'info',
-      message:
-        'Intermediate fracture risk: NOGG intervention thresholds vary with age. ' +
-        'For borderline cases, verify using the NOGG intervention threshold tool at nogg.org.uk.',
-      rationale:
-        'NOGG 2024: intervention thresholds are age-dependent (10-year MOF probability). ' +
-        'The ranges used in this tool represent broad categories; precise age-specific thresholds are available at nogg.org.uk.',
-      source: GUIDELINE_VERSIONS.nogg,
-    };
-    flags.push(noggThresholdFlag);
-  }
-
   const deduplicatedReferrals = deduplicateReferrals(referrals);
 
   const riskFactorsIdentified = generateRiskFactorsIdentified(patient, { riskStratification, flags });
