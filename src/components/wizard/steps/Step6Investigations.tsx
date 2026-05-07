@@ -25,20 +25,15 @@ export function Step6Investigations({ data, onChange }: Props) {
       {/* Auto-calculated estimate */}
       <div className="bg-indigo-50 border border-indigo-200 rounded-lg px-4 py-3 mb-4">
         <p className="text-xs font-medium text-indigo-700 mb-1">
-          Estimated FRAX — Ireland (no <Term term="BMD">BMD</Term>)
+          Estimated FRAX — Ireland (no BMD)
         </p>
         <div className="flex gap-6 text-sm">
           <div>
-            <Term term="MOF">
-              <span className="text-indigo-500">MOF </span>
-            </Term>
+            <span className="text-indigo-500">MOF </span>
             <span className="font-bold text-indigo-900">{fraxEst.mof}%</span>
           </div>
           <div>
-            <Term term="Hip">
-              <span className="text-indigo-500">Hip</span>
-            </Term>
-            <span className="text-indigo-500"> </span>
+            <span className="text-indigo-500">Hip </span>
             <span className="font-bold text-indigo-900">{fraxEst.hip}%</span>
           </div>
         </div>
@@ -65,7 +60,7 @@ export function Step6Investigations({ data, onChange }: Props) {
 
       {hasManualFrax && (
         <>
-          <Field label="Official MOF (10-year)" indent>
+          <Field label={<Term term="MOF">Official MOF (10-year)</Term>} indent>
             <NumInput
               value={data.fraxMOFPercent}
               onChange={v => onChange({ fraxMOFPercent: v })}
@@ -76,7 +71,7 @@ export function Step6Investigations({ data, onChange }: Props) {
               width="w-20"
             />
           </Field>
-          <Field label="Official hip fracture (10-year)" indent>
+          <Field label={<Term term="Hip">Official hip fracture (10-year)</Term>} indent>
             <NumInput
               value={data.fraxHipPercent}
               onChange={v => onChange({ fraxHipPercent: v })}
@@ -152,7 +147,7 @@ export function Step6Investigations({ data, onChange }: Props) {
             />
           </Field>
           <p className="text-xs text-slate-500 pl-4 sm:pl-6 -mt-1 mb-2">
-            <Term term="T-score">T-score</Term> reference: ≤−2.5 osteoporosis · −1.0 to −2.5 osteopenia · ≥−1.0 normal
+            T-score reference: ≤−2.5 osteoporosis · −1.0 to −2.5 osteopenia · ≥−1.0 normal
           </p>
         </>
       )}
@@ -204,31 +199,25 @@ export function Step6Investigations({ data, onChange }: Props) {
             />
           </Field>
           <Field label="ALP" hint="U/L — normal 30–130; >200 markedly elevated" indent>
-            <div className="flex items-center gap-2">
-              <NumInput
-                value={data.bloodResults.alp}
-                onChange={v => onChange({ bloodResults: { ...data.bloodResults!, alp: v } })}
-                min={0}
-                max={1000}
-                unit="U/L"
-                width="w-24"
-              />
-              <Term term="ALP" />
-            </div>
+            <NumInput
+              value={data.bloodResults.alp}
+              onChange={v => onChange({ bloodResults: { ...data.bloodResults!, alp: v } })}
+              min={0}
+              max={1000}
+              unit="U/L"
+              width="w-24"
+            />
           </Field>
           <Field label="TSH" hint="mU/L — normal 0.4–4.0; <0.1 suppressed; >4.0 elevated" indent>
-            <div className="flex items-center gap-2">
-              <NumInput
-                value={data.bloodResults.tshMUL}
-                onChange={v => onChange({ bloodResults: { ...data.bloodResults!, tshMUL: v } })}
-                min={0}
-                max={50}
-                step={0.1}
-                unit="mU/L"
-                width="w-24"
-              />
-              <Term term="TSH" />
-            </div>
+            <NumInput
+              value={data.bloodResults.tshMUL}
+              onChange={v => onChange({ bloodResults: { ...data.bloodResults!, tshMUL: v } })}
+              min={0}
+              max={50}
+              step={0.1}
+              unit="mU/L"
+              width="w-24"
+            />
           </Field>
           <Field
             label="On levothyroxine"

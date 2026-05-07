@@ -40,7 +40,7 @@ export function YesNo({ value, onChange, yesLabel = 'Yes', noLabel = 'No' }: Tog
 // Mobile: label and control stack vertically. ≥sm: side-by-side.
 
 interface FieldProps {
-  label: string;
+  label: React.ReactNode;
   hint?: string;
   children: React.ReactNode;
   indent?: boolean;
@@ -54,7 +54,7 @@ export function Field({ label, hint, children, indent }: FieldProps) {
       }`}
     >
       <div className="flex-1 min-w-0">
-        <p className="text-sm font-medium text-slate-800">{label}</p>
+        <div className="text-sm font-medium text-slate-800">{label}</div>
         {hint && <p className="text-xs text-slate-500 mt-0.5 leading-snug">{hint}</p>}
       </div>
       <div className="sm:flex-shrink-0">{children}</div>
