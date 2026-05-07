@@ -16,17 +16,16 @@ const SOURCE = GUIDELINE_VERSIONS.nogg;
 // ─── Main entry point ─────────────────────────────────────────────────────
 
 export function stratifyRisk(patient: PatientInput): RiskStratification {
-  // Use manually entered FRAX or compute an estimate for age ≥50
-  const hasManualFrax = patient.fraxMOFPercent !== null && patient.fraxHipPercent !== null;
-  const useEstimate = !hasManualFrax && patient.age >= 50;
-
+  // Use manually entered FRAX values where provided; estimate any missing axis for age ≥50.
+  // Partial manual entry is respected — e.g. clinician provides hip only, MOF is estimated.
   let rawMOF: number | null = patient.fraxMOFPercent;
   let rawHip: number | null = patient.fraxHipPercent;
+  const needEstimate = (rawMOF === null || rawHip === null) && patient.age >= 50;
 
-  if (useEstimate) {
+  if (needEstimate) {
     const est = estimateFrax(patient);
-    rawMOF = est.mof;
-    rawHip = est.hip;
+    if (rawMOF === null) rawMOF = est.mof;
+    if (rawHip === null) rawHip = est.hip;
   }
 
   // Apply arithmetic adjustments (NOGG 2024 Table 2) whenever FRAX values are available
@@ -35,7 +34,8 @@ export function stratifyRisk(patient: PatientInput): RiskStratification {
       ? applyFraxAdjustments(patient, rawMOF, rawHip)
       : { adjustedMOF: null, adjustedHip: null, adjustments: [] as FraxAdjustment[] };
 
-  const estNote = useEstimate ? ' (FRAX estimated — verify with frax.shef.ac.uk, country 49)' : '';
+  const fullyEstimated = patient.fraxMOFPercent === null && patient.fraxHipPercent === null && patient.age >= 50;
+  const estNote = fullyEstimated ? ' (FRAX estimated — verify with frax.shef.ac.uk, country 49)' : '';
 
   // Very high risk — overrides all other categories
   const vhrReason = veryHighRiskReason(patient, adjustedMOF, adjustedHip);

@@ -59,7 +59,7 @@ export const NOGG_2024_THRESHOLDS: NOGGThreshold[] = [
   { ageMin: 55, ageMax: 59, lowerMOF:  4.5, upperMOF: 11.4, lowerHip: 0.43, upperHip: 1.7 },
   { ageMin: 60, ageMax: 64, lowerMOF:  6.0, upperMOF: 14.6, lowerHip: 0.80, upperHip: 2.8 },
   { ageMin: 65, ageMax: 69, lowerMOF:  8.6, upperMOF: 19.8, lowerHip: 1.4,  upperHip: 4.2 },
-  { ageMin: 70, ageMax: 120, lowerMOF: 11.1, upperMOF: 24.4, lowerHip: 5.4, upperHip: 6.5 },
+  { ageMin: 70, ageMax: 120, lowerMOF: 11.1, upperMOF: 24.4, lowerHip: 2.6, upperHip: 6.5 },
 ];
 
 export function getAgeThreshold(age: number): NOGGThreshold | null {
