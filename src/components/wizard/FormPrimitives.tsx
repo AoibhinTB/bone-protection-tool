@@ -149,7 +149,7 @@ export function CheckboxGroup<T extends string>({
   };
 
   return (
-    <div className={`grid gap-2 grid-cols-1 ${columns === 2 ? 'sm:grid-cols-2' : ''}`}>
+    <div className={`grid gap-2 grid-cols-1 ${columns === 2 ? 'md:grid-cols-2' : ''}`}>
       {options.map((opt) => (
         <label
           key={opt.value}

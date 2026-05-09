@@ -116,7 +116,7 @@ export function Step3RiskFactors({ data, onChange }: Props) {
         options={SECONDARY_OPTIONS}
         selected={data.secondaryOsteoporosis}
         onChange={v => onChange({ secondaryOsteoporosis: v })}
-        columns={1}
+        columns={2}
       />
     </div>
   );
