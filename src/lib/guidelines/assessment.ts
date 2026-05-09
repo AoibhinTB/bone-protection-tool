@@ -59,23 +59,23 @@ export function assessInvestigationsNeeded(
       tier: 1,
       reason:
         vitD === null
-          ? `Serum 25-OHD not yet measured. Check BEFORE starting antiresorptive therapy. ` +
+          ? `Serum 25-OHD not yet measured. Check at baseline. ` +
             `Target ≥${BLOOD_RANGES.vitaminD.target} nmol/L. ` +
-            'Supplement with 800–1000 IU/day pending result. ' +
-            'Do NOT start bisphosphonate or denosumab until level is known and adequate. ' +
+            'Supplement with 800–2,000 IU/day pending result. ' +
+            'Bisphosphonate may start alongside supplementation — do NOT delay treatment for the level. ' +
             'Do NOT administer denosumab until Vit D ≥50 nmol/L.'
           : vitD < BLOOD_RANGES.vitaminD.deficient  // <25 nmol/L
           ? `Severe vitamin D deficiency (${vitD} nmol/L). ` +
-            'Loading protocol required: 50,000 IU cholecalciferol weekly × 6 weeks (300,000 IU total, Irish standard). ' +
-            `Recheck 25-OHD after loading; do NOT start antiresorptive until level ≥${BLOOD_RANGES.vitaminD.target} nmol/L. ` +
+            'Load with 50,000 IU D3 weekly × 6–8 weeks (300,000–400,000 IU total) OR 30,000 IU D3 twice weekly × 5 weeks (300,000 IU total). ' +
+            'Recheck 25-OHD ~3 months after loading. Bisphosphonate may start alongside loading. ' +
             'Do NOT administer denosumab until Vit D ≥50 nmol/L.'
           : vitD < BLOOD_RANGES.vitaminD.insufficient  // 25–49 nmol/L
           ? `Insufficient (${vitD} nmol/L). ` +
-            'Start 800–1000 IU/day cholecalciferol immediately. ' +
+            'Start 800–2,000 IU/day cholecalciferol (higher end for BMI ≥30 / malabsorption). ' +
             'Oral bisphosphonate can start alongside supplementation. ' +
-            `Do NOT administer denosumab until Vit D ≥50 nmol/L. Recheck at 3 months; target ≥${BLOOD_RANGES.vitaminD.target} nmol/L.`
+            `Do NOT administer denosumab until Vit D ≥50 nmol/L. Recheck at ~3 months; target ≥${BLOOD_RANGES.vitaminD.target} nmol/L.`
           : `Adequate but below target (${vitD} nmol/L — target ≥${BLOOD_RANGES.vitaminD.target} nmol/L). ` +
-            '800–1000 IU/day maintenance alongside bone protection therapy. Recheck in 6–12 months.',
+            '800–2,000 IU/day maintenance alongside bone protection therapy. Recheck in 6–12 months.',
       urgency: urgentVitD ? 'soon' : 'routine',
     });
   }

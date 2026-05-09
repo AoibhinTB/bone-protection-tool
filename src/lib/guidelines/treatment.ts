@@ -275,7 +275,7 @@ export function generateTreatmentOutput(
       id: 'vhr_anabolic_consideration',
       severity: 'warning',
       message:
-        'Very high risk — refer specialist. Anabolic-first (teriparatide or romosozumab) may be appropriate; GP cannot initiate High-Tech.',
+        'Very high risk — refer specialist. Anabolic-first (teriparatide biosimilar [HSE BVM policy March 2023] or romosozumab) may be appropriate; GP cannot initiate High-Tech.',
       rationale:
         'NOGG 2024 Rec 11 (Conditional): consider referral to osteoporosis specialist for very high risk patients. ' +
         'Anabolic-first approach warranted particularly when multiple vertebral fractures are present. ' +
@@ -309,7 +309,7 @@ export function generateTreatmentOutput(
       id: 'aff_history_bp_permanent_ci',
       severity: 'urgent',
       message:
-        'DO NOT prescribe any bisphosphonate — confirmed AFF history. Use denosumab or teriparatide; refer specialist.',
+        'DO NOT prescribe any bisphosphonate — confirmed AFF history. Use denosumab or teriparatide biosimilar (HSE BVM policy March 2023); refer specialist.',
       rationale:
         'AFF is a class effect of bisphosphonates due to suppression of bone remodelling at cortical stress sites. ' +
         'Rechallenge with any bisphosphonate carries recurrence risk and is contraindicated. ' +
@@ -396,7 +396,7 @@ function initiateTherapy(
     recs.push(denosumab(egfr));
     referrals.push({
       specialty: 'metabolic_bone',
-      reason: 'AFF history — teriparatide is the preferred specialist-initiated alternative to denosumab if antiresorptive is not tolerated.',
+      reason: 'AFF history — teriparatide biosimilar (HSE BVM policy March 2023) is the preferred specialist-initiated alternative to denosumab if antiresorptive is not tolerated.',
       urgency: 'soon',
     });
     return recs;
@@ -844,7 +844,7 @@ function affProdrome(
     id: 'aff_post_diagnosis_options',
     severity: 'urgent',
     message:
-      'If AFF confirmed: bisphosphonates permanently contraindicated. Switch to denosumab or specialist-initiated teriparatide.',
+      'If AFF confirmed: bisphosphonates permanently contraindicated. Switch to denosumab or specialist-initiated teriparatide biosimilar (HSE BVM policy March 2023).',
     rationale:
       'NOGG 2024 / NICE NG187: after AFF, bisphosphonates should generally be avoided. ' +
       'Teriparatide promotes cortical healing of incomplete AFF. ' +
@@ -909,37 +909,40 @@ function denosumabReboundFlags(
   const isOnDenosumab = patient.currentTreatment?.agent === 'denosumab' && patient.currentTreatment.currentlyOn;
 
   if (isOnDenosumab) {
-    // Early warning at 6 months + 2 weeks (~6.5 months)
+    // Injection due at 6 months — warning. Bone turnover markers rise from ~3 months and
+    // exceed baseline by 6 months after a missed dose.
     if (
       patient.denosumabMonthsSinceLastDose !== null &&
-      patient.denosumabMonthsSinceLastDose >= 6.5 &&
-      patient.denosumabMonthsSinceLastDose <= DENOSUMAB.reboundRiskThresholdMonths
+      patient.denosumabMonthsSinceLastDose >= 6 &&
+      patient.denosumabMonthsSinceLastDose < DENOSUMAB.reboundRiskThresholdMonths
     ) {
       flags.push({
         id: 'denosumab_injection_due',
         severity: 'warning',
         message:
-          `Denosumab ${patient.denosumabMonthsSinceLastDose} months overdue — arrange next dose now. Risk rises after 6.5 months.`,
+          'Injection due — schedule immediately. Bone turnover markers begin rising 3 months after a missed dose and reach above-baseline levels by 6 months.',
         rationale:
-          'NOGG 2024 Rec 18: rebound fracture risk begins once the 6-month injection window is missed. ' +
-          'Clinical urgency increases rapidly beyond 6.5 months.',
+          'NOGG 2024 Rec 18 / Cummings SR et al. JBMR 2018: bone resorption markers (CTX) rise progressively from 3 months after a missed dose. ' +
+          'By 6 months, levels exceed pre-treatment baseline — schedule the next dose without further delay.',
         source: SRC_NOGG,
       });
     }
 
-    // Overdue injection ≥7 months — urgent
+    // Overdue injection ≥7 months — urgent (FREEDOM trial citation)
     if (
       patient.denosumabMonthsSinceLastDose !== null &&
-      patient.denosumabMonthsSinceLastDose > DENOSUMAB.reboundRiskThresholdMonths
+      patient.denosumabMonthsSinceLastDose >= DENOSUMAB.reboundRiskThresholdMonths
     ) {
       flags.push({
         id: 'denosumab_overdue_injection',
         severity: 'urgent',
         message:
-          `Give denosumab NOW — ${patient.denosumabMonthsSinceLastDose} months overdue (>7 mo = high rebound vertebral fracture risk).`,
+          `Injection overdue — significant rebound vertebral fracture risk. FREEDOM trial data show fracture rate increases from 1.2 to 7.1 per 100 patient-years after discontinuation.`,
         rationale:
-          'NOGG 2024 Rec 18–19: gaps >7 months since last denosumab dose are associated with rebound vertebral fractures ' +
-          'due to rapid resurgence of osteoclast activity.',
+          'Cummings SR et al. Vertebral fractures after discontinuation of denosumab: a post hoc analysis of the FREEDOM trial and its extension. ' +
+          'J Bone Miner Res. 2018;33(2):190–198. https://pubmed.ncbi.nlm.nih.gov/29105841/. ' +
+          'Vertebral fracture rate rose from 1.2 per 100 patient-years (on denosumab) to 7.1 per 100 patient-years after stopping. ' +
+          'NOGG 2024 Rec 18–19: gaps ≥7 months since the last denosumab dose mark imminent vertebral fracture risk.',
         source: SRC_NOGG,
       });
     }
@@ -1184,15 +1187,14 @@ function giop(
       id: 'giop_anabolic_preferred',
       severity: 'warning',
       message:
-        'Very high risk GIOP (multiple vertebral fractures or T-score ≤-3.5 on glucocorticoids): ' +
-        'teriparatide preferred over bisphosphonate for superior efficacy. Requires specialist initiation. ' +
-        'Note: teriparatide has modest effect on hip BMD and has not been shown to reduce hip fractures in RCTs. ' +
-        'If severe osteoporosis is present at both spine AND hip, consider bisphosphonate first then teriparatide with specialist input.',
+        'Very high risk GIOP (multiple VFs or T ≤−3.5 on glucocorticoids): teriparatide biosimilar (HSE BVM policy March 2023) preferred over bisphosphonate; specialist initiation. Modest hip BMD effect — consider BP first then teriparatide if severe hip osteoporosis.',
       rationale:
         'NOGG 2024 Rec 23 / BSR 2022: teriparatide shown superior to alendronate in GIOP (Saag et al. NEJM 2007). ' +
         'GIOP VHR = multiple vertebral fractures OR T-score ≤-3.5 on steroids. ' +
+        'HSE Best Value Medicine policy (1 March 2023): prescribe the recommended teriparatide biosimilar; originator Forsteo not reimbursed unless biosimilar is clinically unsuitable. ' +
         'Teriparatide contraindications: unexplained raised ALP, Paget\'s disease, prior radiation to skeleton, ' +
-        'renal calculi, hypercalcaemia, hyperparathyroidism, haematological malignancy, active malignancy.',
+        'renal calculi, hypercalcaemia, hyperparathyroidism, haematological malignancy, active malignancy. ' +
+        'Source: Smith et al. Br J Clin Pharmacol 2025; HSE MMP BVM policy.',
       source: SRC_BSR,
     });
     referrals.push({
@@ -1349,47 +1351,85 @@ function getSupplements(patient: PatientInput): SupplementRecommendation[] {
   let vitDHeadline: string;
   let vitDBullets: string[];
 
+  // Patient context that modifies dosing
+  const obese = patient.bmi !== null && patient.bmi >= 30;
+  const malabsorption =
+    patient.secondaryOsteoporosis.includes('malabsorption') ||
+    patient.secondaryOsteoporosis.includes('celiac_disease') ||
+    patient.secondaryOsteoporosis.includes('inflammatory_bowel_disease');
+  const ckd =
+    (patient.renalFunction?.egfr ?? patient.bloodResults?.egfr ?? 999) < 60;
+  const hyperPTH = patient.secondaryOsteoporosis.includes('hyperparathyroidism');
+
+  // Context bullets reused across deficient / insufficient tiers
+  const contextBullets: string[] = [];
+  if (obese) {
+    contextBullets.push('BMI ≥30: titrate to target rather than fixed dose — volumetric dilution reduces bioavailability');
+  }
+  if (malabsorption) {
+    contextBullets.push('Malabsorption / bariatric surgery: ≥2,000 IU/day often needed; individualise to labs');
+  }
+  if (ckd) {
+    contextBullets.push('CKD: follow KDIGO CKD-MBD guidance; coordinate with nephrology');
+  }
+  const safetyCeilingBullet = 'Safety ceiling: do not exceed 4,000 IU/day long-term without specialist supervision';
+  const calciumWatchBullet =
+    (ckd || hyperPTH)
+      ? 'Check adjusted calcium 1–2 months after high-dose loading (CKD / hyperparathyroidism)'
+      : null;
+
   if (vitD === null) {
-    vitDHeadline = 'Vitamin D level unknown — check before treatment';
+    vitDHeadline = 'Vitamin D level unknown — check at baseline';
     vitDBullets = [
-      'Measure 25-OHD before starting antiresorptive therapy',
-      'Pending result: 800–1000 IU/day cholecalciferol (e.g. Desunin 800 IU)',
-      'Do NOT start bisphosphonate or denosumab until level confirmed adequate',
+      'Measure 25-OHD at baseline',
+      `Pending result: ${obese || malabsorption ? '2,000 IU/day' : '800–2,000 IU/day'} cholecalciferol (e.g. Desunin 800 IU, InVita D3 drops)`,
+      'Bisphosphonate may start alongside supplementation — do NOT delay treatment',
       'Do NOT administer denosumab until Vit D ≥50 nmol/L',
+      ...contextBullets,
+      safetyCeilingBullet,
     ];
   } else if (vitD < BLOOD_RANGES.vitaminD.deficient) {
     vitDHeadline = `Severe deficiency (${vitD} nmol/L) — loading required`;
     vitDBullets = [
-      'Loading: 50,000 IU cholecalciferol weekly × 6 weeks (300,000 IU total)',
-      'Irish products: Dekristol 20,000 IU × 15 doses or equivalent',
-      `Recheck 25-OHD after loading; target ≥${BLOOD_RANGES.vitaminD.target} nmol/L`,
-      'Do NOT start any antiresorptive until loading complete and level adequate',
+      'Loading option A: 50,000 IU D3 once weekly × 6–8 weeks (300,000–400,000 IU total)',
+      'Loading option B: 30,000 IU D3 twice weekly × 5 weeks (300,000 IU total)',
+      `Recheck 25-OHD ~3 months after loading; target ≥${BLOOD_RANGES.vitaminD.target} nmol/L`,
+      'Bisphosphonate may start alongside loading — do NOT delay',
       'Do NOT administer denosumab until Vit D ≥50 nmol/L',
+      ...(calciumWatchBullet ? [calciumWatchBullet] : []),
+      ...contextBullets,
+      safetyCeilingBullet,
     ];
   } else if (vitD < BLOOD_RANGES.vitaminD.insufficient) {
-    vitDHeadline = `Insufficient (${vitD} nmol/L) — start 800–1000 IU/day`;
+    vitDHeadline = `Insufficient (${vitD} nmol/L) — start 800–2,000 IU/day`;
     vitDBullets = [
       'No formal loading required',
-      'Start 800–1000 IU/day cholecalciferol immediately (e.g. Desunin 800 IU, InVita D3 drops)',
+      `Start ${obese || malabsorption ? '2,000 IU/day' : '800–2,000 IU/day'} cholecalciferol immediately (e.g. Desunin 800 IU, InVita D3 drops)`,
       'Oral bisphosphonate can start alongside supplementation',
       'Do NOT administer denosumab until Vit D ≥50 nmol/L',
-      `Recheck at 3 months; target ≥${BLOOD_RANGES.vitaminD.target} nmol/L`,
+      `Recheck at ~3 months; target ≥${BLOOD_RANGES.vitaminD.target} nmol/L`,
+      ...contextBullets,
+      safetyCeilingBullet,
     ];
   } else if (vitD < BLOOD_RANGES.vitaminD.target) {
     vitDHeadline = `Adequate (${vitD} nmol/L) — maintenance only`;
     vitDBullets = [
       `Below target (≥${BLOOD_RANGES.vitaminD.target} nmol/L)`,
-      '800–1000 IU/day maintenance (e.g. Desunin 800 IU or combined Ca/D3)',
+      `800–2,000 IU/day maintenance${obese || malabsorption ? ' (use higher end)' : ''}`,
       'Antiresorptive therapy can proceed',
       'Recheck in 6–12 months',
+      ...contextBullets,
+      safetyCeilingBullet,
     ];
   } else {
     vitDHeadline = `Target met (${vitD} nmol/L) — maintenance only`;
     vitDBullets = [
       `≥${BLOOD_RANGES.vitaminD.target} nmol/L target reached`,
-      '800 IU/day maintenance',
+      `${obese || malabsorption ? '2,000 IU/day' : '800–2,000 IU/day'} maintenance`,
       'Optimise dietary sources: oily fish, fortified foods, sunlight exposure',
       'No loading required',
+      ...contextBullets,
+      safetyCeilingBullet,
     ];
   }
 
@@ -1532,10 +1572,10 @@ function risedronate(): TreatmentRecommendation {
 function ibandronate(): TreatmentRecommendation {
   return {
     agent: 'ibandronate',
-    dose: '150 mg',
+    dose: '150 mg oral',
     frequency: 'Once monthly, fasting with full glass of water; remain upright ≥60 minutes',
     rationale:
-      'Monthly dosing — adherence advantage over weekly. Evidence mainly for vertebral fracture reduction; ' +
+      'Monthly oral dosing — adherence advantage over weekly. Evidence mainly for vertebral fracture reduction; ' +
       'less robust hip fracture data than alendronate/zoledronate. Use where weekly oral dosing is not feasible.',
     strength: 'conditional',
     contraindications: [
@@ -1547,6 +1587,7 @@ function ibandronate(): TreatmentRecommendation {
     monitoring: [
       'Calcium and eGFR at baseline',
       'DEXA at 1–2 years',
+      'Insufficient evidence for hip fracture reduction — review fracture history at follow-up',
     ],
     irishPrescribingNote: 'GMS standard (less preferred per HSE MMP). Monthly dosing only advantage.',
     source: SRC_HSE,
@@ -1568,6 +1609,48 @@ function ibandronate(): TreatmentRecommendation {
   };
 }
 
+export function ibandronateIV(): TreatmentRecommendation {
+  return {
+    agent: 'ibandronate',
+    dose: '3 mg IV bolus',
+    frequency: 'Every 3 months',
+    rationale:
+      'IV ibandronate — option when oral bisphosphonate is not tolerated and annual zoledronate attendance is not feasible. ' +
+      'Quarterly visits provide adherence safety net between annual reviews. ' +
+      'Insufficient evidence for hip fracture reduction (same caveat as oral ibandronate).',
+    strength: 'conditional',
+    contraindications: [
+      'eGFR <30 ml/min',
+      'Uncorrected hypocalcaemia (CHECK adjusted calcium before each injection)',
+      'Vitamin D deficiency (replete before starting)',
+      'Pregnancy',
+    ],
+    monitoring: [
+      'Adjusted calcium and eGFR before each 3-monthly injection',
+      'Vitamin D adequacy at baseline (no formal block — but optimise)',
+      'DEXA at 1–2 years; reassessment at 3 years',
+      'Insufficient evidence for hip fracture reduction — vertebral protection only',
+      'Dental review before starting if invasive dental work anticipated',
+    ],
+    irishPrescribingNote: 'GMS standard. IV ibandronate is less commonly used than zoledronate; appropriate when annual infusion attendance is not feasible.',
+    source: SRC_HSE,
+    patientEducation: {
+      whatItDoes:
+        'IV ibandronate is an injection given into a vein every 3 months. It strengthens bones by slowing bone breakdown. Useful if you cannot tolerate tablets and cannot attend for the annual zoledronate infusion.',
+      howToTake:
+        'Given as a slow injection into a vein every 3 months, in a clinic or hospital. Quicker than the annual zoledronate infusion.',
+      sideEffects: [
+        'Flu-like symptoms (less marked than zoledronate)',
+        'Mild aches',
+      ],
+      warnings: [
+        'Tell your dentist you are on IV ibandronate before any tooth extraction or jaw surgery.',
+        'Your calcium and kidney function will be checked before each injection.',
+      ],
+    },
+  };
+}
+
 function zoledronate(): TreatmentRecommendation {
   return {
     agent: 'zoledronate',
@@ -1579,13 +1662,13 @@ function zoledronate(): TreatmentRecommendation {
     strength: 'strong',
     contraindications: [
       'eGFR <35 ml/min',
-      'Uncorrected hypocalcaemia (must be corrected before infusion)',
+      'PRE-INFUSION SAFETY CHECK: corrected calcium MUST be measured and within normal range before each infusion — risk of severe symptomatic hypocalcaemia if administered while low',
       'Vitamin D deficiency (replete before infusion)',
       'Pregnancy',
     ],
     monitoring: [
-      'Vitamin D ≥75 nmol/L and calcium normal before each infusion',
-      'eGFR before each annual infusion',
+      'CHECK adjusted calcium IMMEDIATELY before each infusion — withhold if <2.10 mmol/L until corrected',
+      'Vitamin D adequacy and eGFR before each annual infusion',
       'Premedication: paracetamol 1g 1 hour BEFORE infusion, then again 6 hours AFTER — reduces flu-like acute-phase reaction',
       'DEXA at 1–2 years; bisphosphonate reassessment at 3 years',
       'Dental review before starting if invasive dental work anticipated — ONJ risk (very low at osteoporosis doses)',
@@ -1614,6 +1697,105 @@ function zoledronate(): TreatmentRecommendation {
   };
 }
 
+// ─── SERMs ─────────────────────────────────────────────────────────────────
+// Raloxifene and bazedoxifene — vertebral fracture protection only.
+// Indication: postmenopausal women where bisphosphonates / denosumab are contraindicated
+// or not tolerated, particularly when symptomatic menopausal status is relevant.
+
+export function raloxifene(): TreatmentRecommendation {
+  return {
+    agent: 'raloxifene',
+    dose: '60 mg oral',
+    frequency: 'Once daily, with or without food',
+    rationale:
+      'SERM — vertebral fracture protection only (no robust evidence for hip or non-vertebral fracture reduction). ' +
+      'Option for postmenopausal women where bisphosphonates / denosumab are contraindicated or not tolerated. ' +
+      'NOT suitable in symptomatic menopausal women — raloxifene can worsen hot flushes; consider bazedoxifene instead.',
+    strength: 'conditional',
+    contraindications: [
+      'Personal or family history of VTE (DVT/PE)',
+      'Active or recent thromboembolic event',
+      'Premenopausal women',
+      'Severe hepatic impairment',
+      'Pregnancy',
+    ],
+    monitoring: [
+      'Vertebral protection only — insufficient evidence for hip / non-vertebral fracture',
+      'VTE risk: counsel about leg swelling / chest pain symptoms',
+      'May worsen hot flushes — switch to bazedoxifene if vasomotor symptoms develop',
+      'DEXA at 1–2 years',
+    ],
+    irishPrescribingNote: 'GMS standard. Useful niche — bisphosphonate-contraindicated postmenopausal women without vasomotor symptoms.',
+    source: SRC_HSE,
+    patientEducation: {
+      whatItDoes:
+        'Raloxifene is a daily tablet that mimics the effect of oestrogen on bone — it slows bone loss and reduces the risk of spinal fractures.',
+      howToTake:
+        'One 60 mg tablet daily, swallowed whole with water. Can be taken at any time, with or without food.',
+      sideEffects: [
+        'Hot flushes — raloxifene can MAKE vasomotor symptoms WORSE; tell your doctor if these become a problem',
+        'Leg cramps',
+        'Increased risk of blood clots (DVT / PE) — tell your doctor immediately if you develop calf swelling, chest pain, or breathlessness',
+      ],
+      warnings: [
+        'Stop and contact a doctor if you develop calf pain or swelling, chest pain, or sudden breathlessness — possible blood clot.',
+        'Tell your doctor about any history of blood clots or breast cancer before starting.',
+        'If hot flushes worsen significantly, ask your doctor about bazedoxifene as an alternative SERM that does not worsen hot flushes.',
+        'Stop 3 days before any planned major surgery or prolonged immobility — restart once mobile.',
+      ],
+    },
+  };
+}
+
+export function bazedoxifene(): TreatmentRecommendation {
+  return {
+    agent: 'bazedoxifene',
+    dose: '20 mg oral',
+    frequency: 'Once daily',
+    rationale:
+      'SERM — vertebral fracture protection only (insufficient evidence for hip or non-vertebral). ' +
+      'Advantage over raloxifene: does NOT worsen hot flushes — preferred SERM in symptomatic younger postmenopausal women. ' +
+      'Also available combined with conjugated oestrogens (Duavive / Viviant) for vasomotor symptoms. ' +
+      'Indication: option for symptomatic younger postmenopausal women where bisphosphonates or denosumab are contraindicated or not tolerated. ' +
+      'Source: Smith et al. Br J Clin Pharmacol 2025; StatPearls 2024.',
+    strength: 'conditional',
+    contraindications: [
+      'Personal or family history of VTE (DVT/PE) — same as raloxifene',
+      'Active or recent thromboembolic event',
+      'Premenopausal women',
+      'Severe hepatic impairment',
+      'Pregnancy',
+    ],
+    monitoring: [
+      'Vertebral protection only — insufficient evidence for hip / non-vertebral fracture',
+      'VTE risk: counsel about leg swelling / chest pain symptoms',
+      'Does NOT worsen hot flushes (advantage over raloxifene)',
+      'DEXA at 1–2 years',
+    ],
+    irishPrescribingNote:
+      'GMS-reimbursed in Ireland since 2012. Niche option — bisphosphonate / denosumab contraindicated younger postmenopausal women, particularly with vasomotor symptoms.',
+    source: SRC_HSE,
+    patientEducation: {
+      whatItDoes:
+        'Bazedoxifene is a daily tablet (a SERM) that mimics oestrogen on bone to slow bone loss and reduce spinal fractures. Unlike raloxifene, it does not worsen hot flushes.',
+      howToTake:
+        'One 20 mg tablet daily, swallowed whole with water. Can be taken at any time, with or without food.',
+      sideEffects: [
+        'Leg cramps',
+        'Mild stomach upset',
+        'Increased risk of blood clots (DVT / PE) — tell your doctor immediately if you develop calf swelling, chest pain, or breathlessness',
+      ],
+      warnings: [
+        'Tell your doctor if you have a personal or family history of blood clots before starting.',
+        'Stop and contact a doctor if you develop calf pain or swelling, chest pain, or sudden breathlessness.',
+        'Provides spinal fracture protection only — does not have proven benefit for hip fracture prevention.',
+        'Stop 3 days before any planned major surgery or prolonged immobility — restart once mobile.',
+        'A combined product with conjugated oestrogens (Duavive / Viviant) is also available if menopausal symptoms need treatment.',
+      ],
+    },
+  };
+}
+
 function denosumab(egfr: number | null): TreatmentRecommendation {
   const ckdCaution =
     egfr !== null && egfr < RENAL_LIMITS.denosumab.hypocalcaemiaWatch
@@ -1627,8 +1809,10 @@ function denosumab(egfr: number | null): TreatmentRecommendation {
     dose: '60 mg SC injection',
     frequency: 'Every 6 months (strict) — risk of rebound vertebral fractures begins if >6 months since last dose',
     rationale:
-      'Not renally cleared — preferred when bisphosphonates are contraindicated (eGFR <35). ' +
-      'Also used in treatment escalation for very high risk or bisphosphonate failure.',
+      'POSITIONING: denosumab is FIRST-LINE only in specific populations — eGFR <35, men on ADT (HALT trial), ' +
+      'and bisphosphonate contraindication (AFF, severe renal impairment, GI intolerance where IV zoledronate is also unsuitable). ' +
+      'For all other patients denosumab is SECOND-LINE per HSE MMP cascade and NICE positioning — bisphosphonate is preferred first-line. ' +
+      'Not renally cleared, hence the preferred antiresorptive in CKD.',
     strength: 'strong',
     contraindications: [
       'Uncorrected hypocalcaemia (MUST correct before each injection)',
@@ -1646,6 +1830,7 @@ function denosumab(egfr: number | null): TreatmentRecommendation {
       'CRITICAL: Plan sequential antiresorptive (alendronate or single-dose zoledronate) BEFORE stopping denosumab. Routine cessation is not supported.',
     ],
     irishPrescribingNote:
+      'POSITIONING: first-line only in specific groups (eGFR <35, men on ADT, BP contraindications). Otherwise second-line per HSE MMP cascade — alendronate first-line for most patients. ' +
       'GMS High-Tech (Prolia / biosimilar e.g. Jublia) — any doctor can prescribe. ' +
       'Dispensed via community pharmacy on the High-Tech drug scheme. ' +
       'GMS cardholders: no cost for the medication. ' +
@@ -1684,7 +1869,7 @@ function addVitDBlock(patient: PatientInput, flags: ClinicalFlag[]): void {
       id: 'denosumab_vitd_block',
       severity: 'urgent',
       message:
-        `HOLD denosumab — Vit D ${vitD} nmol/L (<50). Correct first; do not administer until ≥50 nmol/L.`,
+        `HOLD denosumab — Vit D ${vitD} nmol/L (<50). Correct first; do not administer until ≥50 nmol/L. Bisphosphonate (oral or IV zoledronate) is NOT held by Vit D — only denosumab.`,
       rationale:
         'Denosumab reduces bone resorption acutely; if vitamin D and calcium are not replete, ' +
         'severe hypocalcaemia can occur. Mandatory to correct Vit D to ≥50 nmol/L before each dose.',

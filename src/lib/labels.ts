@@ -22,11 +22,12 @@ export const AGENT_LABELS: Record<TreatmentAgent, string> = {
   ibandronate:   'Ibandronate 150 mg monthly (oral)',
   zoledronate:   'Zoledronate 5 mg IV yearly (Aclasta)',
   denosumab:     'Denosumab 60 mg SC 6-monthly (Prolia)',
-  teriparatide:  'Teriparatide 20 μg daily SC (Forsteo)',
+  teriparatide:  'Teriparatide 20 μg daily SC (biosimilar — HSE BVM policy March 2023)',
   romosozumab:   'Romosozumab 210 mg monthly SC × 12 (Evenity)',
   abaloparatide: 'Abaloparatide 80 μg daily SC (Eladynos)',
   hrt:           'HRT — oestrogen ± progestogen',
   raloxifene:    'Raloxifene 60 mg daily (Evista)',
+  bazedoxifene:  'Bazedoxifene 20 mg daily (or combined with conjugated oestrogens — Duavive/Viviant)',
 };
 
 export const STOP_REASON_LABELS: Record<TreatmentStopReason, string> = {

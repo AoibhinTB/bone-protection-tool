@@ -176,11 +176,12 @@ const INVESTIGATION_BULLETS: Partial<Record<string, string[]>> = {
     'Normal range: 2.1–2.6 mmol/L',
   ],
   vitamin_d: [
-    'Not yet measured: check before starting antiresorptive therapy',
+    'Not yet measured: check at baseline',
     'Target: ≥75 nmol/L',
-    'Supplement 800–1000 IU/day pending result',
-    'Do NOT start bisphosphonate or denosumab until level known and adequate',
+    'Supplement 800–2,000 IU/day pending result (higher end for BMI ≥30 / malabsorption)',
+    'Bisphosphonate may start alongside supplementation — do NOT delay treatment',
     'Do NOT administer denosumab until Vit D ≥50 nmol/L',
+    'Safety ceiling: do not exceed 4,000 IU/day long-term without specialist supervision',
   ],
   egfr: [
     'Required to select safe agent',
@@ -226,9 +227,10 @@ function buildBloodEntries(patient: PatientInput): BloodEntry[] {
         status: 'abnormal',
         statusLabel: 'severe deficiency',
         bullets: [
-          'Loading required: 50,000 IU cholecalciferol weekly × 6 weeks',
-          'Recheck 25-OHD after loading (target ≥75 nmol/L)',
-          'Do NOT start any antiresorptive until Vit D adequate',
+          'Loading option A: 50,000 IU D3 once weekly × 6–8 weeks (300,000–400,000 IU total)',
+          'Loading option B: 30,000 IU D3 twice weekly × 5 weeks (300,000 IU total)',
+          'Recheck 25-OHD ~3 months after loading (target ≥75 nmol/L)',
+          'Bisphosphonate may start alongside loading — do NOT delay',
           'Do NOT administer denosumab until Vit D ≥50 nmol/L',
         ],
       });
@@ -239,10 +241,10 @@ function buildBloodEntries(patient: PatientInput): BloodEntry[] {
         status: 'abnormal',
         statusLabel: 'insufficient',
         bullets: [
-          'Start 800–1000 IU/day cholecalciferol immediately',
+          'Start 800–2,000 IU/day cholecalciferol (higher end for BMI ≥30 / malabsorption)',
           'Oral bisphosphonate can start alongside supplementation',
           'Do NOT administer denosumab until Vit D ≥50 nmol/L',
-          'Recheck at 3 months; target ≥75 nmol/L',
+          'Recheck at ~3 months; target ≥75 nmol/L',
         ],
       });
     } else if (v < BLOOD_RANGES.vitaminD.target) {
@@ -252,7 +254,7 @@ function buildBloodEntries(patient: PatientInput): BloodEntry[] {
         status: 'normal',
         statusLabel: 'adequate, below target',
         bullets: [
-          '800–1000 IU/day maintenance',
+          '800–2,000 IU/day maintenance',
           'Antiresorptive therapy can proceed',
           'Recheck in 6–12 months',
         ],
@@ -263,7 +265,7 @@ function buildBloodEntries(patient: PatientInput): BloodEntry[] {
         value: `${v} nmol/L`,
         status: 'normal',
         statusLabel: 'target met',
-        bullets: ['800 IU/day maintenance', 'No loading required'],
+        bullets: ['800–2,000 IU/day maintenance', 'No loading required'],
       });
     }
   }

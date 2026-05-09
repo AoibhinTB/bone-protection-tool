@@ -126,10 +126,11 @@ export function generateBloodFlags(patient: PatientInput): ClinicalFlag[] {
       flags.push({
         id: 'hypocalcaemia',
         severity: 'urgent',
-        message: `Hypocalcaemia (${ca} mmol/L). Correct calcium and vitamin D BEFORE bisphosphonate or denosumab.`,
+        message: `Hypocalcaemia (${ca} mmol/L). Correct BEFORE IV zoledronate or denosumab — high risk of severe symptomatic hypocalcaemia.`,
         rationale:
-          'Adjusted calcium <2.10 mmol/L is a contraindication to antiresorptive therapy — risk of severe acute hypocalcaemia. ' +
-          'Replace vitamin D first; supplement calcium; recheck before any bisphosphonate or denosumab dose.',
+          'Adjusted calcium <2.10 mmol/L is a contraindication to IV zoledronate and denosumab — both can precipitate severe acute hypocalcaemia. ' +
+          'Replace vitamin D first; supplement calcium; recheck before any IV zoledronate or denosumab dose. ' +
+          'Oral bisphosphonate is also contraindicated in untreated hypocalcaemia.',
         source: SRC_IOS,
       });
     }

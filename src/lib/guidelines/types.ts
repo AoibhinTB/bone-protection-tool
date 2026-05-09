@@ -69,7 +69,8 @@ export type TreatmentAgent =
   | AnabolicAgent
   | 'denosumab'
   | 'hrt'
-  | 'raloxifene';
+  | 'raloxifene'
+  | 'bazedoxifene';
 
 export type TreatmentStopReason =
   | 'gi_intolerance'
