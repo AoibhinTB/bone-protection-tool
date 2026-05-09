@@ -19,7 +19,9 @@ import {
   BLOOD_RANGES,
   DENOSUMAB,
   GUIDELINE_VERSIONS,
+  getAgeThreshold,
 } from './thresholds';
+import type { RiskStratification } from './types';
 
 const SRC_HSE      = GUIDELINE_VERSIONS.hse_mmp;
 const SRC_NOGG     = GUIDELINE_VERSIONS.nogg;
@@ -43,6 +45,7 @@ export interface TreatmentOutput {
 export function generateTreatmentOutput(
   patient: PatientInput,
   riskCategory: RiskCategory,
+  riskStratification: RiskStratification,
 ): TreatmentOutput {
   const flags: ClinicalFlag[]               = [];
   const referrals: ReferralRecommendation[] = [];
@@ -86,6 +89,85 @@ export function generateTreatmentOutput(
         'Immediate treatment is indicated — DEXA can be arranged concurrently but must not delay prescribing.',
       source: SRC_NOGG,
     });
+  }
+
+  // ── Vertebral fracture imaging prompt (NOGG 2024 Rec 4) ──
+  // Triggers: acute back pain + risk factors, height loss ≥4 cm, kyphosis, long-term oral
+  // glucocorticoids, or T-score ≤−2.5.
+  {
+    const lowestT = patient.dexaResults
+      ? Math.min(
+          ...[
+            patient.dexaResults.lumbarSpineTScore,
+            patient.dexaResults.totalHipTScore,
+            patient.dexaResults.femoralNeckTScore,
+          ].filter((t): t is number => t != null)
+        )
+      : 0;
+    const longTermOralGC =
+      patient.glucocorticoidUse?.current === true &&
+      patient.glucocorticoidUse.dose !== 'very_low' &&
+      patient.glucocorticoidUse.durationMonths >= 3;
+
+    const vfImagingTriggers: string[] = [];
+    if (patient.acuteBackPain && patient.priorFragilityFracture) {
+      vfImagingTriggers.push('acute back pain with osteoporosis risk factors');
+    }
+    if (patient.heightLossCm !== null && patient.heightLossCm >= 4) {
+      vfImagingTriggers.push(`height loss ${patient.heightLossCm} cm`);
+    }
+    if (patient.kyphosis) vfImagingTriggers.push('kyphosis');
+    if (longTermOralGC) vfImagingTriggers.push('long-term oral glucocorticoids');
+    if (lowestT <= -2.5 && lowestT !== 0) {
+      vfImagingTriggers.push(`T-score ${lowestT}`);
+    }
+
+    if (vfImagingTriggers.length > 0) {
+      flags.push({
+        id: 'vf_imaging_consideration',
+        severity: 'info',
+        message:
+          'Consider imaging to look for vertebral fracture (lateral spine X-ray or VFA on DXA).',
+        rationale:
+          `Triggered by: ${vfImagingTriggers.join('; ')}. ` +
+          'Many vertebral fractures are silent and only identifiable on imaging — they reclassify risk and ' +
+          'are independently sufficient for clinical diagnosis of osteoporosis. Source: NOGG 2024 Rec 4.',
+        source: SRC_NOGG,
+      });
+    }
+  }
+
+  // ── Falls risk assessment prompt (NOGG 2024 Rec 5) ──
+  // Fires for patients with osteoporosis (T ≤ −2.5) or any fragility fracture.
+  {
+    const lowestT = patient.dexaResults
+      ? Math.min(
+          ...[
+            patient.dexaResults.lumbarSpineTScore,
+            patient.dexaResults.totalHipTScore,
+            patient.dexaResults.femoralNeckTScore,
+          ].filter((t): t is number => t != null)
+        )
+      : 0;
+    const hasOsteoporosis = lowestT <= -2.5 && lowestT !== 0;
+    const hasFragilityFracture =
+      patient.priorFragilityFracture ||
+      patient.priorHipFracture ||
+      patient.priorVertebralFracture;
+
+    if (hasOsteoporosis || hasFragilityFracture) {
+      flags.push({
+        id: 'falls_risk_assessment',
+        severity: 'info',
+        message:
+          'Assess falls risk. Offer exercise programme to improve balance and muscle strength to those at risk.',
+        rationale:
+          'Falls drive most fragility fractures. Exercise programmes that improve balance and muscle strength ' +
+          '(e.g. Otago, tai chi) reduce fall and fracture risk in older adults. Combine with home-hazard review, ' +
+          'medication review for fall risk, and annual vision check. Source: NOGG 2024 Rec 5.',
+        source: SRC_NOGG,
+      });
+    }
   }
 
   // ── RA double-counting warning — fires whenever RA is ticked ──
@@ -227,23 +309,96 @@ export function generateTreatmentOutput(
     return { recommendations: [], flags, referrals, supplements };
   }
 
-  // Intermediate risk without DEXA — withhold pharmacological treatment pending BMD
-  // NOGG 2024 Section 3.1: BMD required to reclassify amber before treatment decision
-  // Bypass: recent fracture (treat immediately) or AI threshold met (DEXA not required to decide)
-  if (riskCategory === 'intermediate' && !patient.dexaResults && !patient.currentTreatment &&
-      !patient.recentFractureWithin2Years && !aiLowerThresholdMet) {
+  // Intermediate risk without DEXA — branch on whether BMD is unavailable per NOGG 2024 Rec 6.
+  // Bypass: recent fracture (treat immediately) or AI threshold met (DEXA not required to decide).
+  if (
+    riskCategory === 'intermediate' &&
+    !patient.dexaResults &&
+    !patient.currentTreatment &&
+    !patient.recentFractureWithin2Years &&
+    !aiLowerThresholdMet
+  ) {
+    if (patient.bmdUnavailable) {
+      // NOGG 2024 Rec 6: BMD unavailable / contraindicated / impractical
+      const threshold = getAgeThreshold(patient.age);
+      const adjustedMOF = riskStratification.adjustedFraxMOFPercent;
+      const exceedsIT =
+        threshold !== null && adjustedMOF !== null && adjustedMOF >= threshold.itMOF;
+      const hasFragilityFx =
+        patient.priorFragilityFracture ||
+        patient.priorHipFracture ||
+        patient.priorVertebralFracture;
+
+      if (hasFragilityFx) {
+        flags.push({
+          id: 'bmd_unavailable_treat_fx',
+          severity: 'info',
+          message:
+            'BMD not available — treatment offered based on history of fragility fracture per NOGG 2024 Rec 6.',
+          rationale:
+            'NOGG 2024 Rec 6 (Strong): in intermediate-risk patients where BMD is unavailable, ' +
+            'a previous low-trauma fracture is a sufficient indication for treatment.',
+          source: SRC_NOGG,
+        });
+        // Fall through to standard treatment initiation below
+      } else if (exceedsIT) {
+        flags.push({
+          id: 'bmd_unavailable_treat_frax',
+          severity: 'info',
+          message:
+            `BMD not available — FRAX MOF ${adjustedMOF}% exceeds intervention threshold (${threshold!.itMOF}% at age ${patient.age}) per NOGG 2024 Rec 6.`,
+          rationale:
+            'NOGG 2024 Rec 6 (Strong): in intermediate-risk patients without BMD, treatment is offered ' +
+            'when FRAX 10-year MOF probability exceeds the age-specific intervention threshold (Table 5).',
+          source: SRC_NOGG,
+        });
+        // Fall through to standard treatment initiation below
+      } else {
+        flags.push({
+          id: 'bmd_unavailable_no_treatment',
+          severity: 'info',
+          message:
+            'BMD not available and neither treatment criterion met — lifestyle advice, reassess when BMD becomes available or if risk factors change per NOGG 2024 Rec 6.',
+          rationale:
+            'NOGG 2024 Rec 6 (Strong): in intermediate-risk patients without BMD, treat only if a previous ' +
+            'fragility fracture is present OR FRAX exceeds the intervention threshold. Otherwise lifestyle advice and reassessment.',
+          source: SRC_NOGG,
+        });
+        return { recommendations: [], flags, referrals, supplements };
+      }
+    } else {
+      // BMD is available / appropriate — refer for DEXA, withhold treatment until result
+      flags.push({
+        id: 'intermediate_await_dexa',
+        severity: 'info',
+        message:
+          'Intermediate fracture risk — refer for DEXA. BMD will reclassify to low (no treatment) or high (treat) per NOGG 2024 Rec 4.',
+        rationale:
+          'NOGG 2024 Rec 4 (Strong): intermediate-risk patients require BMD measurement before treatment decision. ' +
+          'Starting treatment without BMD in the amber zone is not appropriate. ' +
+          'If BMD is unavailable, contraindicated, or impractical, indicate this on the investigations step to apply NOGG Rec 6.',
+        source: SRC_NOGG,
+      });
+      return { recommendations: [], flags, referrals, supplements };
+    }
+  }
+
+  // High / very high risk: DEXA is for baseline comparison only — treatment must NOT be delayed.
+  // (NOGG 2024 Rec 3, Strong.)
+  if (
+    (riskCategory === 'high' || riskCategory === 'very_high') &&
+    !patient.dexaResults
+  ) {
     flags.push({
-      id: 'intermediate_await_dexa',
+      id: 'dexa_baseline_high_risk',
       severity: 'info',
       message:
-        'Intermediate fracture risk: do not start pharmacological treatment until DEXA is available. ' +
-        'BMD result will reclassify to low (green — no treatment) or high (red — treat).',
+        'DEXA recommended to provide a baseline for future BMD comparison. Treatment should be started without waiting for DEXA result.',
       rationale:
-        'NOGG 2024 Section 3.1: intermediate risk requires BMD measurement to reclassify before treatment decision. ' +
-        'Starting treatment without BMD in the amber zone is not appropriate.',
+        'NOGG 2024 Rec 3 (Strong): high / very high risk patients should start bone protection without delay; ' +
+        'DEXA provides a baseline for monitoring response, not a gate on treatment.',
       source: SRC_NOGG,
     });
-    return { recommendations: [], flags, referrals, supplements };
   }
 
   // ── Post-anabolic sequencing (highest priority safety flag) ──

@@ -106,10 +106,22 @@ export function Step6Investigations({ data, onChange }: Props) {
               dexaResults: v
                 ? { lumbarSpineTScore: null, totalHipTScore: null, femoralNeckTScore: null, forearmTScore: null }
                 : null,
+              bmdUnavailable: v ? false : data.bmdUnavailable,
             })
           }
         />
       </Field>
+      {!hasDexa && (
+        <Field
+          label="BMD measurement is unavailable, contraindicated, or impractical"
+          hint="e.g. frailty, severe immobility — applies NOGG 2024 Rec 6 logic"
+        >
+          <YesNo
+            value={data.bmdUnavailable}
+            onChange={v => onChange({ bmdUnavailable: v })}
+          />
+        </Field>
+      )}
       {hasDexa && data.dexaResults && (
         <>
           <Field label="Lumbar spine T-score" indent>

@@ -178,6 +178,10 @@ export interface PatientInput {
   // Patient preference — refuses all injection-based treatments
   // (denosumab SC, zoledronate IV, teriparatide SC, romosozumab SC)
   refusesInjections: boolean;
+
+  // BMD unavailable / contraindicated / impractical (frailty, severe immobility, etc.)
+  // Triggers NOGG 2024 Rec 6 logic in the intermediate-risk pathway.
+  bmdUnavailable: boolean;
 }
 
 // ─── Risk factor summary ──────────────────────────────────────────────────

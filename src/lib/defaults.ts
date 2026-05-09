@@ -48,4 +48,5 @@ export const defaultPatient: PatientInput = {
   thighOrGroinPain: false,
   onThyroidReplacement: false,
   refusesInjections: false,
+  bmdUnavailable: false,
 };

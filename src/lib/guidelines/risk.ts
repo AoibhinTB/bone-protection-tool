@@ -16,6 +16,17 @@ const SOURCE = GUIDELINE_VERSIONS.nogg;
 // ─── Main entry point ─────────────────────────────────────────────────────
 
 export function stratifyRisk(patient: PatientInput): RiskStratification {
+  // No clinical risk factors at all → FRAX not indicated (NOGG 2024 Rec 1).
+  // Skip FRAX calculation; surface a specific rationale; downstream paths produce no
+  // pharmacological treatment, only lifestyle / Ca / Vit D advice.
+  if (!hasAnyClinicalRiskFactor(patient)) {
+    return result(
+      'low', 'green', null, null, null, null, null, null, [],
+      'No clinical risk factors identified. FRAX assessment is not indicated at this time per NOGG 2024 Rec 1. ' +
+      'Reassess if risk factors develop. Advise on lifestyle measures and calcium/vitamin D intake.'
+    );
+  }
+
   // Use manually entered FRAX values where provided; estimate any missing axis for age ≥50.
   // Partial manual entry is respected — e.g. clinician provides hip only, MOF is estimated.
   let rawMOF: number | null = patient.fraxMOFPercent;
@@ -265,6 +276,35 @@ function stratifyUnder50(
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────
+
+// True if the patient has any FRAX-relevant clinical risk factor across all inputs.
+// Used to gate FRAX calculation per NOGG 2024 Rec 1.
+function hasAnyClinicalRiskFactor(p: PatientInput): boolean {
+  if (
+    p.priorFragilityFracture ||
+    p.priorHipFracture ||
+    p.priorVertebralFracture ||
+    p.recentFractureWithin2Years
+  ) return true;
+  if (p.parentalHipFracture || p.currentSmoker || p.vaping) return true;
+  if (p.alcoholUnitsPerWeek >= 21) return true;            // FRAX threshold
+  if (p.bmi !== null && p.bmi < 19) return true;            // low BMI
+  if (p.rheumatoidArthritis) return true;
+  if (p.secondaryOsteoporosis.length > 0) return true;
+  if (p.glucocorticoidUse?.current === true) return true;
+  if (p.adtUse || p.aromataseInhibitorUse) return true;
+  if (p.earlyMenopause) return true;
+  if (p.type2Diabetes) return true;
+  if (p.fallsInLastYear >= 2) return true;
+  if (p.parkinsonsDisease || p.lowerLimbAmputation || p.learningDisabilities) return true;
+  if (p.heightLossCm !== null && p.heightLossCm >= 4) return true;
+  if (p.heightLossProspectiveCm !== null && p.heightLossProspectiveCm >= 2) return true;
+  if (p.kyphosis || p.acuteBackPain) return true;
+  if (p.dexaResults !== null && lowestTScore(p.dexaResults) <= -2.5) return true;
+  if (p.thighOrGroinPain || p.completedAnabolicCourse) return true;
+  if (p.currentTreatment || p.previousTreatments.length > 0) return true;
+  return false;
+}
 
 function lowestTScore(dexa: NonNullable<PatientInput['dexaResults']>): number {
   const scores = [dexa.lumbarSpineTScore, dexa.totalHipTScore, dexa.femoralNeckTScore]

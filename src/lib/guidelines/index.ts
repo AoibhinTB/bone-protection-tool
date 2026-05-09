@@ -38,7 +38,7 @@ export function runClinicalDecision(patient: PatientInput): ClinicalDecision {
   }
 
   const { recommendations, flags, referrals, supplements } =
-    generateTreatmentOutput(patient, riskCategory);
+    generateTreatmentOutput(patient, riskCategory, riskStratification);
 
   // Append biochemistry-driven flags (ALP, TSH, calcium)
   flags.push(...generateBloodFlags(patient));

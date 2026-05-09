@@ -49,17 +49,19 @@ export interface NOGGThreshold {
   ageMin: number;
   ageMax: number;
   lowerMOF: number;  // % — LAT: below this = low risk
+  itMOF:    number;  // % — IT: intervention threshold (used by NOGG 2024 Rec 6 for BMD-unavailable patients)
   upperMOF: number;  // % — UAT: at or above this = treat without DEXA
   lowerHip: number;  // % — hip LAT
+  itHip:    number;  // % — hip IT
   upperHip: number;  // % — hip UAT
 }
 
 export const NOGG_2024_THRESHOLDS: NOGGThreshold[] = [
-  { ageMin: 50, ageMax: 54, lowerMOF:  3.4, upperMOF:  8.8, lowerHip: 0.23, upperHip: 1.1 },
-  { ageMin: 55, ageMax: 59, lowerMOF:  4.5, upperMOF: 11.4, lowerHip: 0.43, upperHip: 1.7 },
-  { ageMin: 60, ageMax: 64, lowerMOF:  6.0, upperMOF: 14.6, lowerHip: 0.80, upperHip: 2.8 },
-  { ageMin: 65, ageMax: 69, lowerMOF:  8.6, upperMOF: 19.8, lowerHip: 1.4,  upperHip: 4.2 },
-  { ageMin: 70, ageMax: 120, lowerMOF: 11.1, upperMOF: 24.4, lowerHip: 2.6, upperHip: 6.5 },
+  { ageMin: 50, ageMax: 54, lowerMOF:  3.4, itMOF:  7.3, upperMOF:  8.8, lowerHip: 0.23, itHip: 0.91, upperHip: 1.1 },
+  { ageMin: 55, ageMax: 59, lowerMOF:  4.5, itMOF:  9.5, upperMOF: 11.4, lowerHip: 0.43, itHip: 1.5,  upperHip: 1.7 },
+  { ageMin: 60, ageMax: 64, lowerMOF:  6.0, itMOF: 12.2, upperMOF: 14.6, lowerHip: 0.80, itHip: 2.3,  upperHip: 2.8 },
+  { ageMin: 65, ageMax: 69, lowerMOF:  8.6, itMOF: 16.5, upperMOF: 19.8, lowerHip: 1.4,  itHip: 3.5,  upperHip: 4.2 },
+  { ageMin: 70, ageMax: 120, lowerMOF: 11.1, itMOF: 20.3, upperMOF: 24.4, lowerHip: 2.6, itHip: 5.4,  upperHip: 6.5 },
 ];
 
 export function getAgeThreshold(age: number): NOGGThreshold | null {
