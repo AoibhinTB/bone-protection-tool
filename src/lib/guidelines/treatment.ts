@@ -424,27 +424,36 @@ export function generateTreatmentOutput(
   aiFlags(patient, flags);
   affFlags(patient, flags);
 
-  // ── Very high risk — anabolic consideration ──
+  // ── Very high risk — specialist referral (NOGG 2024 Conditional recommendation) ──
   if (riskCategory === 'very_high') {
+    const gcDrivesVHR =
+      patient.glucocorticoidUse?.current === true &&
+      (patient.glucocorticoidUse.dose === 'medium' || patient.glucocorticoidUse.dose === 'high') &&
+      patient.glucocorticoidUse.durationMonths >= GIOP.highDoseMinMonths;
+
     flags.push({
-      id: 'vhr_anabolic_consideration',
-      severity: 'warning',
-      message:
-        'Very high risk — refer specialist. Anabolic-first (teriparatide biosimilar [HSE BVM policy March 2023] or romosozumab) may be appropriate; GP cannot initiate High-Tech.',
+      id: 'vhr_specialist_referral',
+      severity: gcDrivesVHR ? 'urgent' : 'warning',
+      message: gcDrivesVHR
+        ? 'URGENT: refer to osteoporosis specialist in secondary care. Start an oral bisphosphonate in the meantime if any delay is anticipated — rapid bone loss post-glucocorticoid initiation.'
+        : 'Refer to osteoporosis specialist in secondary care for assessment and consideration of parenteral treatment. Some may need first-line anabolic drug treatment, especially those with multiple vertebral fractures.',
       rationale:
-        'NOGG 2024 Rec 11 (Conditional): consider referral to osteoporosis specialist for very high risk patients. ' +
-        'Anabolic-first approach warranted particularly when multiple vertebral fractures are present. ' +
-        'HSE MAP (effective 1 Nov 2024): romosozumab reimbursed for postmenopausal women meeting the criteria above — ' +
-        'individual patient application required through approved consultant; non-hub prescriptions not reimbursed. ' +
+        'NOGG 2024 (Conditional): consider referral of very high-risk patients to an osteoporosis specialist in secondary care, ' +
+        'for assessment and consideration of parenteral treatment (some may need first-line anabolic drug treatment, especially those with multiple vertebral fractures). ' +
+        'Indications include single important risk factors (recent vertebral fracture <2y, ≥2 vertebral fractures, T-score ≤−3.5, ' +
+        'high-dose glucocorticoids ≥7.5 mg/day for ≥3 months — refer urgently given rapid post-initiation bone loss), multiple clinical risk factors with a recent fragility fracture, ' +
+        'or other indicators (FRAX-defined VHR). ' +
+        'GP cannot initiate High-Tech anabolic drugs (teriparatide biosimilar, romosozumab) — these require specialist initiation. ' +
+        'Romosozumab HSE MAP (effective 1 Nov 2024): postmenopausal women with T ≤ −2.5 + MOF within 24 months; individual patient application via approved consultant; High Tech Hub prescription only. ' +
         'Source: HSE Managed Access Protocol — Romosozumab (Evenity), available at assets.hse.ie/media/documents/HSE_Managed_Access_Protocol_Romosozumab.pdf',
       source: SRC_ROMO_MAP,
     });
     referrals.push({
       specialty: 'metabolic_bone',
-      reason:
-        'Very high fracture risk — anabolic therapy decision (teriparatide/romosozumab) requires consultant initiation. ' +
-        'Romosozumab: HSE MAP individual patient application required; High Tech Hub prescription only.',
-      urgency: 'soon',
+      reason: gcDrivesVHR
+        ? 'Very high fracture risk driven by high-dose glucocorticoid use — urgent referral; rapid bone loss post-GC initiation. Start oral bisphosphonate in the meantime if any delay anticipated.'
+        : 'Very high fracture risk — assessment and consideration of parenteral treatment per NOGG 2024 (some may need first-line anabolic, especially with multiple vertebral fractures).',
+      urgency: gcDrivesVHR ? 'urgent' : 'soon',
     });
   }
 

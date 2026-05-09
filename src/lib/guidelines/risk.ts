@@ -238,6 +238,15 @@ function veryHighRiskReason(
     criteria.push(`high-dose glucocorticoid (${patient.glucocorticoidUse.dose} dose, ${patient.glucocorticoidUse.durationMonths} months)`);
   }
 
+  // Multiple clinical risk factors with a recent fragility fracture (any site) —
+  // NOGG 2024: high imminent re-fracture risk. ≥3 risk factors used as a sensible threshold.
+  if (patient.recentFractureWithin2Years) {
+    const rfCount = countFraxClinicalRiskFactors(patient);
+    if (rfCount >= 3) {
+      criteria.push(`recent fragility fracture (within 24 months) plus ${rfCount} clinical risk factors — high imminent re-fracture risk`);
+    }
+  }
+
   // FRAX MOF / hip VHR triggers
   // - MOF VHR fires only when FRAX MOF was manually entered (estimator too coarse for VHR designation).
   // - Hip VHR fires only when BMD was included in the FRAX calculation (NOGG 2024 / SCOOP — hip
@@ -306,6 +315,26 @@ function stratifyUnder50(
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────
+
+// Count of FRAX-relevant clinical risk factors. Used by the NOGG VHR criterion
+// "multiple clinical risk factors with recent fragility fracture".
+function countFraxClinicalRiskFactors(p: PatientInput): number {
+  let n = 0;
+  if (p.parentalHipFracture) n++;
+  if (p.currentSmoker) n++;
+  if (p.alcoholUnitsPerWeek >= 21) n++;
+  if (p.bmi !== null && p.bmi < 19) n++;
+  if (p.rheumatoidArthritis) n++;
+  if (p.secondaryOsteoporosis.length > 0) n++;
+  if (p.type2Diabetes) n++;
+  if (p.fallsInLastYear >= 2) n++;
+  if (p.parkinsonsDisease) n++;
+  if (p.glucocorticoidUse?.current === true) n++;
+  if (p.adtUse) n++;
+  if (p.aromataseInhibitorUse) n++;
+  if (p.earlyMenopause) n++;
+  return n;
+}
 
 // True if the patient has any FRAX-relevant clinical risk factor across all inputs.
 // Used to gate FRAX calculation per NOGG 2024 Rec 1.
