@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import type { PatientInput, ClinicalDecision } from '@/lib/guidelines/types';
 import { runClinicalDecision } from '@/lib/guidelines';
 import { defaultPatient } from '@/lib/defaults';
@@ -13,6 +13,11 @@ import { Step5Physical } from '@/components/wizard/steps/Step5Physical';
 import { Step6Investigations } from '@/components/wizard/steps/Step6Investigations';
 import { Step7TreatmentHistory } from '@/components/wizard/steps/Step7TreatmentHistory';
 import { ResultsView } from '@/components/results/ResultsView';
+import { DisclaimerScreen } from '@/components/DisclaimerScreen';
+
+const FEEDBACK_URL =
+  'https://docs.google.com/forms/d/e/1FAIpQLScyshX1LF68y7UYCJm9DSp2f_9s-DJ2FEi3xM3WX4wXSNFzAg/viewform';
+const DISCLAIMER_KEY = 'bp-disclaimer-acknowledged';
 
 const STEP_TITLES = [
   'Demographics',
@@ -28,6 +33,30 @@ export default function Home() {
   const [patient, setPatient] = useState<PatientInput>(defaultPatient);
   const [step, setStep] = useState(0);
   const [result, setResult] = useState<ClinicalDecision | null>(null);
+  const [acknowledged, setAcknowledged] = useState<boolean | null>(null);
+
+  // Check session storage for prior acknowledgement (per-session gate)
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    try {
+      setAcknowledged(window.sessionStorage.getItem(DISCLAIMER_KEY) === '1');
+    } catch {
+      setAcknowledged(false);
+    }
+  }, []);
+
+  function handleAcceptDisclaimer() {
+    try {
+      window.sessionStorage.setItem(DISCLAIMER_KEY, '1');
+    } catch {
+      /* sessionStorage may be unavailable in private mode — proceed anyway */
+    }
+    setAcknowledged(true);
+  }
+
+  // Avoid hydration mismatch by waiting for client-side check before rendering
+  if (acknowledged === null) return null;
+  if (!acknowledged) return <DisclaimerScreen onAccept={handleAcceptDisclaimer} />;
 
   function patch(updates: Partial<PatientInput>) {
     setPatient(prev => ({ ...prev, ...updates }));
@@ -62,6 +91,15 @@ export default function Home() {
             </div>
             <p className="text-[11px] sm:text-xs text-slate-400 mt-0.5">
               Healthcare professional use only. Does not replace clinical judgement.
+              {' · '}
+              <a
+                href={FEEDBACK_URL}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-indigo-600 underline underline-offset-2 hover:text-indigo-800"
+              >
+                Submit feedback
+              </a>
             </p>
           </div>
         </header>

@@ -1,5 +1,8 @@
 'use client';
 
+const FEEDBACK_URL =
+  'https://docs.google.com/forms/d/e/1FAIpQLScyshX1LF68y7UYCJm9DSp2f_9s-DJ2FEi3xM3WX4wXSNFzAg/viewform';
+
 interface WizardShellProps {
   currentStep: number;
   totalSteps: number;
@@ -32,6 +35,15 @@ export function WizardShell({
           </div>
           <p className="text-[11px] sm:text-xs text-slate-400 mt-0.5">
             Healthcare professional use only. Does not replace clinical judgement.
+            {' · '}
+            <a
+              href={FEEDBACK_URL}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-indigo-600 underline underline-offset-2 hover:text-indigo-800"
+            >
+              Submit feedback
+            </a>
           </p>
         </div>
       </header>
