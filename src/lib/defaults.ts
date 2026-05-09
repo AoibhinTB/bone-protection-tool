@@ -49,4 +49,5 @@ export const defaultPatient: PatientInput = {
   onThyroidReplacement: false,
   refusesInjections: false,
   bmdUnavailable: false,
+  recentOralGlucocorticoidUse: false,
 };

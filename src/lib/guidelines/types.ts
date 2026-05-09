@@ -182,6 +182,10 @@ export interface PatientInput {
   // BMD unavailable / contraindicated / impractical (frailty, severe immobility, etc.)
   // Triggers NOGG 2024 Rec 6 logic in the intermediate-risk pathway.
   bmdUnavailable: boolean;
+
+  // Recent past oral glucocorticoid use — stopped within the last ~12 months.
+  // Used as a VFA indication (silent vertebral fractures may have occurred during the GC period).
+  recentOralGlucocorticoidUse: boolean;
 }
 
 // ─── Risk factor summary ──────────────────────────────────────────────────

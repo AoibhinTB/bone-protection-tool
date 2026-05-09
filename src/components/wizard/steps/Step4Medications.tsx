@@ -21,7 +21,7 @@ export function Step4Medications({ data, onChange }: Props) {
   return (
     <div>
       <SectionHeading>Glucocorticoids</SectionHeading>
-      <Field label="Current or recent glucocorticoid use" hint="Prednisolone or equivalent">
+      <Field label="Current glucocorticoid use" hint="Prednisolone or equivalent">
         <YesNo
           value={gcOn}
           onChange={v =>
@@ -31,6 +31,15 @@ export function Step4Medications({ data, onChange }: Props) {
                 : null,
             })
           }
+        />
+      </Field>
+      <Field
+        label="Recent oral glucocorticoid use (stopped within last 12 months)"
+        hint="Triggers VFA — silent vertebral fractures may have occurred during GC period"
+      >
+        <YesNo
+          value={data.recentOralGlucocorticoidUse}
+          onChange={v => onChange({ recentOralGlucocorticoidUse: v })}
         />
       </Field>
       {gcOn && data.glucocorticoidUse && (

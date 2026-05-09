@@ -348,15 +348,23 @@ function vfaIndicationReason(patient: PatientInput): string | null {
   if (patient.kyphosis) {
     reasons.push('kyphosis');
   }
-  if (patient.glucocorticoidUse?.current) {
-    reasons.push('current glucocorticoid use');
+  // Long-term (≥3 months) current GC, or recent past oral GC stopped within ~12 months.
+  // Silent VFs may have occurred during the high-risk GC period.
+  const longTermCurrentGC =
+    patient.glucocorticoidUse?.current === true &&
+    patient.glucocorticoidUse.durationMonths >= 3;
+  if (longTermCurrentGC) {
+    reasons.push(`long-term current glucocorticoid use (${patient.glucocorticoidUse!.durationMonths} months)`);
+  } else if (patient.recentOralGlucocorticoidUse) {
+    reasons.push('recent oral glucocorticoid therapy (stopped within last 12 months)');
   }
   if (patient.dexaResults) {
     const lowest = lowestTScore(patient.dexaResults);
-    if (lowest <= -2.5) reasons.push(`T-score ${lowest} ≤ -2.5`);
+    if (lowest <= -2.5) reasons.push(`T-score ${lowest} ≤ -2.5 at spine or hip`);
   }
-  if (patient.acuteBackPain && patient.priorFragilityFracture) {
-    reasons.push('acute back pain with osteoporosis risk');
+  // Acute back pain with any osteoporosis risk factor (NOGG: "with risk factors for osteoporosis")
+  if (patient.acuteBackPain && hasAnyOsteoporosisRiskFactor(patient)) {
+    reasons.push('acute back pain with osteoporosis risk factor(s)');
   }
 
   if (reasons.length === 0) return null;
@@ -366,6 +374,24 @@ function vfaIndicationReason(patient: PatientInput): string | null {
     'VFA identifies prevalent vertebral fractures that alter risk category and treatment decisions ' +
     '(NOGG 2024 Rec 4 — Strong Recommendation).'
   );
+}
+
+// Generic osteoporosis risk factor check (used by the VFA back-pain criterion).
+function hasAnyOsteoporosisRiskFactor(p: PatientInput): boolean {
+  if (p.priorFragilityFracture || p.priorHipFracture || p.priorVertebralFracture) return true;
+  if (p.dexaResults && lowestTScore(p.dexaResults) <= -2.5) return true;
+  if (p.glucocorticoidUse?.current === true || p.recentOralGlucocorticoidUse) return true;
+  if (p.adtUse || p.aromataseInhibitorUse || p.earlyMenopause) return true;
+  if (p.parentalHipFracture) return true;
+  if (p.currentSmoker) return true;
+  if (p.alcoholUnitsPerWeek >= 21) return true;
+  if (p.bmi !== null && p.bmi < 19) return true;
+  if (p.rheumatoidArthritis) return true;
+  if (p.secondaryOsteoporosis.length > 0) return true;
+  if (p.type2Diabetes) return true;
+  if (p.fallsInLastYear >= 2) return true;
+  if (p.parkinsonsDisease) return true;
+  return false;
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────
