@@ -77,6 +77,15 @@ export function Step4Medications({ data, onChange }: Props) {
       )}
 
       <SectionHeading>Other medications</SectionHeading>
+      <Field
+        label="On levothyroxine"
+        hint="Affects TSH interpretation — under/over-replacement contributes to bone loss"
+      >
+        <YesNo
+          value={data.onThyroidReplacement}
+          onChange={v => onChange({ onThyroidReplacement: v })}
+        />
+      </Field>
       {data.sex === 'male' && (
         <Field label="Androgen deprivation therapy (ADT)" hint="Prostate cancer treatment">
           <YesNo value={data.adtUse} onChange={v => onChange({ adtUse: v })} />

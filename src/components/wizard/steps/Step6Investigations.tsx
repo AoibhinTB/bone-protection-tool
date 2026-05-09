@@ -2,7 +2,7 @@
 
 import { estimateFrax } from '@/lib/fraxEstimate';
 import type { PatientInput } from '@/lib/guidelines/types';
-import { Field, NumInput, YesNo, SectionHeading } from '../FormPrimitives';
+import { Field, NumInput, YesNo, SectionHeading, Segmented } from '../FormPrimitives';
 import { Term } from '@/components/Tooltip';
 
 interface Props {
@@ -260,22 +260,25 @@ export function Step6Investigations({ data, onChange }: Props) {
               width="w-24"
             />
           </Field>
-          <Field
-            label="On levothyroxine"
-            hint="Affects TSH interpretation — under/over-replacement contributes to bone loss"
-            indent
-          >
-            <YesNo
-              value={data.onThyroidReplacement}
-              onChange={v => onChange({ onThyroidReplacement: v })}
-            />
-          </Field>
-          <Field label="FBC" indent>
-            <YesNo
-              value={data.bloodResults.fbc ?? false}
-              onChange={v => onChange({ bloodResults: { ...data.bloodResults!, fbc: v } })}
-              yesLabel="Normal"
-              noLabel="Abnormal / not done"
+          <Field label="FBC" hint="Full blood count — three-way: not done / normal / abnormal" indent>
+            <Segmented<'not_done' | 'normal' | 'abnormal'>
+              value={
+                data.bloodResults.fbc === null
+                  ? 'not_done'
+                  : data.bloodResults.fbc
+                  ? 'normal'
+                  : 'abnormal'
+              }
+              onChange={v => {
+                const fbcVal: boolean | null =
+                  v === 'not_done' ? null : v === 'normal';
+                onChange({ bloodResults: { ...data.bloodResults!, fbc: fbcVal } });
+              }}
+              options={[
+                { value: 'not_done', label: 'Not done' },
+                { value: 'normal',   label: 'Normal' },
+                { value: 'abnormal', label: 'Abnormal' },
+              ]}
             />
           </Field>
         </>
