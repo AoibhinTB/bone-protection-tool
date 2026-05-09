@@ -134,28 +134,53 @@ export function stratifyRisk(patient: PatientInput): RiskStratification {
       'Hip and clinical vertebral fractures provide clinical diagnosis of osteoporosis without DEXA.');
   }
 
-  // FRAX-based stratification (always available here: estimate or manual)
+  // FRAX-based stratification (always available here: estimate or manual).
+  // NOGG 2024 (Strong): when BMD is included in FRAX, classify by the HIGHER of the MOF
+  // and hip-fracture risk categories. Without BMD, hip probability is unreliable for
+  // classification (per SCOOP study and NOGG guidance) — use MOF only.
   if (adjustedMOF !== null) {
     const mof = adjustedMOF;
 
-    if (mof >= threshold.upperMOF) {
-      return result('high', 'red', threshold.lowerMOF, threshold.upperMOF, rawMOF, rawHip, adjustedMOF, adjustedHip, adjustments,
-        `FRAX MOF ${mof}% exceeds upper threshold (${threshold.upperMOF}%) for age ${patient.age} — treatment indicated.` + estNote);
+    const categorise = (val: number, low: number, up: number): 'high' | 'intermediate' | 'low' =>
+      val >= up ? 'high' : val >= low ? 'intermediate' : 'low';
+
+    const mofCat = categorise(mof, threshold.lowerMOF, threshold.upperMOF);
+
+    // Hip axis only counted when BMD is included in the FRAX calculation
+    let hipCat: 'high' | 'intermediate' | 'low' | null = null;
+    if (patient.fraxCalculatedWithBMD && adjustedHip !== null) {
+      hipCat = categorise(adjustedHip, threshold.lowerHip, threshold.upperHip);
     }
 
-    if (mof >= threshold.lowerMOF) {
+    const rank = (c: 'high' | 'intermediate' | 'low'): number =>
+      c === 'high' ? 2 : c === 'intermediate' ? 1 : 0;
+
+    const useHip = hipCat !== null && rank(hipCat) > rank(mofCat);
+    const finalCat: 'high' | 'intermediate' | 'low' = useHip ? hipCat! : mofCat;
+
+    const drivenBy = useHip
+      ? `FRAX hip ${adjustedHip}% drives ${finalCat} classification (higher of MOF / hip per NOGG 2024 Strong recommendation; BMD included)`
+      : hipCat !== null
+      ? `FRAX MOF ${mof}% drives ${finalCat} classification (MOF and hip categories agree or MOF is higher; BMD included)`
+      : `FRAX MOF ${mof}% drives ${finalCat} classification (BMD not included — hip axis not counted per NOGG 2024)`;
+
+    if (finalCat === 'high') {
+      return result('high', 'red', threshold.lowerMOF, threshold.upperMOF, rawMOF, rawHip, adjustedMOF, adjustedHip, adjustments,
+        `${drivenBy}. Treatment indicated.` + estNote);
+    }
+
+    if (finalCat === 'intermediate') {
       // Intermediate FRAX but T-score ≤ -2.5 → reclassify to high
       if (patient.dexaResults && lowestTScore(patient.dexaResults) <= -2.5) {
         return result('high', 'red', threshold.lowerMOF, threshold.upperMOF, rawMOF, rawHip, adjustedMOF, adjustedHip, adjustments,
-          `FRAX MOF ${mof}% in intermediate zone, but T-score ≤ -2.5 — reclassified to high risk per NOGG 2024 Rec 2.` + estNote);
+          `${drivenBy}, but T-score ≤ -2.5 — reclassified to high risk per NOGG 2024 Rec 2.` + estNote);
       }
       return result('intermediate', 'amber', threshold.lowerMOF, threshold.upperMOF, rawMOF, rawHip, adjustedMOF, adjustedHip, adjustments,
-        `FRAX MOF ${mof}% between thresholds (${threshold.lowerMOF}–${threshold.upperMOF}%) for age ${patient.age}. ` +
-        'DEXA recommended to refine risk.' + estNote);
+        `${drivenBy}. DEXA recommended to refine risk.` + estNote);
     }
 
     return result('low', 'green', threshold.lowerMOF, threshold.upperMOF, rawMOF, rawHip, adjustedMOF, adjustedHip, adjustments,
-      `FRAX MOF ${mof}% below lower threshold (${threshold.lowerMOF}%) for age ${patient.age} — treatment not indicated.` + estNote);
+      `${drivenBy}. Treatment not indicated.` + estNote);
   }
 
   // Fallback (age <50 or no data): clinical risk factor estimate
@@ -213,16 +238,21 @@ function veryHighRiskReason(
     criteria.push(`high-dose glucocorticoid (${patient.glucocorticoidUse.dose} dose, ${patient.glucocorticoidUse.durationMonths} months)`);
   }
 
-  // FRAX MOF / hip VHR triggers — only when FRAX is manually entered (not estimated).
-  // The estimator is too coarse for VHR designation; require an official FRAX value to
-  // avoid over-classification.
+  // FRAX MOF / hip VHR triggers
+  // - MOF VHR fires only when FRAX MOF was manually entered (estimator too coarse for VHR designation).
+  // - Hip VHR fires only when BMD was included in the FRAX calculation (NOGG 2024 / SCOOP — hip
+  //   probability is unreliable without BMD).
   const fraxIsManual = patient.fraxMOFPercent !== null || patient.fraxHipPercent !== null;
   if (fraxIsManual) {
     if (adjustedMOF !== null && adjustedMOF >= VERY_HIGH_RISK.fraxMOF) {
       criteria.push(`adjusted FRAX MOF ${adjustedMOF}% ≥ ${VERY_HIGH_RISK.fraxMOF}%`);
     }
-    if (adjustedHip !== null && adjustedHip >= VERY_HIGH_RISK.fraxHip) {
-      criteria.push(`adjusted FRAX hip ${adjustedHip}% ≥ ${VERY_HIGH_RISK.fraxHip}%`);
+    if (
+      adjustedHip !== null &&
+      adjustedHip >= VERY_HIGH_RISK.fraxHip &&
+      patient.fraxCalculatedWithBMD
+    ) {
+      criteria.push(`adjusted FRAX hip ${adjustedHip}% ≥ ${VERY_HIGH_RISK.fraxHip}% (BMD-included)`);
     }
   }
 
