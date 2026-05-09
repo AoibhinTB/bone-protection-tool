@@ -124,6 +124,14 @@ export function generateRiskFactorsIdentified(
     // already added above as part of "secondary cause"; skip duplicate
   }
 
+  // Born outside Ireland — FRAX needs country-of-origin model
+  if (patient.bornOutsideIreland) {
+    items.push({
+      factor: 'Born outside Ireland',
+      effect: 'In-tool FRAX estimator suppressed (uses Irish baselines); calculate FRAX at frax.shef.ac.uk with country of birth selected and enter manually',
+    });
+  }
+
   // Patient refuses injections
   if (patient.refusesInjections) {
     items.push({

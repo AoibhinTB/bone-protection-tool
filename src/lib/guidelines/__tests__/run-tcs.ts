@@ -57,6 +57,7 @@ function basePatient(overrides: Partial<PatientInput>): PatientInput {
     refusesInjections: false,
     bmdUnavailable: false,
     recentOralGlucocorticoidUse: false,
+    bornOutsideIreland: false,
   };
   return { ...base, ...overrides };
 }

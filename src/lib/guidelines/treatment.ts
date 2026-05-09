@@ -91,6 +91,24 @@ export function generateTreatmentOutput(
     });
   }
 
+  // ── Patient born outside Ireland — FRAX must use country-of-origin model ──
+  if (patient.bornOutsideIreland) {
+    const hasManualFrax =
+      patient.fraxMOFPercent !== null || patient.fraxHipPercent !== null;
+    flags.push({
+      id: 'frax_country_of_origin',
+      severity: hasManualFrax ? 'info' : 'warning',
+      message: hasManualFrax
+        ? 'Patient born outside Ireland — confirm the manual FRAX values were calculated using the patient\'s country-of-birth model on frax.shef.ac.uk (NOGG 2024 Table 2: risk characteristics persist after migration).'
+        : 'Patient born outside Ireland — auto-estimated FRAX (Irish baseline) is not appropriate. Calculate FRAX at frax.shef.ac.uk with the patient\'s country of birth selected, then enter values manually.',
+      rationale:
+        'NOGG 2024 Table 2: individuals retain the risk characteristics of their country of origin. ' +
+        'Use the FRAX model for the country of birth — Irish baselines (country code 49) are not appropriate for non-Irish-born patients. ' +
+        'Source: Johansson et al. 2015; Wändell et al. 2021.',
+      source: SRC_NOGG,
+    });
+  }
+
   // ── Vertebral fracture imaging prompt (NOGG 2024 Rec 4) ──
   // Triggers: acute back pain + risk factors, height loss ≥4 cm, kyphosis, long-term oral
   // glucocorticoids, or T-score ≤−2.5.

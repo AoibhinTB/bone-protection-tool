@@ -186,6 +186,13 @@ export interface PatientInput {
   // Recent past oral glucocorticoid use — stopped within the last ~12 months.
   // Used as a VFA indication (silent vertebral fractures may have occurred during the GC period).
   recentOralGlucocorticoidUse: boolean;
+
+  // Born outside Ireland — FRAX must use the country-of-origin model
+  // (NOGG 2024 Table 2: individuals retain risk characteristics of their country of birth).
+  // The in-tool FRAX estimator uses Irish baselines (country code 49), so for non-Irish
+  // patients the estimator is suppressed and manual FRAX entry from frax.shef.ac.uk
+  // (with the patient's country selected) is required.
+  bornOutsideIreland: boolean;
 }
 
 // ─── Risk factor summary ──────────────────────────────────────────────────

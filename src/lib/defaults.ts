@@ -50,4 +50,5 @@ export const defaultPatient: PatientInput = {
   refusesInjections: false,
   bmdUnavailable: false,
   recentOralGlucocorticoidUse: false,
+  bornOutsideIreland: false,
 };

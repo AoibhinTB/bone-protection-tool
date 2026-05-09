@@ -49,6 +49,15 @@ export function Step1Demographics({ data, onChange }: Props) {
           onChange={v => onChange({ pagetsDiseaseOfBone: v })}
         />
       </Field>
+      <Field
+        label="Born outside Ireland"
+        hint="FRAX should use the country-of-origin model — risk persists after migration (NOGG Table 2). The in-tool estimator uses Irish baselines (country 49); for non-Irish-born patients enter FRAX manually from frax.shef.ac.uk with the correct country selected."
+      >
+        <YesNo
+          value={data.bornOutsideIreland}
+          onChange={v => onChange({ bornOutsideIreland: v })}
+        />
+      </Field>
     </div>
   );
 }

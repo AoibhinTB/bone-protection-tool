@@ -29,9 +29,14 @@ export function stratifyRisk(patient: PatientInput): RiskStratification {
 
   // Use manually entered FRAX values where provided; estimate any missing axis for age ≥50.
   // Partial manual entry is respected — e.g. clinician provides hip only, MOF is estimated.
+  // For patients born outside Ireland, the estimator is suppressed: it uses Irish baselines
+  // (country code 49) which are not appropriate for non-Irish-born patients (NOGG Table 2).
   let rawMOF: number | null = patient.fraxMOFPercent;
   let rawHip: number | null = patient.fraxHipPercent;
-  const needEstimate = (rawMOF === null || rawHip === null) && patient.age >= 50;
+  const needEstimate =
+    !patient.bornOutsideIreland &&
+    (rawMOF === null || rawHip === null) &&
+    patient.age >= 50;
 
   if (needEstimate) {
     const est = estimateFrax(patient);

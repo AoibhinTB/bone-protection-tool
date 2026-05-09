@@ -22,31 +22,54 @@ export function Step6Investigations({ data, onChange }: Props) {
         <Term term="FRAX">FRAX</Term>
       </SectionHeading>
 
-      {/* Auto-calculated estimate */}
-      <div className="bg-indigo-50 border border-indigo-200 rounded-lg px-4 py-3 mb-4">
-        <p className="text-xs font-medium text-indigo-700 mb-1">
-          Estimated FRAX — Ireland (no BMD)
-        </p>
-        <div className="flex gap-6 text-sm">
-          <div>
-            <Term term="MOF">
-              <span className="text-indigo-500">MOF</span>
-            </Term>
-            <span className="text-indigo-500"> </span>
-            <span className="font-bold text-indigo-900">{fraxEst.mof}%</span>
-          </div>
-          <div>
-            <Term term="Hip">
-              <span className="text-indigo-500">Hip</span>
-            </Term>
-            <span className="text-indigo-500"> </span>
-            <span className="font-bold text-indigo-900">{fraxEst.hip}%</span>
-          </div>
+      {data.bornOutsideIreland ? (
+        // Non-Irish: auto-estimate suppressed (Irish baselines not appropriate)
+        <div className="bg-amber-50 border-l-4 border-amber-500 rounded-r-lg px-4 py-3 mb-4">
+          <p className="text-xs font-bold text-amber-800 uppercase tracking-wide mb-1">
+            FRAX must be calculated externally
+          </p>
+          <p className="text-xs text-amber-900 leading-snug">
+            Patient born outside Ireland. The in-tool estimator uses Irish baselines (country
+            code 49) and is not appropriate. Calculate FRAX at{' '}
+            <a
+              href="https://frax.shef.ac.uk/FRAX/"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="underline font-medium"
+            >
+              frax.shef.ac.uk
+            </a>{' '}
+            with the patient&apos;s country of birth selected, then enter the values below
+            (NOGG 2024 Table 2 — risk characteristics persist after migration).
+          </p>
         </div>
-        <p className="text-xs text-indigo-500 mt-1">
-          Calculated from risk factors above · Based on published NOGG/FRAX algorithm (Kanis et al.)
-        </p>
-      </div>
+      ) : (
+        // Irish-born (or unknown): show auto-estimate
+        <div className="bg-indigo-50 border border-indigo-200 rounded-lg px-4 py-3 mb-4">
+          <p className="text-xs font-medium text-indigo-700 mb-1">
+            Estimated FRAX — Ireland (no BMD)
+          </p>
+          <div className="flex gap-6 text-sm">
+            <div>
+              <Term term="MOF">
+                <span className="text-indigo-500">MOF</span>
+              </Term>
+              <span className="text-indigo-500"> </span>
+              <span className="font-bold text-indigo-900">{fraxEst.mof}%</span>
+            </div>
+            <div>
+              <Term term="Hip">
+                <span className="text-indigo-500">Hip</span>
+              </Term>
+              <span className="text-indigo-500"> </span>
+              <span className="font-bold text-indigo-900">{fraxEst.hip}%</span>
+            </div>
+          </div>
+          <p className="text-xs text-indigo-500 mt-1">
+            Calculated from risk factors above · Based on published NOGG/FRAX algorithm (Kanis et al.)
+          </p>
+        </div>
+      )}
 
       <Field
         label="Override with official FRAX values"
