@@ -53,7 +53,7 @@ export function DisclaimerScreen({ onAccept }: Props) {
             </li>
             <li className="flex items-start gap-1.5">
               <span className="text-slate-500 mt-0.5 shrink-0">•</span>
-              <span>This tool is pending independent clinical review — it is a prototype under active development</span>
+              <span>This tool is pending independent clinical review and is a prototype under active development.</span>
             </li>
           </ul>
         </section>
@@ -88,7 +88,7 @@ export function DisclaimerScreen({ onAccept }: Props) {
           onClick={onAccept}
           className="w-full rounded-lg bg-indigo-600 text-white font-semibold text-sm sm:text-base px-5 py-3 sm:py-3.5 active:bg-indigo-800 hover:bg-indigo-700 shadow-sm transition-colors min-h-[48px]"
         >
-          I understand — begin assessment
+          I understand
         </button>
 
         {/* Footer: version, sources, feedback */}
