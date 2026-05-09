@@ -194,13 +194,25 @@ export function Step6Investigations({ data, onChange }: Props) {
       )}
 
       <SectionHeading>Blood results</SectionHeading>
+      <p className="text-xs text-slate-500 mb-2 leading-snug">
+        Optional. Fill in any values you have — leave fields blank if not done. The tool
+        will recommend baseline bloods regardless and use entered values to refine alerts.
+      </p>
       <Field label="Blood results available">
         <YesNo
           value={hasBlood}
           onChange={v =>
             onChange({
               bloodResults: v
-                ? { adjustedCalciumMmol: null, vitaminDNmol: null, egfr: null, alp: null, tshMUL: null, fbc: null }
+                ? {
+                    adjustedCalciumMmol: null,
+                    vitaminDNmol: null,
+                    egfr: null,
+                    alp: null,
+                    tshMUL: null,
+                    hbGramsPerLitre: null,
+                    esrOrCrp: null,
+                  }
                 : null,
             })
           }
@@ -260,24 +272,40 @@ export function Step6Investigations({ data, onChange }: Props) {
               width="w-24"
             />
           </Field>
-          <Field label="FBC" hint="Full blood count — three-way: not done / normal / abnormal" indent>
-            <Segmented<'not_done' | 'normal' | 'abnormal'>
+          <Field
+            label="Hb"
+            hint="g/L — anaemia threshold <120 women, <130 men. Anaemia is the key FBC signal for myeloma exclusion."
+            indent
+          >
+            <NumInput
+              value={data.bloodResults.hbGramsPerLitre}
+              onChange={v => onChange({ bloodResults: { ...data.bloodResults!, hbGramsPerLitre: v } })}
+              min={40}
+              max={220}
+              unit="g/L"
+              width="w-24"
+            />
+          </Field>
+          <Field
+            label="ESR or CRP"
+            hint="Either ESR or CRP — categorical only. Elevated value adds to myeloma triggers (NOGG)."
+            indent
+          >
+            <Segmented<'not_done' | 'normal' | 'elevated'>
               value={
-                data.bloodResults.fbc === null
+                data.bloodResults.esrOrCrp === null
                   ? 'not_done'
-                  : data.bloodResults.fbc
-                  ? 'normal'
-                  : 'abnormal'
+                  : data.bloodResults.esrOrCrp
               }
               onChange={v => {
-                const fbcVal: boolean | null =
-                  v === 'not_done' ? null : v === 'normal';
-                onChange({ bloodResults: { ...data.bloodResults!, fbc: fbcVal } });
+                const val: 'normal' | 'elevated' | null =
+                  v === 'not_done' ? null : v;
+                onChange({ bloodResults: { ...data.bloodResults!, esrOrCrp: val } });
               }}
               options={[
                 { value: 'not_done', label: 'Not done' },
                 { value: 'normal',   label: 'Normal' },
-                { value: 'abnormal', label: 'Abnormal' },
+                { value: 'elevated', label: 'Elevated' },
               ]}
             />
           </Field>

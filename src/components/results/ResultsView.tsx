@@ -196,9 +196,15 @@ const INVESTIGATION_BULLETS: Partial<Record<string, string[]>> = {
     'Unexplained raised ALP: contraindication to teriparatide',
   ],
   fbc: [
-    'Exclude haematological malignancy (myeloma)',
-    'Especially important if anaemia present, vertebral fracture with no clear cause, or elevated ESR',
-    'If abnormal: add SPEP/UPEP',
+    'Hb is the key FBC signal for myeloma exclusion (anaemia → SPEP/UPEP)',
+    'Anaemia threshold: <120 g/L women, <130 g/L men',
+    'Severe anaemia (<80 g/L) — investigate cause urgently before bone treatment',
+    'Other FBC abnormalities (high WCC etc.) interpreted on their own merits',
+  ],
+  esr_crp: [
+    'Either ESR or CRP — both screen for inflammation',
+    'Elevated → SPEP/UPEP indicated to exclude myeloma',
+    'Other differentials: RA, connective tissue disease, infection, malignancy generally',
   ],
 };
 
@@ -472,21 +478,69 @@ function buildBloodEntries(patient: PatientInput): BloodEntry[] {
     }
   }
 
-  // FBC (boolean)
-  if (b.fbc !== null) {
-    entries.push({
-      name: 'FBC',
-      value: b.fbc ? 'Normal' : 'Abnormal / not done',
-      status: b.fbc ? 'normal' : 'abnormal',
-      statusLabel: b.fbc ? 'normal' : 'abnormal',
-      bullets: b.fbc
-        ? ['No haematological flag']
-        : [
-            'Investigate anaemia or cytopenia',
-            'Add SPEP/UPEP — exclude myeloma',
-            'Particularly if vertebral fracture without clear cause',
-          ],
-    });
+  // Hb / anaemia
+  if (b.hbGramsPerLitre !== null) {
+    const hb = b.hbGramsPerLitre;
+    const threshold = patient.sex === 'female' ? 120 : 130;
+    if (hb < 80) {
+      entries.push({
+        name: 'Hb',
+        value: `${hb} g/L`,
+        status: 'abnormal',
+        statusLabel: 'severe anaemia',
+        bullets: [
+          'Severe anaemia — investigate urgently',
+          'Add SPEP/UPEP, serum free light chains, full myeloma workup',
+          'Consider GI bleeding, B12/folate, iron, chronic disease',
+          'Hold elective bone treatment pending diagnosis',
+        ],
+      });
+    } else if (hb < threshold) {
+      entries.push({
+        name: 'Hb',
+        value: `${hb} g/L`,
+        status: 'abnormal',
+        statusLabel: 'anaemia',
+        bullets: [
+          `Below sex-specific threshold (<${threshold} g/L for ${patient.sex})`,
+          'Add SPEP/UPEP and serum free light chains — exclude myeloma',
+          'Investigate other causes (B12/folate, iron, chronic disease)',
+        ],
+      });
+    } else {
+      entries.push({
+        name: 'Hb',
+        value: `${hb} g/L`,
+        status: 'normal',
+        statusLabel: 'normal',
+        bullets: [`At/above sex threshold (≥${threshold} g/L for ${patient.sex})`, 'No anaemia flag'],
+      });
+    }
+  }
+
+  // ESR or CRP
+  if (b.esrOrCrp !== null) {
+    if (b.esrOrCrp === 'elevated') {
+      entries.push({
+        name: 'ESR / CRP',
+        value: 'Elevated',
+        status: 'abnormal',
+        statusLabel: 'elevated',
+        bullets: [
+          'Add SPEP/UPEP — exclude myeloma',
+          'Other differentials: RA, connective tissue disease, infection, malignancy generally',
+          'Investigate alongside FBC and SPEP/UPEP',
+        ],
+      });
+    } else {
+      entries.push({
+        name: 'ESR / CRP',
+        value: 'Normal',
+        status: 'normal',
+        statusLabel: 'normal',
+        bullets: ['No inflammatory flag'],
+      });
+    }
   }
 
   return entries;

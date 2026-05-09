@@ -107,13 +107,14 @@ export function assessInvestigationsNeeded(
     });
   }
 
-  if (!patient.bloodResults?.fbc) {
+  if (patient.bloodResults?.hbGramsPerLitre == null) {
     needed.push({
       investigation: 'fbc',
       tier: 2,
       reason:
-        'FBC: exclude haematological malignancy (myeloma) — especially with anaemia, ' +
-        'vertebral fracture without clear cause, or elevated ESR. If abnormal, add SPEP/UPEP.',
+        'FBC (Hb): exclude haematological malignancy (myeloma) — anaemia is the key signal, ' +
+        'particularly with vertebral fracture without clear cause or elevated ESR/CRP. ' +
+        'If anaemia or elevated inflammatory markers, add SPEP/UPEP.',
       urgency: 'routine',
     });
   }
@@ -242,20 +243,30 @@ export function assessInvestigationsNeeded(
     });
   }
 
-  // SPEP/UPEP — Tier 3: if FBC abnormal, anaemia suspected, or vertebral fracture without clear cause
-  const fhcAbnormal = patient.bloodResults?.fbc === false;
+  // SPEP/UPEP — Tier 3: clinically-precise myeloma triggers per NOGG.
+  // Anaemia (Hb below sex threshold), or elevated ESR/CRP, or unexplained vertebral fx.
+  // Generic "FBC abnormal" no longer triggers — high WCC alone (e.g. infection) is not a
+  // myeloma signal and shouldn't auto-recommend SPEP/UPEP.
+  const hb = patient.bloodResults?.hbGramsPerLitre ?? null;
+  const anaemiaThreshold = patient.sex === 'female' ? 120 : 130;
+  const anaemia = hb !== null && hb < anaemiaThreshold;
+  const esrCrpElevated = patient.bloodResults?.esrOrCrp === 'elevated';
   const vertebralNoOtherCause =
     patient.priorVertebralFracture &&
     patient.secondaryOsteoporosis.length === 0 &&
     !patient.glucocorticoidUse;
-  if (fhcAbnormal || vertebralNoOtherCause) {
+  if (anaemia || esrCrpElevated || vertebralNoOtherCause) {
+    const reasons: string[] = [];
+    if (anaemia) reasons.push(`anaemia (Hb ${hb} g/L; threshold <${anaemiaThreshold} for ${patient.sex})`);
+    if (esrCrpElevated) reasons.push('elevated ESR/CRP');
+    if (vertebralNoOtherCause) reasons.push('vertebral fracture without clear secondary cause');
     needed.push({
       investigation: 'spep_upep',
       tier: 3,
       reason:
-        'SPEP/UPEP: exclude myeloma — particularly with abnormal FBC, anaemia, ' +
-        'or vertebral fracture with no clear secondary cause.',
-      urgency: fhcAbnormal ? 'soon' : 'routine',
+        `SPEP/UPEP: exclude myeloma — triggered by ${reasons.join('; ')}. ` +
+        'NOGG 2024: anaemia, raised ESR, and unexplained vertebral fracture are the key flags.',
+      urgency: anaemia || esrCrpElevated ? 'soon' : 'routine',
     });
   }
 

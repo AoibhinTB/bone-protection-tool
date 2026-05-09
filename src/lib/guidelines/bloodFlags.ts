@@ -136,5 +136,47 @@ export function generateBloodFlags(patient: PatientInput): ClinicalFlag[] {
     }
   }
 
+  // ── Hb / anaemia ───────────────────────────────────────────────────────
+  if (blood.hbGramsPerLitre !== null) {
+    const hb = blood.hbGramsPerLitre;
+    const threshold = patient.sex === 'female' ? 120 : 130;
+    if (hb < 80) {
+      flags.push({
+        id: 'severe_anaemia',
+        severity: 'urgent',
+        message: `Severe anaemia (Hb ${hb} g/L). Investigate cause urgently — myeloma is a key differential in this clinical context.`,
+        rationale:
+          'Severe anaemia in an osteoporosis workup raises strong suspicion of haematological malignancy (myeloma), ' +
+          'GI bleeding, or other serious cause. Add SPEP/UPEP, serum free light chains, and full myeloma workup. ' +
+          'Hold elective bone treatment pending diagnosis.',
+        source: SRC_NOGG,
+      });
+    } else if (hb < threshold) {
+      flags.push({
+        id: 'anaemia',
+        severity: 'warning',
+        message: `Anaemia (Hb ${hb} g/L; threshold <${threshold} for ${patient.sex}). Add SPEP/UPEP to exclude myeloma.`,
+        rationale:
+          'Anaemia in osteoporosis workup is the classic flag for myeloma (NOGG 2024). ' +
+          'Add SPEP/UPEP and serum free light chains. Investigate other causes (B12/folate, iron, chronic disease).',
+        source: SRC_NOGG,
+      });
+    }
+  }
+
+  // ── ESR / CRP elevated ─────────────────────────────────────────────────
+  if (blood.esrOrCrp === 'elevated') {
+    flags.push({
+      id: 'esr_crp_elevated',
+      severity: 'warning',
+      message: 'ESR / CRP elevated. Add SPEP/UPEP to exclude myeloma; investigate other inflammatory causes.',
+      rationale:
+        'Raised ESR (and/or CRP) in osteoporosis workup is a NOGG flag for haematological malignancy. ' +
+        'Other differentials: RA, connective tissue disease, infection, malignancy generally. ' +
+        'Investigate alongside SPEP/UPEP.',
+      source: SRC_NOGG,
+    });
+  }
+
   return flags;
 }

@@ -53,12 +53,13 @@ export interface DexaResults {
 }
 
 export interface BloodResults {
-  adjustedCalciumMmol: number | null; // mmol/L
-  vitaminDNmol: number | null;        // nmol/L (25-OHD)
-  egfr: number | null;                // ml/min/1.73 m²
-  alp: number | null;                 // U/L — bone turnover, Paget's, osteomalacia screen (normal 30–130)
-  tshMUL: number | null;              // mU/L — TSH (normal 0.4–4.0)
-  fbc: boolean | null;                // true = done and normal; false = done and abnormal
+  adjustedCalciumMmol: number | null;       // mmol/L
+  vitaminDNmol: number | null;              // nmol/L (25-OHD)
+  egfr: number | null;                      // ml/min/1.73 m²
+  alp: number | null;                       // U/L — bone turnover, Paget's, osteomalacia screen (normal 30–130)
+  tshMUL: number | null;                    // mU/L — TSH (normal 0.4–4.0)
+  hbGramsPerLitre: number | null;           // g/L — Hb (anaemia threshold: <120 women, <130 men)
+  esrOrCrp: 'normal' | 'elevated' | null;   // ESR or CRP categorical — null = not done
 }
 
 export type BisphosphonateAgent = 'alendronate' | 'risedronate' | 'zoledronate' | 'ibandronate';
