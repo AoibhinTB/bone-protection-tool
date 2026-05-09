@@ -424,6 +424,56 @@ export function generateTreatmentOutput(
   aiFlags(patient, flags);
   affFlags(patient, flags);
 
+  // ── High → very high re-designation consideration (NOGG 2024 Section 3 + Table 2) ──
+  // High-risk patients with ≥2 Table 2 modifiers → prompt clinician to consider VHR.
+  // Modifiers that already drive VHR independently (high-dose GC ≥3mo, T ≤ −3.5) are excluded.
+  if (riskCategory === 'high') {
+    const modifiers: string[] = [];
+
+    if (patient.fallsInLastYear >= 2) {
+      modifiers.push(`recurrent falls (${patient.fallsInLastYear}/year)`);
+    }
+    if (patient.type2Diabetes || patient.secondaryOsteoporosis.includes('type1_diabetes')) {
+      modifiers.push('diabetes mellitus');
+    }
+    if (patient.parkinsonsDisease) {
+      modifiers.push("Parkinson's disease");
+    }
+    if (patient.recentFractureWithin2Years) {
+      modifiers.push('recent fragility fracture (<24 months)');
+    }
+    // Spine-predominant low BMD: lumbar T ≤ −3.0 AND ≥1 SD lower than femoral neck
+    if (patient.dexaResults) {
+      const ls = patient.dexaResults.lumbarSpineTScore;
+      const fn = patient.dexaResults.femoralNeckTScore;
+      if (
+        ls !== null && ls > -3.5 && ls <= -3.0 &&
+        fn !== null && (fn - ls) >= 1.0
+      ) {
+        modifiers.push(`spine-predominant low BMD (LS ${ls} vs FN ${fn})`);
+      }
+    }
+
+    if (modifiers.length >= 2) {
+      flags.push({
+        id: 'vhr_redesignation_consideration',
+        severity: 'warning',
+        message:
+          `High risk by FRAX with ${modifiers.length} Table 2 modifiers (${modifiers.join('; ')}). ` +
+          'Consider re-designation to very high risk per NOGG 2024 — refer for specialist consideration of parenteral / anabolic treatment.',
+        rationale:
+          'NOGG 2024 (Conditional): in patients with FRAX probabilities in the high-risk category, ' +
+          'consideration of additional clinical risk factors (e.g., frequent falls, very low spine BMD — see Table 2) ' +
+          'can also lead to redesignation from high to very high risk of fracture. ' +
+          'Table 2 modifiers counted: high-dose glucocorticoids (already separate VHR criterion), LS BMD discordance, ' +
+          'TBS, HAL, recurrent falls, country of birth, T1DM/T2DM, Parkinson\'s disease, recent MOF. ' +
+          'TBS, HAL, and country of birth are not collected by this tool. ' +
+          'Threshold: ≥2 modifiers prompt re-designation consideration; clinician retains the decision.',
+        source: SRC_NOGG,
+      });
+    }
+  }
+
   // ── Very high risk — specialist referral (NOGG 2024 Conditional recommendation) ──
   if (riskCategory === 'very_high') {
     const gcDrivesVHR =
