@@ -762,6 +762,9 @@ export function ResultsView({ result, patient, onReset, onBack }: Props) {
               case 'testosterone': return 'Testosterone';
               case 'vitamin_d':  return 'Vitamin D';
               case 'calcium':    return 'Adjusted calcium';
+              case 'phosphate':  return 'Serum phosphate';
+              case 'lfts':       return 'Liver transaminases (ALT, AST)';
+              case 'esr_crp':    return 'ESR or CRP';
               default:           return id.replace(/_/g, ' ');
             }
           }

@@ -118,6 +118,35 @@ export function assessInvestigationsNeeded(
     });
   }
 
+  // Tier 2 routine bloods per NOGG Table 3 — phosphate, LFTs, ESR/CRP.
+  // Recommended at baseline regardless of whether values have been collected, since the
+  // tool doesn't model their numeric results. The clinician orders them as part of the
+  // standard osteoporosis workup.
+  needed.push({
+    investigation: 'phosphate',
+    tier: 2,
+    reason:
+      'Serum phosphate: persistent low phosphate can indicate underlying metabolic bone disease ' +
+      '(e.g. osteomalacia, X-linked hypophosphataemia). NOGG 2024 Table 3 routine investigation.',
+    urgency: 'routine',
+  });
+  needed.push({
+    investigation: 'lfts',
+    tier: 2,
+    reason:
+      'Liver transaminases (ALT, AST): screen for chronic liver disease (a secondary cause of ' +
+      'osteoporosis) and to interpret elevated ALP (hepatic vs bone source). NOGG 2024 Table 3.',
+    urgency: 'routine',
+  });
+  needed.push({
+    investigation: 'esr_crp',
+    tier: 2,
+    reason:
+      'ESR or CRP: detect underlying inflammation (e.g. myeloma, RA, inflammatory bowel disease, ' +
+      'connective tissue disease). NOGG 2024 Table 3 routine investigation.',
+    urgency: 'routine',
+  });
+
   // ── Tier 3: Suspected secondary cause ────────────────────────────────────
 
   const alpAbnormal = patient.bloodResults?.alp !== null && patient.bloodResults?.alp !== undefined &&

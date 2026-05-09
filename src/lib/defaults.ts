@@ -51,4 +51,5 @@ export const defaultPatient: PatientInput = {
   bmdUnavailable: false,
   recentOralGlucocorticoidUse: false,
   bornOutsideIreland: false,
+  onThiazolidinedione: false,
 };

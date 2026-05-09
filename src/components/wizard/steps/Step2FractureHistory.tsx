@@ -14,7 +14,7 @@ export function Step2FractureHistory({ data, onChange }: Props) {
       <SectionHeading>Fracture history</SectionHeading>
       <Field
         label="Prior fragility fracture"
-        hint="Low-energy fracture from a fall from standing height or less"
+        hint="Any prior fracture in adulthood. NOGG 2024: high-trauma fractures predict future fracture risk to the same extent as low-trauma — include both."
       >
         <YesNo
           value={data.priorFragilityFracture}

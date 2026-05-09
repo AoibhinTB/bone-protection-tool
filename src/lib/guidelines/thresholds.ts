@@ -106,15 +106,21 @@ export function applyFraxAdjustments(
     adjustments.push({ factor: 'Type 2 diabetes', multiplier: 1.20, appliedTo: 'MOF' });
   }
 
-  // Falls ≥2 in past year
+  // Falls ≥2 in past year — NOGG Table 2: ×1.30 for BOTH MOF and hip
   if (patient.fallsInLastYear >= 2) {
+    mof = mof * 1.30;
     hip = hip * 1.30;
+    adjustments.push({ factor: 'Falls ≥2/year', multiplier: 1.30, appliedTo: 'MOF' });
     adjustments.push({ factor: 'Falls ≥2/year', multiplier: 1.30, appliedTo: 'hip' });
   }
 
-  // Parkinson's disease
+  // Parkinson's disease — NOGG Table 2: enter as RA surrogate (affects both MOF and hip).
+  // RA-β derived multipliers approximate to ~×1.30 MOF; we retain the existing ×1.50 hip
+  // (PD increases hip risk beyond the RA-surrogate per NOGG footnote z, Evidence Ib).
   if (patient.parkinsonsDisease) {
+    mof = mof * 1.30;
     hip = hip * 1.50;
+    adjustments.push({ factor: "Parkinson's disease", multiplier: 1.30, appliedTo: 'MOF' });
     adjustments.push({ factor: "Parkinson's disease", multiplier: 1.50, appliedTo: 'hip' });
   }
 

@@ -91,6 +91,57 @@ export function generateTreatmentOutput(
     });
   }
 
+  // ── BMD-included FRAX with secondary causes ticked — clarification flag ──
+  // NOGG 2024: "The listed secondary causes are conservatively assumed to be mediated through
+  // low BMD and carry no weight when femoral neck BMD is entered into FRAX." Surface this
+  // clarification when relevant so clinicians know the FRAX numerical output isn't doubled-up.
+  if (patient.fraxCalculatedWithBMD && patient.secondaryOsteoporosis.length > 0) {
+    flags.push({
+      id: 'frax_bmd_secondary_causes_note',
+      severity: 'info',
+      message:
+        'FRAX calculated with BMD and secondary cause(s) ticked: when BMD is entered, secondary causes carry no additional FRAX weight (NOGG 2024). They remain relevant to clinical management and underlying-cause workup.',
+      rationale:
+        'FRAX assumes secondary causes act via reduced BMD, so once femoral neck BMD is entered the secondary-cause input is conservatively given no further weight. ' +
+        'This is not a tool error — it reflects the FRAX algorithm. Document the secondary cause and address underlying pathology separately.',
+      source: SRC_NOGG,
+    });
+  }
+
+  // ── Thiazolidinedione + T2DM — additional fracture risk consideration ──
+  if (patient.onThiazolidinedione) {
+    flags.push({
+      id: 'thiazolidinedione_fracture_risk',
+      severity: 'info',
+      message:
+        'On a thiazolidinedione (pioglitazone) — adds to T2DM-related fracture risk. Consider alternative diabetes therapy where appropriate, in discussion with diabetes team.',
+      rationale:
+        'Thiazolidinediones increase fracture risk independently of T2DM (NOGG 2024 — risk modifier; PROactive and ADOPT trial data). ' +
+        'No published FRAX numerical adjustment; managed as a clinical consideration rather than a multiplier.',
+      source: SRC_NOGG,
+    });
+  }
+
+  // ── eGFR <60 but CKD not ticked as a secondary cause — prompt ──
+  // CKD 3a–5 is a Table 1 FRAX input (secondary cause). When the eGFR indicates CKD but
+  // the clinician hasn't ticked it, prompt them to add it for FRAX accuracy.
+  {
+    const egfr = patient.renalFunction?.egfr ?? patient.bloodResults?.egfr ?? null;
+    const ckdTicked = patient.secondaryOsteoporosis.includes('chronic_kidney_disease');
+    if (egfr !== null && egfr < 60 && !ckdTicked) {
+      flags.push({
+        id: 'ckd_not_ticked_for_frax',
+        severity: 'info',
+        message:
+          `eGFR ${egfr} ml/min indicates CKD 3a–5 — tick "Chronic kidney disease" under secondary causes to include it as a FRAX risk factor (NOGG Table 1).`,
+        rationale:
+          'Non-dialysis CKD (eGFR <60) is a NOGG Table 1 secondary cause of osteoporosis and a FRAX input. ' +
+          'When BMD is not entered into FRAX, ticking secondary causes increases the calculated probability appropriately.',
+        source: SRC_NOGG,
+      });
+    }
+  }
+
   // ── Patient born outside Ireland — FRAX must use country-of-origin model ──
   if (patient.bornOutsideIreland) {
     const hasManualFrax =

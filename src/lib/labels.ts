@@ -4,7 +4,7 @@ export const SECONDARY_CAUSE_LABELS: Record<SecondaryOsteoporosisCause, string> 
   type1_diabetes:           'Type 1 diabetes',
   osteogenesis_imperfecta:  'Osteogenesis imperfecta',
   untreated_hyperthyroidism:'Hyperthyroidism (untreated)',
-  hypogonadism:             'Hypogonadism',
+  hypogonadism:             'Untreated hypogonadism',
   chronic_malnutrition:     'Chronic malnutrition',
   malabsorption:            'Malabsorption (coeliac, IBD, bariatric)',
   chronic_liver_disease:    'Chronic liver disease',
@@ -14,6 +14,7 @@ export const SECONDARY_CAUSE_LABELS: Record<SecondaryOsteoporosisCause, string> 
   hyperparathyroidism:      'Hyperparathyroidism',
   antiepileptic_use:        'Antiepileptic drugs (enzyme-inducing: phenytoin, carbamazepine, valproate)',
   copd:                     'COPD (often combined with steroid use)',
+  chronic_kidney_disease:   'Chronic kidney disease (CKD 3a–5, non-dialysis)',
 };
 
 export const AGENT_LABELS: Record<TreatmentAgent, string> = {

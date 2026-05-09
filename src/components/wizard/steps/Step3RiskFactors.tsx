@@ -65,9 +65,26 @@ export function Step3RiskFactors({ data, onChange }: Props) {
       <Field label="Type 2 diabetes" hint="FRAX underestimates — MOF ×1.2 applied">
         <YesNo
           value={data.type2Diabetes}
-          onChange={v => onChange({ type2Diabetes: v })}
+          onChange={v =>
+            onChange({
+              type2Diabetes: v,
+              onThiazolidinedione: v ? data.onThiazolidinedione : false,
+            })
+          }
         />
       </Field>
+      {data.type2Diabetes && (
+        <Field
+          label="On a thiazolidinedione (pioglitazone)"
+          hint="TZDs add to T2DM-related fracture risk; surfaces a clinical flag"
+          indent
+        >
+          <YesNo
+            value={data.onThiazolidinedione}
+            onChange={v => onChange({ onThiazolidinedione: v })}
+          />
+        </Field>
+      )}
       <Field label="Falls in the last 12 months" hint="≥2 falls → hip risk ×1.3">
         <NumInput
           value={data.fallsInLastYear}

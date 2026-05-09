@@ -31,14 +31,15 @@ export type SecondaryOsteoporosisCause =
   | 'untreated_hyperthyroidism'
   | 'hypogonadism'
   | 'chronic_malnutrition'
-  | 'malabsorption'          // coeliac, IBD, bariatric
+  | 'malabsorption'                  // coeliac, IBD, bariatric
   | 'chronic_liver_disease'
   | 'inflammatory_bowel_disease'
   | 'celiac_disease'
   | 'cushing_syndrome'
   | 'hyperparathyroidism'
-  | 'antiepileptic_use'      // enzyme-inducing: phenytoin, carbamazepine, valproate
-  | 'copd';                  // often combined with steroid use
+  | 'antiepileptic_use'              // enzyme-inducing: phenytoin, carbamazepine, valproate
+  | 'copd'                           // often combined with steroid use
+  | 'chronic_kidney_disease';        // CKD 3a–5 / non-dialysis (NOGG Table 1)
 
 export interface RenalFunction {
   egfr: number; // ml/min/1.73 m²
@@ -193,6 +194,10 @@ export interface PatientInput {
   // patients the estimator is suppressed and manual FRAX entry from frax.shef.ac.uk
   // (with the patient's country selected) is required.
   bornOutsideIreland: boolean;
+
+  // On a thiazolidinedione (pioglitazone) — adds to T2DM-related fracture risk.
+  // Surfaced as a clinical flag; not numerically adjusted in FRAX (no NOGG multiplier).
+  onThiazolidinedione: boolean;
 }
 
 // ─── Risk factor summary ──────────────────────────────────────────────────
@@ -235,7 +240,10 @@ export interface InvestigationRecommendation {
     | 'alp'
     | 'fbc'
     | 'frax'
-    | 'spep_upep';
+    | 'spep_upep'
+    | 'phosphate'
+    | 'lfts'
+    | 'esr_crp';
   reason: string;
   urgency: Urgency;
   tier?: 1 | 2 | 3; // 1 = mandatory pre-treatment, 2 = routine baseline, 3 = secondary cause

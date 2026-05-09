@@ -124,6 +124,14 @@ export function generateRiskFactorsIdentified(
     // already added above as part of "secondary cause"; skip duplicate
   }
 
+  // Thiazolidinedione (TZD) — additional T2DM fracture risk
+  if (patient.onThiazolidinedione) {
+    items.push({
+      factor: 'On a thiazolidinedione (pioglitazone)',
+      effect: 'Adds to T2DM-related fracture risk; consider alternative diabetes therapy where appropriate',
+    });
+  }
+
   // Born outside Ireland — FRAX needs country-of-origin model
   if (patient.bornOutsideIreland) {
     items.push({
