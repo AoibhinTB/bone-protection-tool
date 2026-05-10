@@ -27,7 +27,7 @@ export function DisclaimerScreen({ onAccept }: Props) {
         {/* Description */}
         <p className="text-xs sm:text-sm text-slate-700 leading-snug text-center mb-3 sm:mb-4">
           A clinical decision support tool to guide bone protection assessment and management
-          in line with NOGG 2024, HSE Medicines Management Programme, and Irish Osteoporosis Society guidelines.
+          in line with NOGG 2024, NICE NG23/NG187, FRAX Ireland (country code 49), and international consensus (IOF, ISCD).
         </p>
 
         {/* Disclaimer box */}
@@ -98,7 +98,7 @@ export function DisclaimerScreen({ onAccept }: Props) {
             {' · '}Last reviewed May 2026
           </p>
           <p className="mb-2">
-            Sources: NOGG 2024 · HSE MMP · IOS · FRAX Ireland (country 49) · NICE NG187 · ISCD 2023
+            Sources: NOGG 2024 · NICE NG23 · NICE NG187 · FRAX Ireland (country 49) · IOF · ISCD 2023 · HSE BVM (teriparatide biosimilar policy)
           </p>
           <p className="text-slate-600">
             Found a clinical error or have a suggestion? We want to hear from you.

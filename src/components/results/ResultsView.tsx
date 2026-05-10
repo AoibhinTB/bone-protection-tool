@@ -1034,7 +1034,7 @@ export function ResultsView({ result, patient, onReset, onBack }: Props) {
             summary={
               <span>
                 <span className="font-semibold text-slate-900">Lifestyle advice</span>
-                <span className="text-slate-700"> — {result.lifestyleAdvice.length} points (exercise, falls prevention, calcium, Vit D)</span>
+                <span className="text-slate-700"> — {result.lifestyleAdvice.length} points (diet, exercise, falls prevention, calcium, Vit D, alcohol)</span>
               </span>
             }
             defaultOpen={false}

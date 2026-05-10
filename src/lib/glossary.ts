@@ -26,7 +26,8 @@ export type GlossaryTerm =
   | 'ADT'
   | 'POI'
   | 'GIOP'
-  | 'HSE MMP';
+  | 'HSE MMP'
+  | 'HSE BVM';
 
 export const GLOSSARY: Record<GlossaryTerm, string> = {
   'MOF':       'Major Osteoporotic Fracture (MOF) — the 10-year probability of fracture at any of four specific sites: clinical spine (symptomatic vertebral fracture only — not incidental radiological findings), hip, forearm (wrist/distal radius), or humerus (upper arm). Note: ankle, rib, and other peripheral fractures are NOT included in the MOF definition used by FRAX, even if they are fragility fractures. Radiological vertebral fractures found incidentally without symptoms are also not counted. Source: FRAX methodology; NOGG 2024.',
@@ -53,5 +54,6 @@ export const GLOSSARY: Record<GlossaryTerm, string> = {
   'ADT':       'Androgen Deprivation Therapy — used for prostate cancer; causes rapid bone loss.',
   'POI':       'Premature Ovarian Insufficiency — menopause before age 40. HRT is first-line bone protection.',
   'GIOP':      'Glucocorticoid-Induced Osteoporosis — bone loss from prednisolone ≥7.5 mg/day for ≥3 months (or lower-dose with risk factors).',
-  'HSE MMP':   'Health Service Executive Medicines Management Programme — Ireland\'s preferred-drug guidance.',
+  'HSE MMP':   'Health Service Executive Medicines Management Programme — Ireland\'s preferred-drug guidance for general primary care prescribing. Note: there is no standalone HSE MMP osteoporosis prescribing document; the bisphosphonate-first / denosumab-second order this tool follows comes from NOGG 2024 (Strong) on cost-effectiveness grounds, not from an HSE MMP osteoporosis publication.',
+  'HSE BVM':   'HSE Best-Value Medicines policy — the legitimate HSE Ireland scope for this tool. Specifically the March 2023 BVM teriparatide biosimilar policy that governs which teriparatide product is dispensed when teriparatide is initiated by a specialist.',
 };

@@ -121,6 +121,41 @@ export function Step7TreatmentHistory({ data, onChange }: Props) {
         </>
       )}
 
+      {/* v1.13 Step 9 — BP pause monitoring signals (NOGG 2024 Section 6.6 Rec 7 Conditional).
+          Visible only when patient has a previously-paused bisphosphonate AND is not currently
+          on treatment — these inputs drive the bp_pause_restart_signal flag. */}
+      {(() => {
+        const onPause =
+          !data.currentTreatment &&
+          data.previousTreatments.some(
+            t => BISPHOSPHONATES.includes(t.agent) && t.reasonStopped === 'treatment_holiday',
+          );
+        if (!onPause) return null;
+        return (
+          <>
+            <SectionHeading>Bisphosphonate pause — monitoring signals</SectionHeading>
+            <Field
+              label="Bone turnover markers rising during pause"
+              hint="CTX or P1NP trending upward — Conditional restart signal (NOGG 2024 Rec 7). Exclude liver source if ALP-driven."
+            >
+              <YesNo
+                value={data.boneTurnoverMarkersRising === true}
+                onChange={v => onChange({ boneTurnoverMarkersRising: v })}
+              />
+            </Field>
+            <Field
+              label="BMD decreased on repeat DEXA during pause"
+              hint="Conditional restart signal (NOGG 2024 Rec 7). No definitive thresholds — clinical judgement."
+            >
+              <YesNo
+                value={data.bmdDecreasedDuringPause === true}
+                onChange={v => onChange({ bmdDecreasedDuringPause: v })}
+              />
+            </Field>
+          </>
+        );
+      })()}
+
       <SectionHeading>Patient preference</SectionHeading>
       <Field
         label="Refuses all injections"

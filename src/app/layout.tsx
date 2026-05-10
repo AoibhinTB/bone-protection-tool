@@ -17,7 +17,7 @@ const geistMono = localFont({
 export const metadata: Metadata = {
   title: "Bone Protection Tool",
   description:
-    "Clinical decision support for bone protection and osteoporosis management in Ireland (NOGG 2024, HSE MMP, IOS).",
+    "Clinical decision support for bone protection and osteoporosis management in Ireland (NOGG 2024, NICE NG23/NG187, FRAX Ireland, IOF, ISCD).",
   applicationName: "Bone Protection",
   manifest: "/manifest.webmanifest",
   appleWebApp: {

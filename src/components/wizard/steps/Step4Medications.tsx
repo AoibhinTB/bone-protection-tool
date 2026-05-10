@@ -15,6 +15,16 @@ const GC_DOSE_OPTIONS: { value: GlucocorticoidDose; label: string }[] = [
   { value: 'high', label: '>20 mg/day' },
 ];
 
+// v1.13 — derive the legacy categorical bucket from the numeric mg/day so both
+// fields stay in sync. Engine prefers numeric, but categorical is kept for
+// backwards compatibility with persisted/loaded patient data.
+function bucketFromMgDay(mg: number): GlucocorticoidDose {
+  if (mg < 2.5) return 'very_low';
+  if (mg < 7.5) return 'low';
+  if (mg <= 20) return 'medium';
+  return 'high';
+}
+
 export function Step4Medications({ data, onChange }: Props) {
   const gcOn = data.glucocorticoidUse !== null;
 
@@ -29,6 +39,9 @@ export function Step4Medications({ data, onChange }: Props) {
               glucocorticoidUse: v
                 ? { current: true, durationMonths: 3, dose: 'low' }
                 : null,
+              glucocorticoidDoseMgDay: v ? 5 : null,
+              // If turning GC on, clear "previously used" since current overrides.
+              glucocorticoidPreviouslyUsed: v ? false : data.glucocorticoidPreviouslyUsed,
             })
           }
         />
@@ -64,7 +77,30 @@ export function Step4Medications({ data, onChange }: Props) {
               width="w-20"
             />
           </Field>
-          <Field label="Daily dose (prednisolone equivalent)" indent>
+          <Field
+            label="Daily dose (prednisolone equivalent)"
+            hint="Enter the exact dose in mg/day — drives Table 8 FRAX correction (low <2.5 ↓; medium 2.5–7.5 none; high ≥7.5 ↑)"
+            indent
+          >
+            <NumInput
+              value={data.glucocorticoidDoseMgDay}
+              onChange={v =>
+                onChange({
+                  glucocorticoidDoseMgDay: v,
+                  // Keep legacy categorical in sync for backwards compatibility.
+                  glucocorticoidUse: data.glucocorticoidUse
+                    ? { ...data.glucocorticoidUse, dose: v != null && v > 0 ? bucketFromMgDay(v) : data.glucocorticoidUse.dose }
+                    : data.glucocorticoidUse,
+                })
+              }
+              min={0}
+              max={120}
+              step={0.5}
+              unit="mg/day"
+              width="w-24"
+            />
+          </Field>
+          <Field label="Or pick a dose band" hint="Optional shortcut — only used if mg/day is left blank" indent>
             <Segmented<GlucocorticoidDose>
               value={data.glucocorticoidUse.dose}
               onChange={v =>
@@ -74,6 +110,17 @@ export function Step4Medications({ data, onChange }: Props) {
             />
           </Field>
         </>
+      )}
+      {!gcOn && (
+        <Field
+          label="Previously on long-term oral glucocorticoid (now stopped)"
+          hint="Drives the GC-withdrawal bone-protection review (Section 9.4) — fires when patient is currently off GC and on a bisphosphonate"
+        >
+          <YesNo
+            value={data.glucocorticoidPreviouslyUsed}
+            onChange={v => onChange({ glucocorticoidPreviouslyUsed: v })}
+          />
+        </Field>
       )}
 
       <SectionHeading>Other medications</SectionHeading>
@@ -96,9 +143,26 @@ export function Step4Medications({ data, onChange }: Props) {
           <Field label="Aromatase inhibitor" hint="Breast cancer treatment">
             <YesNo
               value={data.aromataseInhibitorUse}
-              onChange={v => onChange({ aromataseInhibitorUse: v })}
+              onChange={v =>
+                onChange({
+                  aromataseInhibitorUse: v,
+                  hadAdjuvantHighDoseBisphosphonate: v ? data.hadAdjuvantHighDoseBisphosphonate : false,
+                })
+              }
             />
           </Field>
+          {data.aromataseInhibitorUse && (
+            <Field
+              label="Received adjuvant high-dose bisphosphonate"
+              hint="Higher / more frequent dosing as part of breast cancer management — surfaces end-of-course fracture risk reassessment (NOGG 2024 Rec 4 Conditional)"
+              indent
+            >
+              <YesNo
+                value={data.hadAdjuvantHighDoseBisphosphonate}
+                onChange={v => onChange({ hadAdjuvantHighDoseBisphosphonate: v })}
+              />
+            </Field>
+          )}
           <Field label="Early menopause" hint="Menopause before age 45">
             <YesNo
               value={data.earlyMenopause}
