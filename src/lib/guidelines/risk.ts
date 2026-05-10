@@ -8,6 +8,9 @@ import {
   VERY_HIGH_RISK,
   GUIDELINE_VERSIONS,
   GIOP,
+  isOnGC,
+  isOnHighDoseGC,
+  gcDurationMonths,
 } from './thresholds';
 import { estimateFrax } from '../fraxEstimate';
 
@@ -85,7 +88,7 @@ export function stratifyRisk(patient: PatientInput): RiskStratification {
   // GIOP lower threshold: any current glucocorticoid use + T-score ≤ -1.5 → high risk.
   // Glucocorticoids increase fracture risk over and above their effect on BMD; NOGG applies
   // a lower BMD treatment threshold of T ≤ -1.5 in this context.
-  if (patient.glucocorticoidUse?.current && patient.dexaResults) {
+  if (isOnGC(patient) && patient.dexaResults) {
     const lowest = lowestTScore(patient.dexaResults);
     if (lowest <= -1.5) {
       return result('high', 'red', threshold.lowerMOF, threshold.upperMOF, rawMOF, rawHip, adjustedMOF, adjustedHip, adjustments,
@@ -265,12 +268,10 @@ function veryHighRiskReason(
   }
 
   // High-dose glucocorticoids ≥7.5 mg/day for ≥3 months (NOGG 2024 Rec 11)
-  if (
-    patient.glucocorticoidUse?.current &&
-    (patient.glucocorticoidUse.dose === 'medium' || patient.glucocorticoidUse.dose === 'high') &&
-    patient.glucocorticoidUse.durationMonths >= GIOP.highDoseMinMonths
-  ) {
-    criteria.push(`high-dose glucocorticoid (${patient.glucocorticoidUse.dose} dose, ${patient.glucocorticoidUse.durationMonths} months)`);
+  if (isOnHighDoseGC(patient) && gcDurationMonths(patient) >= GIOP.highDoseMinMonths) {
+    const dose = patient.glucocorticoidDoseMgDay ?? '?';
+    const months = gcDurationMonths(patient);
+    criteria.push(`high-dose glucocorticoid (${dose} mg/day, ${months} months)`);
   }
 
   // Multiple clinical risk factors with a recent fragility fracture (any site) —
@@ -328,7 +329,7 @@ function stratifyUnder50(
   const hasHighRiskFeature =
     patient.priorFragilityFracture ||
     patient.earlyMenopause ||
-    (patient.glucocorticoidUse?.current === true) ||
+    isOnGC(patient) ||
     (patient.dexaResults !== null && lowestTScore(patient.dexaResults) <= -2.5);
 
   const hasIntermediateFeature =
@@ -364,7 +365,7 @@ function countFraxClinicalRiskFactors(p: PatientInput): number {
   if (p.type2Diabetes) n++;
   if (p.fallsInLastYear >= 2) n++;
   if (p.parkinsonsDisease) n++;
-  if (p.glucocorticoidUse?.current === true) n++;
+  if (isOnGC(p)) n++;
   if (p.adtUse) n++;
   if (p.aromataseInhibitorUse) n++;
   if (p.earlyMenopause) n++;
@@ -385,7 +386,7 @@ function hasAnyClinicalRiskFactor(p: PatientInput): boolean {
   if (p.bmi !== null && p.bmi < 19) return true;            // low BMI
   if (p.rheumatoidArthritis) return true;
   if (p.secondaryOsteoporosis.length > 0) return true;
-  if (p.glucocorticoidUse?.current === true) return true;
+  if (isOnGC(p)) return true;
   if (p.adtUse || p.aromataseInhibitorUse) return true;
   if (p.earlyMenopause) return true;
   if (p.type2Diabetes) return true;

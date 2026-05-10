@@ -20,6 +20,13 @@ import {
   DENOSUMAB,
   GUIDELINE_VERSIONS,
   getAgeThreshold,
+  effectiveGCDoseMgDay,
+  isOnGC,
+  isOnHighDoseGC,
+  isOnMediumOrHighDoseGC,
+  gcDurationMonths,
+  PAUSE_REASSESSMENT_INTERVAL_MONTHS,
+  BP_INDIVIDUAL_BASIS_AFTER_YEARS,
 } from './thresholds';
 import type { RiskStratification } from './types';
 
@@ -173,10 +180,10 @@ export function generateTreatmentOutput(
           ].filter((t): t is number => t != null)
         )
       : 0;
+    // VF imaging trigger: long-term oral GC = current GC at ≥2.5 mg/day for ≥3 months
+    // (very-low-dose <2.5 mg/day excluded; FRAX downward correction applies and bone-loss risk is minimal).
     const longTermOralGC =
-      patient.glucocorticoidUse?.current === true &&
-      patient.glucocorticoidUse.dose !== 'very_low' &&
-      patient.glucocorticoidUse.durationMonths >= 3;
+      isOnMediumOrHighDoseGC(patient) && gcDurationMonths(patient) >= 3;
 
     const vfImagingTriggers: string[] = [];
     if (patient.acuteBackPain && patient.priorFragilityFracture) {
@@ -270,18 +277,66 @@ export function generateTreatmentOutput(
 
   // ── Glucocorticoids ≥7.5 mg/day surface flag — GIOP pathway, FRAX adjusted ──
   // Fires on current high-dose use regardless of elapsed duration (planned ≥3 mo per Rec 22).
-  if (
-    patient.glucocorticoidUse?.current &&
-    (patient.glucocorticoidUse.dose === 'medium' || patient.glucocorticoidUse.dose === 'high')
-  ) {
+  if (isOnHighDoseGC(patient)) {
+    const _gcDose = effectiveGCDoseMgDay(patient);
     flags.push({
       id: 'gc_high_dose_giop_surface',
       severity: 'warning',
       message:
-        'Glucocorticoids ≥7.5 mg/day for ≥3 months — GIOP pathway applied; FRAX MOF ×1.15 / hip ×1.20.',
+        `Glucocorticoids ${_gcDose} mg/day (≥7.5) — GIOP pathway applied; Table 8 FRAX correction MOF ×1.15 / hip ×1.20.`,
       rationale:
         'NOGG 2024 Rec 22 (Strong): start bone protection at the same time as glucocorticoids; do not wait for DEXA. ' +
-        'NOGG arithmetic adjustment compensates for FRAX underestimation at high doses.',
+        'Table 8 high-dose adjustment compensates for FRAX underestimation at ≥7.5 mg/day.',
+      source: SRC_NOGG,
+    });
+  }
+
+  // ── BTM / BMD restart signal during a bisphosphonate pause (v1.13 Step 9; NOGG Section 6.6, Conditional) ──
+  // Patient is currently NOT on a BP, but had a previous BP stopped for treatment_holiday.
+  // Surface a restart-consideration flag if BTM is rising OR BMD has decreased on repeat DEXA.
+  {
+    const onPause =
+      !patient.currentTreatment &&
+      patient.previousTreatments.some(
+        t => isBisphosphonate(t.agent) && t.reasonStopped === 'treatment_holiday',
+      );
+    if (onPause && (patient.boneTurnoverMarkersRising === true || patient.bmdDecreasedDuringPause === true)) {
+      const triggers: string[] = [];
+      if (patient.boneTurnoverMarkersRising === true) triggers.push('rising bone turnover markers (CTX / P1NP)');
+      if (patient.bmdDecreasedDuringPause === true) triggers.push('BMD decreased on repeat DEXA');
+      flags.push({
+        id: 'bp_pause_restart_signal',
+        severity: 'warning',
+        message:
+          `Bisphosphonate pause restart signal: ${triggers.join('; ')}. Consider restarting bisphosphonate before the scheduled FRAX reassessment.`,
+        rationale:
+          'NOGG 2024 Section 6.6 Rec 7 (Conditional): in addition to fracture (Rec 3) and scheduled FRAX reassessment (Rec 4), ' +
+          'consider restart if biochemical markers indicate relapse from suppressed bone turnover OR BMD has decreased on repeat DEXA. ' +
+          'No definitive thresholds for BTM/BMD change have been established — clinical judgement applies.',
+        source: SRC_NOGG,
+      });
+    }
+  }
+
+  // ── GC withdrawal — Section 9.4 review of bone protection (v1.13) ──
+  // Patient was previously on oral GC, has now stopped, AND is currently on a bisphosphonate.
+  // Bone-protective therapy may be considered for withdrawal IF FRAX (with BMD) reassessment
+  // shows BOTH MOF and hip below the age-specific intervention threshold.
+  if (
+    patient.glucocorticoidPreviouslyUsed &&
+    !isOnGC(patient) &&
+    patient.currentTreatment?.currentlyOn === true &&
+    isBisphosphonate(patient.currentTreatment.agent)
+  ) {
+    flags.push({
+      id: 'gc_withdrawal_bp_review',
+      severity: 'info',
+      message:
+        'Glucocorticoid stopped — review bisphosphonate need. Withdrawal of bone-protective therapy may be considered, but only if FRAX reassessment (with BMD) shows BOTH MOF and hip probabilities below the age-specific intervention threshold. If either is above threshold, continue bone protection. Recalculate FRAX without the GC checkbox for this reassessment.',
+      rationale:
+        'NOGG 2024 Section 9.4 (Strong): on cessation of GC therapy, withdrawal of antiresorptive may be appropriate ' +
+        'where both MOF and hip 10-year probabilities lie below the age-specific intervention threshold. ' +
+        'The Table 8 GC dose adjustment no longer applies once GC is stopped — recalculate FRAX with the GC box unticked.',
       source: SRC_NOGG,
     });
   }
@@ -375,7 +430,7 @@ export function generateTreatmentOutput(
       patient.type2Diabetes ||
       patient.fallsInLastYear >= 2 ||
       patient.parkinsonsDisease ||
-      (patient.glucocorticoidUse?.current === true) ||
+      isOnGC(patient) ||
       patient.adtUse ||
       patient.aromataseInhibitorUse ||
       patient.earlyMenopause;
@@ -522,7 +577,7 @@ export function generateTreatmentOutput(
   }
 
   if (isGIOP(patient)) {
-    return { ...giop(patient, riskCategory, flags, referrals), supplements };
+    return { ...giop(patient, riskCategory, riskStratification, flags, referrals), supplements };
   }
 
   // ── Contextual flags ──
@@ -583,9 +638,7 @@ export function generateTreatmentOutput(
   // ── Very high risk — specialist referral (NOGG 2024 Conditional recommendation) ──
   if (riskCategory === 'very_high') {
     const gcDrivesVHR =
-      patient.glucocorticoidUse?.current === true &&
-      (patient.glucocorticoidUse.dose === 'medium' || patient.glucocorticoidUse.dose === 'high') &&
-      patient.glucocorticoidUse.durationMonths >= GIOP.highDoseMinMonths;
+      isOnHighDoseGC(patient) && gcDurationMonths(patient) >= GIOP.highDoseMinMonths;
 
     flags.push({
       id: 'vhr_specialist_referral',
@@ -640,7 +693,7 @@ export function generateTreatmentOutput(
 
   // ── Existing treatment — sequencing logic ──
   if (patient.currentTreatment) {
-    const seq = sequencing(patient, riskCategory, flags, referrals);
+    const seq = sequencing(patient, riskCategory, riskStratification, flags, referrals);
     return { ...seq, supplements };
   }
 
@@ -729,13 +782,13 @@ function initiateTherapy(
     addVitDBlock(patient, flags);
     recs.push({ ...denosumab(egfr), priority: 'first-line' });
     if (canUse('alendronate', egfr)) {
-      recs.push({
+      recs.push(withBPInitiationContext({
         ...alendronate(),
         priority: 'alternative',
         rationale:
           'Second-line alternative on ADT. Consider if denosumab not feasible (cost, adherence, patient preference). ' +
           'Note: denosumab has the strongest fracture-reduction RCT evidence in this population (HALT trial, Smith et al. NEJM 2009).',
-      });
+      }, patient));
     }
     return recs;
   }
@@ -754,7 +807,7 @@ function initiateTherapy(
       source: SRC_HSE,
     });
     if (canUse('zoledronate', egfr)) {
-      recs.push(zoledronate());
+      recs.push(withBPInitiationContext(zoledronate(), patient));
     } else {
       addVitDBlock(patient, flags);
       recs.push(denosumab(egfr));
@@ -780,12 +833,12 @@ function initiateTherapy(
       source: SRC_BMS,
     });
     if (canUse('alendronate', egfr)) {
-      recs.push({
+      recs.push(withBPInitiationContext({
         ...alendronate(),
         rationale:
           'Add alendronate alongside HRT: T-score remains ≤−2.5 despite HRT, suggesting HRT alone is insufficient bone protection.',
         priority: 'first-line',
-      });
+      }, patient));
     }
     return recs;
   }
@@ -806,7 +859,7 @@ function initiateTherapy(
         source: SRC_NICE,
       });
     }
-    recs.push(alendronate());
+    recs.push(withBPInitiationContext(alendronate(), patient));
     return recs;
   }
 
@@ -880,7 +933,7 @@ function initiateTherapy(
     rationale: 'eGFR <35 contraindicates alendronate and zoledronate; eGFR <30 contraindicates risedronate.',
     source: SRC_HSE,
   });
-  recs.push(alendronate());
+  recs.push(withBPInitiationContext(alendronate(), patient));
   return recs;
 }
 
@@ -889,6 +942,7 @@ function initiateTherapy(
 function sequencing(
   patient: PatientInput,
   riskCategory: RiskCategory,
+  riskStratification: RiskStratification,
   flags: ClinicalFlag[],
   referrals: ReferralRecommendation[],
 ): Omit<TreatmentOutput, 'supplements'> {
@@ -910,12 +964,12 @@ function sequencing(
       source: SRC_BMS,
     });
     if (canUse('alendronate', egfr)) {
-      recs.push({
+      recs.push(withBPInitiationContext({
         ...alendronate(),
         rationale:
           'Add alendronate alongside HRT: T-score remains ≤−2.5 despite HRT, suggesting HRT alone is insufficient bone protection.',
         priority: 'first-line',
-      });
+      }, patient));
     }
     return { recommendations: recs, flags, referrals };
   }
@@ -925,20 +979,47 @@ function sequencing(
     return { ...giSwitch(patient, current.agent, egfr, flags), referrals };
   }
 
-  // ── Treatment failure ──
-  const isTreatmentFailure =
-    current.reasonStopped === 'treatment_failure' ||
-    (current.currentlyOn && current.durationMonths >= 12 && patient.numberOfPriorFractures >= 2);
+  // ── On-treatment fracture pathway (NOGG 2024 Section 6.3, Strong) — v1.13 Step 10 ──
+  // A fragility fracture during antiresorptive therapy is NOT auto-classified as failure.
+  // Mandatory pathway:
+  //   1. Adherence review — poor adherence = <80% of prescribed treatment taken correctly
+  //   2. Investigate secondary causes — repeat Tier 2 bloods minimum
+  //   3. Failure only confirmed if adherence ≥80% AND secondary causes excluded
+  // If during the first 5y oral / 3y IV course, the fracture is also an extension indication
+  // (Section 7 Rec 1–2). Switch class only on confirmed failure.
+  const explicitTreatmentFailure = current.reasonStopped === 'treatment_failure';
+  const possibleOnTxFracture =
+    current.currentlyOn && current.durationMonths >= 12 && patient.numberOfPriorFractures >= 2;
 
-  if (isTreatmentFailure) {
+  if (possibleOnTxFracture && !explicitTreatmentFailure) {
+    flags.push({
+      id: 'on_treatment_fracture_pathway',
+      severity: 'warning',
+      message:
+        `Fragility fracture on ${current.agent} (${Math.round(current.durationMonths / 12)}y duration). ` +
+        'Mandatory pathway: (1) review adherence — poor adherence is <80% of prescribed treatment taken correctly; ' +
+        '(2) investigate secondary causes — repeat Tier 2 bloods minimum, consider Tier 3 if not previously done; ' +
+        '(3) only classify as treatment failure if adherence ≥80% and secondary causes excluded. ' +
+        'If within first 5y oral / 3y IV: this fracture is ALSO an extension indication (NOGG Section 7 Rec 1–2 Strong) — ' +
+        'plan for the extended course (10y oral / 6y IV) once adherence is verified.',
+      rationale:
+        'NOGG 2024 Section 6.3 Rec 5 (Strong): a fracture during antiresorptive therapy does not automatically equal ' +
+        'treatment failure. Adherence and secondary causes must be reviewed first. If adherence is adequate and no ' +
+        'secondary cause is identified, the fracture confirms failure → switch class. If adherence is poor: correct, ' +
+        'address technique, ensure Vit D replete, and extend the planned course.',
+      source: SRC_NOGG,
+    });
+    // Do NOT auto-switch class. Engine surfaces guidance only.
+  }
+
+  if (explicitTreatmentFailure) {
     flags.push({
       id: 'treatment_failure',
       severity: 'warning',
       message:
-        'Possible treatment failure — fracture on adequate therapy. Review adherence/Vit D first; if confirmed, switch class.',
+        'Treatment failure confirmed (clinician-flagged). Switch class.',
       rationale:
-        'Treatment failure = new fracture or significant BMD loss (>4–5% spine or >3% hip) despite good adherence and replete vitamin D. ' +
-        'NOGG 2024 Rec 20: reassess fracture risk after any new fracture.',
+        'Adherence ≥80% confirmed AND secondary causes excluded — proceed to switch class per NOGG 2024 Section 6.3 / 7.4.',
       source: SRC_NOGG,
     });
     // Offer IV/denosumab before escalating to specialist (per spec Section 7.4)
@@ -955,7 +1036,7 @@ function sequencing(
         source: SRC_NOGG,
       });
       if (canUse('zoledronate', egfr) && !hasAFFHistory(patient)) {
-        recs.push(zoledronate());
+        recs.push(withBPInitiationContext(zoledronate(), patient));
       } else {
         addVitDBlock(patient, flags);
         recs.push(denosumab(egfr));
@@ -969,6 +1050,7 @@ function sequencing(
       });
     }
   }
+  const isTreatmentFailure = explicitTreatmentFailure;
 
   // ── Currently on denosumab (stable — no treatment failure): show continuation + transition plan ──
   // denosumabReboundFlags() has already added the cessation plan flag explaining transition options.
@@ -978,36 +1060,55 @@ function sequencing(
     return { recommendations: recs, flags, referrals };
   }
 
-  // ── Bisphosphonate reassessment (NOGG 2024 Rec 17) ──
+  // ── Bisphosphonate reassessment (NOGG 2024 Section 7) ──
   // Routine drug holidays are NOT supported by evidence (Evidence IIa) — individualised reassessment only.
   if (current.currentlyOn && isBisphosphonate(current.agent)) {
     const isIV = current.agent === 'zoledronate';
     const holidayYear = isIV ? BP_HOLIDAY.ivZoledronate.reviewAt : BP_HOLIDAY.oral.reviewAt;
+    const individualBasisYear = isIV ? BP_INDIVIDUAL_BASIS_AFTER_YEARS.iv : BP_INDIVIDUAL_BASIS_AFTER_YEARS.oral;
+
+    // v1.13 Step 13 — after 10 years (oral) / 6 years (IV): individual basis Conditional flag.
+    if (current.durationMonths >= individualBasisYear * 12) {
+      flags.push({
+        id: 'bp_individual_basis_after_long_course',
+        severity: 'info',
+        message:
+          `Bisphosphonate ${Math.round(current.durationMonths / 12)} years (${current.agent}). ` +
+          `After ${individualBasisYear} years of ${isIV ? 'IV zoledronate' : 'oral bisphosphonate'}, ongoing management must be decided on an individual basis in careful consultation with the patient. Specialist advice should be sought.`,
+        rationale:
+          'NOGG 2024 Section 7 Rec 8 (Conditional): evidence base for continuing oral bisphosphonate beyond 10 years or IV zoledronate beyond 6 years is limited. Decisions should be individualised after specialist input.',
+        source: SRC_NOGG,
+      });
+    }
 
     if (current.durationMonths >= holidayYear * 12) {
-      const pauseDecision = shouldTakeBPHoliday(patient, riskCategory);
+      const pauseDecision = shouldTakeBPHoliday(patient, riskCategory, riskStratification);
       const maleCaveat =
         patient.sex === 'male'
           ? ' No specific evidence base exists for treatment pauses in men — each case must be judged individually.'
           : '';
 
       if (pauseDecision.takeHoliday) {
+        // v1.13 Step 8 — drug-specific reassessment interval after the pause
+        const reassessMonths = PAUSE_REASSESSMENT_INTERVAL_MONTHS[
+          current.agent as 'alendronate' | 'risedronate' | 'ibandronate' | 'zoledronate'
+        ];
         flags.push({
           id: 'bp_holiday_appropriate',
           severity: 'info',
           message:
             `${holidayYear}-year bisphosphonate reassessment: fracture risk appears low/intermediate ` +
             `(${pauseDecision.reasons.join('; ')}). ` +
-            `An individualised treatment pause of ${BP_HOLIDAY.holidayDurationMonthsMin}–${BP_HOLIDAY.holidayDurationMonthsMax} months may be considered. ` +
-            'Reassess with FRAX + femoral neck BMD at 18 months. ' +
+            `An individualised treatment pause may be considered. Reassess with FRAX + femoral neck BMD at ` +
+            `${reassessMonths} months for ${current.agent} (drug-specific offset kinetics; NOGG 2024 Section 7 Rec 4). ` +
+            'If a new fracture occurs during the pause, FRAX reassessment and restart is triggered immediately ' +
+            'regardless of the above interval (NOGG Section 7 Rec 3). ' +
             'This is NOT a routine recommendation — there is no standard policy for all patients.' +
             maleCaveat,
           rationale:
-            'NOGG 2024 Rec 17 (Evidence IIa): routine bisphosphonate drug holidays are NOT supported by evidence. ' +
-            'After 5yr oral / 3yr IV, reassess current fracture risk using FRAX with femoral neck BMD. ' +
-            'A pause of 18–36 months may be considered only if risk has fallen to low/intermediate. ' +
-            'Evidence is based on limited extension studies in postmenopausal women. ' +
-            'FRAX assesses current fracture risk — it cannot be used to measure treatment response.',
+            'NOGG 2024 Section 7 Rec 4 (Strong): after a pause, FRAX reassessment intervals are drug-specific — ' +
+            'risedronate / ibandronate at 18 months, alendronate at 2 years, zoledronate at 3 years (offset kinetics differ). ' +
+            'Routine drug holidays remain unsupported (Evidence IIa); pause considered only if risk falls to low/intermediate.',
           source: SRC_NOGG,
         });
       } else {
@@ -1055,44 +1156,61 @@ function sequencing(
 function shouldTakeBPHoliday(
   patient: PatientInput,
   riskCategory: RiskCategory,
+  riskStratification: RiskStratification,
 ): { takeHoliday: boolean; reasons: string[] } {
   const continueReasons: string[] = [];
 
+  // v1.13 Step 7: continuation criteria from NOGG 2024 Section 7 Rec 1–2 + Rec 6.
   // Continue if age ≥70
   if (patient.age >= 70) {
-    continueReasons.push('age ≥70 — longer duration needed');
+    continueReasons.push('age ≥70 at start of bisphosphonate (Section 7 Rec 1–2 Strong)');
   }
 
   // Continue if hip or vertebral fracture history
   if (patient.priorHipFracture || patient.priorVertebralFracture) {
-    continueReasons.push('prior hip or vertebral fracture');
+    continueReasons.push('prior hip or vertebral fracture (Section 7 Rec 1–2 Strong)');
   }
 
-  // Continue if new fracture on treatment
+  // Continue if fracture during the first 5 yr (oral) / 3 yr (IV) — extension indication (Section 7 Rec 1–2).
+  // Note: this is NOT auto-failure (see Section 6.3); adherence/secondary cause review required first.
   if (patient.numberOfPriorFractures >= 2 && patient.currentTreatment?.durationMonths && patient.currentTreatment.durationMonths >= 12) {
-    continueReasons.push('fracture during treatment');
+    continueReasons.push('fragility fracture during treatment — extension indication (Section 7 Rec 1–2; review adherence + secondary causes first per Section 6.3)');
   }
 
-  // Continue if ongoing high-dose glucocorticoids
-  if (
-    patient.glucocorticoidUse?.current &&
-    (patient.glucocorticoidUse.dose === 'medium' || patient.glucocorticoidUse.dose === 'high')
-  ) {
-    continueReasons.push('ongoing high-dose glucocorticoids');
+  // Continue if ongoing high-dose glucocorticoids (≥7.5 mg/day) — Section 6.2
+  if (isOnHighDoseGC(patient)) {
+    continueReasons.push('ongoing high-dose glucocorticoids ≥7.5 mg/day (Section 6.2 — ongoing GC negates pause benefit)');
   }
 
-  // Continue if hip T-score ≤ -2.5
+  // Continue if hip T-score ≤ -2.5 (Section 7 explicit criterion)
   const hipTScores = [
     patient.dexaResults?.totalHipTScore,
     patient.dexaResults?.femoralNeckTScore,
   ].filter((t): t is number => t != null);
   if (hipTScores.length > 0 && Math.min(...hipTScores) <= -2.5) {
-    continueReasons.push('hip T-score ≤ −2.5');
+    continueReasons.push('hip T-score ≤ −2.5 (Section 7 Strong — pause not appropriate when hip BMD still osteoporotic)');
   }
 
-  // Continue if FRAX still high (red zone)
-  if (riskCategory === 'high' || riskCategory === 'very_high') {
-    continueReasons.push('FRAX risk still in red zone');
+  // v1.13 Step 7: FRAX (adjusted) above age-specific intervention threshold → continue.
+  // Section 7 Rec 6 Strong.
+  const ageThr = getAgeThreshold(patient.age);
+  if (ageThr !== null) {
+    const adjMOF = riskStratification.adjustedFraxMOFPercent;
+    const adjHip = riskStratification.adjustedFraxHipPercent;
+    if (adjMOF !== null && adjMOF >= ageThr.itMOF) {
+      continueReasons.push(`adjusted FRAX MOF ${adjMOF}% ≥ IT ${ageThr.itMOF}% (Section 7 Rec 6 Strong — continue or switch, do not pause)`);
+    }
+    if (adjHip !== null && adjHip >= ageThr.itHip) {
+      continueReasons.push(`adjusted FRAX hip ${adjHip}% ≥ IT ${ageThr.itHip}% (Section 7 Rec 6 Strong — continue or switch, do not pause)`);
+    }
+  }
+
+  // Belt-and-braces: keep the existing risk-category guard for cases where FRAX values aren't available.
+  if (
+    (riskCategory === 'high' || riskCategory === 'very_high') &&
+    !continueReasons.some(r => r.startsWith('adjusted FRAX'))
+  ) {
+    continueReasons.push('overall FRAX risk category in red zone');
   }
 
   if (continueReasons.length > 0) {
@@ -1101,7 +1219,7 @@ function shouldTakeBPHoliday(
 
   return {
     takeHoliday: true,
-    reasons: ['T-score >−2.5 at hip', 'no hip or vertebral fracture', 'age <70', 'no ongoing steroids'],
+    reasons: ['T-score >−2.5 at hip', 'no hip or vertebral fracture', 'age <70', 'no ongoing steroids ≥7.5 mg/day', 'FRAX adjusted below IT'],
   };
 }
 
@@ -1130,9 +1248,9 @@ function giSwitch(
       rationale: 'HSE MMP / NOGG 2024 Rec 13: switch oral bisphosphonate or move to IV if GI not tolerated.',
       source: SRC_HSE,
     });
-    if (!affCI && canUse('risedronate', egfr)) recs.push(risedronate());
-    if (!affCI && canUse('ibandronate', egfr)) recs.push(ibandronate());
-    if (!affCI && canUse('zoledronate', egfr)) recs.push(zoledronate());
+    if (!affCI && canUse('risedronate', egfr)) recs.push(withBPInitiationContext(risedronate(), patient));
+    if (!affCI && canUse('ibandronate', egfr)) recs.push(withBPInitiationContext(ibandronate(), patient));
+    if (!affCI && canUse('zoledronate', egfr)) recs.push(withBPInitiationContext(zoledronate(), patient));
     if (affCI || (!canUse('risedronate', egfr) && !canUse('ibandronate', egfr) && !canUse('zoledronate', egfr))) {
       addVitDBlock(patient, flags);
       recs.push(denosumab(egfr));
@@ -1148,9 +1266,9 @@ function giSwitch(
       rationale: 'After failure of two oral bisphosphonates due to GI effects, IV or monthly oral is appropriate.',
       source: SRC_HSE,
     });
-    if (!affCI && canUse('ibandronate', egfr)) recs.push(ibandronate());
+    if (!affCI && canUse('ibandronate', egfr)) recs.push(withBPInitiationContext(ibandronate(), patient));
     if (!affCI && canUse('zoledronate', egfr)) {
-      recs.push(zoledronate());
+      recs.push(withBPInitiationContext(zoledronate(), patient));
     } else {
       addVitDBlock(patient, flags);
       recs.push(denosumab(egfr));
@@ -1158,7 +1276,7 @@ function giSwitch(
   } else {
     // Any other agent — IV or denosumab
     if (!affCI && canUse('zoledronate', egfr)) {
-      recs.push(zoledronate());
+      recs.push(withBPInitiationContext(zoledronate(), patient));
     } else {
       addVitDBlock(patient, flags);
       recs.push(denosumab(egfr));
@@ -1412,57 +1530,121 @@ function earlyMenopause(
   return { recommendations: [rec], flags, referrals };
 }
 
+// v1.13: GIOP pathway applies to any current GC user in scope (postmenopausal women / men ≥50).
+// Within the GIOP pathway, immediate-start vs assess-and-treat decision uses NOGG criteria (a)-(d)
+// — see giopImmediateStartCriteria() below.
 function isGIOP(patient: PatientInput): boolean {
-  if (!patient.glucocorticoidUse) return false;
-  if (!patient.glucocorticoidUse.current) return false;
+  return isOnGC(patient);
+}
 
-  const { dose, durationMonths } = patient.glucocorticoidUse;
-
-  // High-dose (≥7.5 mg/day prednisolone equivalent): NOGG Rec 22 says start bone protection
-  // immediately when planned ≥3 months — fire as soon as the dose is ticked, regardless of
-  // elapsed duration, so the engine catches early-course patients.
-  if (dose === 'medium' || dose === 'high') return true;
-
-  // Lower-dose threshold: ≥5mg/day + age ≥65 or prior fragility fracture
-  if (dose === 'low' && durationMonths >= GIOP.lowerDoseMinMonths) {
-    if (patient.age >= GIOP.lowerDoseTriggerAge || patient.priorFragilityFracture) return true;
-    // Any dose ≥3 months, age <65, no prior fracture: DEXA required — treat if T-score ≤-1.5
-    if (durationMonths >= GIOP.highDoseMinMonths) return true;
+/**
+ * NOGG 2024 immediate-start criteria for GIOP (Section 9.1).
+ * Returns the list of criteria that match. Empty list = patient is on GC but does NOT meet
+ * any immediate-start criterion → assess-and-treat path (Section 9.2).
+ *
+ * Criteria — any one is sufficient:
+ *   (a) Prior fragility fracture, at any GC dose.
+ *   (b) Female ≥70, at any GC dose.
+ *   (c) Postmenopausal woman or man ≥50 on prednisolone ≥7.5 mg/day for planned ≥3 months.
+ *   (d) Postmenopausal woman or man ≥50 with FRAX (after Table 8 correction) above the
+ *       age-specific NOGG intervention threshold, at any GC dose.
+ *
+ * (d) requires the post-Table-8 FRAX values and the age-specific IT — passed in from the caller.
+ */
+function giopImmediateStartCriteria(
+  patient: PatientInput,
+  adjustedMOF: number | null,
+  adjustedHip: number | null,
+  itMOF: number | null,
+  itHip: number | null,
+): string[] {
+  if (!isOnGC(patient)) return [];
+  const criteria: string[] = [];
+  // (a) Prior fragility fracture — any dose
+  if (patient.priorFragilityFracture || patient.priorHipFracture || patient.priorVertebralFracture) {
+    criteria.push('(a) Prior fragility fracture (any GC dose)');
   }
-
-  return false;
+  // (b) Female ≥70 — any dose
+  if (patient.sex === 'female' && patient.age >= 70) {
+    criteria.push('(b) Female ≥70 (any GC dose)');
+  }
+  // (c) Postmenopausal woman or man ≥50 + GC ≥7.5 mg/day
+  if (patient.age >= 50 && isOnHighDoseGC(patient)) {
+    criteria.push('(c) GC ≥7.5 mg/day prednisolone equivalent for planned ≥3 months');
+  }
+  // (d) FRAX (after Table 8) above age-specific IT — any dose.
+  // Gated on manual FRAX entry: criterion (d) requires a reliable FRAX number,
+  // and the in-tool estimator is too coarse for this immediate-start decision.
+  // Without manual entry the patient routes to the assess-and-treat path (Section 9.2).
+  const fraxIsManual = patient.fraxMOFPercent !== null || patient.fraxHipPercent !== null;
+  if (patient.age >= 50 && fraxIsManual) {
+    const mofAboveIT = adjustedMOF !== null && itMOF !== null && adjustedMOF >= itMOF;
+    const hipAboveIT = adjustedHip !== null && itHip !== null && adjustedHip >= itHip;
+    if (mofAboveIT || hipAboveIT) {
+      const which =
+        mofAboveIT && hipAboveIT
+          ? `FRAX MOF ${adjustedMOF}% and hip ${adjustedHip}% both above IT (${itMOF}% / ${itHip}%)`
+          : mofAboveIT
+          ? `FRAX MOF ${adjustedMOF}% above IT ${itMOF}%`
+          : `FRAX hip ${adjustedHip}% above IT ${itHip}%`;
+      criteria.push(`(d) ${which} (any GC dose; Table 8 correction applied; manual FRAX)`);
+    }
+  }
+  return criteria;
 }
 
 function giop(
   patient: PatientInput,
   riskCategory: RiskCategory,
+  riskStratification: RiskStratification,
   flags: ClinicalFlag[],
   referrals: ReferralRecommendation[],
 ): Omit<TreatmentOutput, 'supplements'> {
   const egfr = resolveEGFR(patient);
   const recs: TreatmentRecommendation[] = [];
-  const { dose, durationMonths } = patient.glucocorticoidUse!;
+  const gcDose = effectiveGCDoseMgDay(patient);
 
-  const isHighDose = dose === 'medium' || dose === 'high';
+  // Compute Section 9.1 immediate-start criteria using post-Table-8 FRAX values
+  // and age-specific intervention thresholds.
+  const adjustedMOF = riskStratification.adjustedFraxMOFPercent;
+  const adjustedHip = riskStratification.adjustedFraxHipPercent;
+  const ageThr = getAgeThreshold(patient.age);
+  const itMOF = ageThr ? ageThr.itMOF : null;
+  const itHip = ageThr ? ageThr.itHip : null;
+  const immediateStartCriteria = giopImmediateStartCriteria(
+    patient, adjustedMOF, adjustedHip, itMOF, itHip,
+  );
+  const meetsImmediateStart = immediateStartCriteria.length > 0;
 
-  // Lower threshold scenario: low-dose, age <65, no prior fracture
-  // Steroids increase fracture risk independently of BMD — DEXA required; treat if T-score ≤-1.5
-  const isLowerThresholdOnly =
-    dose === 'low' &&
-    patient.age < GIOP.lowerDoseTriggerAge &&
-    !patient.priorFragilityFracture;
-
-  if (isLowerThresholdOnly) {
+  if (meetsImmediateStart) {
     flags.push({
-      id: 'giop_lower_threshold_new',
+      id: 'giop_immediate_start',
       severity: 'warning',
       message:
-        `Age <${GIOP.lowerDoseTriggerAge}, no prior fracture, on glucocorticoids (${dose}-dose, ${durationMonths} months): ` +
-        'glucocorticoids increase fracture risk independently of BMD — the standard T-score threshold does not apply. ' +
-        'DEXA required: start bone protection if T-score ≤-1.5 (NOGG 2024).',
+        `GIOP — start bone protection immediately, do NOT wait for DEXA. Triggered by: ${immediateStartCriteria.join('; ')}.`,
       rationale:
-        'NOGG 2024: glucocorticoids increase fracture risk at all doses over and above the effect on BMD. ' +
-        'For patients aged <65 without prior fracture, the lower treatment threshold of T-score ≤-1.5 applies.',
+        'NOGG 2024 Section 9.1 / Rec 22 (Strong): bone loss is greatest in the first 3–6 months of GC therapy. ' +
+        'Any one of criteria (a)–(d) is sufficient to start treatment without waiting for BMD. ' +
+        '(a) Prior fragility fracture — any GC dose. ' +
+        '(b) Female ≥70 — any GC dose. ' +
+        '(c) Postmenopausal woman or man ≥50 on prednisolone ≥7.5 mg/day for planned ≥3 months. ' +
+        '(d) Postmenopausal woman or man ≥50 with FRAX (after Table 8 dose correction) above the age-specific intervention threshold.',
+      source: SRC_NOGG,
+    });
+  } else {
+    // Section 9.2 — assess and treat. Patient is on GC but does not meet immediate-start criteria.
+    // The standard scenario: medium- or low-dose GC in a younger patient without fracture and
+    // with FRAX below IT. DEXA-gated treatment with lower threshold T ≤ −1.5.
+    flags.push({
+      id: 'giop_lower_threshold_assess_and_treat',
+      severity: 'info',
+      message:
+        `GIOP assess-and-treat: on ${gcDose ?? '?'} mg/day GC; does not meet immediate-start criteria (a)–(d). ` +
+        'Measure BMD; treat if T-score ≤−1.5 (lower GIOP threshold — steroids increase fracture risk beyond BMD effect alone).',
+      rationale:
+        'NOGG 2024 Section 9.2: for postmenopausal women or men ≥50 on medium- or low-dose GC who do not meet ' +
+        'immediate-start criteria, DEXA is required and treatment is offered if T-score ≤ −1.5 at any standard site. ' +
+        'Glucocorticoids increase fracture risk independently of BMD, so the standard −2.5 threshold is lowered.',
       source: SRC_NOGG,
     });
 
@@ -1474,6 +1656,29 @@ function giop(
         ].filter((t): t is number => t != null)
       : [];
     const lowestT = tScores.length > 0 ? Math.min(...tScores) : null;
+
+    // Step 5 — Near-threshold reassessment (NOGG 2024 Section 9.2, Conditional).
+    // Patient on medium/low dose GC with FRAX (after Table 8) below but within 20% of the IT.
+    if (gcDose !== null && gcDose < 7.5 && itMOF !== null && itHip !== null) {
+      const mofNearIT =
+        adjustedMOF !== null && adjustedMOF < itMOF && adjustedMOF >= itMOF * 0.8;
+      const hipNearIT =
+        adjustedHip !== null && adjustedHip < itHip && adjustedHip >= itHip * 0.8;
+      if (mofNearIT || hipNearIT) {
+        flags.push({
+          id: 'giop_near_threshold_reassess',
+          severity: 'info',
+          message:
+            'GIOP near-threshold reassessment: FRAX is below but within 20% of the age-specific intervention threshold. ' +
+            'Recommend FRAX + BMD reassessment at 12–18 months after starting GC therapy.',
+          rationale:
+            'NOGG 2024 (Conditional): for medium/low-dose GC patients near but below the IT, repeat fracture risk ' +
+            'assessment at 12–18 months allows earlier treatment if risk crosses the threshold during the high-loss ' +
+            'first year of GC therapy.',
+          source: SRC_NOGG,
+        });
+      }
+    }
 
     if (lowestT === null) {
       // No DEXA yet — flag raised, await result before treating
@@ -1493,23 +1698,8 @@ function giop(
       });
       return { recommendations: [], flags, referrals };
     }
-    // T-score ≤-1.5 — continue to standard treatment recommendations below
+    // T-score ≤ -1.5 — continue to standard GIOP treatment recommendations below
   }
-
-  flags.push({
-    id: 'giop_lower_threshold',
-    severity: 'warning',
-    message:
-      `GIOP: ${dose}-dose glucocorticoid for ${durationMonths} months — lower treatment thresholds apply. ` +
-      'FRAX underestimates fracture risk at high dose; arithmetic adjustment applied (MOF ×1.15, hip ×1.20). ' +
-      (isHighDose
-        ? 'Start bone protection AT THE SAME TIME as steroids — do not wait for DEXA.'
-        : 'Bone protection indicated given age/fracture history — assess need for DEXA.'),
-    rationale:
-      'NOGG 2024 Rec 22 (Strong): start bone protection immediately when prednisolone ≥7.5mg/day ≥3 months is initiated. ' +
-      'Glucocorticoids cause greatest bone loss in first 3–6 months.',
-    source: SRC_NOGG,
-  });
 
   flags.push({
     id: 'giop_monitoring',
@@ -1562,13 +1752,13 @@ function giop(
 
   if (!aff && !giIntolerance && canUse('alendronate', egfr)) {
     // Oral first-line per HSE MMP / NOGG GIOP Rec 23
-    recs.push({
+    recs.push(withBPInitiationContext({
       ...alendronate(),
       rationale:
         'First-line bisphosphonate for GIOP (NOGG 2024 Rec 23; HSE MMP). ' +
         'Initiate at same time as glucocorticoid if planned duration ≥3 months. ' +
         'Calcium 1000–1500 mg/day and vitamin D ≥800 IU/day required alongside.',
-    });
+    }, patient));
   } else if (!aff && giIntolerance && !refuses && canUse('zoledronate', egfr)) {
     // Prior oral GI intolerance — IV zoledronate bypasses GI tract
     flags.push({
@@ -1581,9 +1771,9 @@ function giop(
         'Pre-medicate with paracetamol and pre-hydrate.',
       source: SRC_HSE,
     });
-    recs.push({ ...zoledronate(), rationale: 'IV zoledronate for GIOP when oral bisphosphonate is contraindicated by prior intolerance.' });
+    recs.push(withBPInitiationContext({ ...zoledronate(), rationale: 'IV zoledronate for GIOP when oral bisphosphonate is contraindicated by prior intolerance.' }, patient));
   } else if (!aff && !refuses && canUse('zoledronate', egfr)) {
-    recs.push({ ...zoledronate(), rationale: 'IV zoledronate for GIOP when oral bisphosphonate is contraindicated or not tolerated.' });
+    recs.push(withBPInitiationContext({ ...zoledronate(), rationale: 'IV zoledronate for GIOP when oral bisphosphonate is contraindicated or not tolerated.' }, patient));
   } else {
     // BP options exhausted (AFF history, refusal of IV, or eGFR too low) — denosumab
     if (refuses) {
@@ -1826,6 +2016,41 @@ function getSupplements(patient: PatientInput): SupplementRecommendation[] {
 }
 
 // ─── Treatment recipe cards ───────────────────────────────────────────────
+
+// v1.13 Step 6 — planned duration text computed from extension criteria at initiation.
+function plannedBPDuration(patient: PatientInput, isIV: boolean): string {
+  const hasExtensionCriterion =
+    patient.age >= 70 ||
+    patient.priorHipFracture ||
+    patient.priorVertebralFracture ||
+    isOnHighDoseGC(patient);
+  if (isIV) {
+    return hasExtensionCriterion
+      ? 'Planned duration: at least 6 years (extension criterion at initiation: age ≥70, prior hip/vertebral fracture, or GC ≥7.5 mg/day). NOGG 2024 Section 7 Rec 2 (Strong).'
+      : 'Planned duration: at least 3 years, then reassess fracture risk. NOGG 2024 Section 7 Rec 2 (Strong).';
+  }
+  return hasExtensionCriterion
+    ? 'Planned duration: at least 10 years (extension criterion at initiation: age ≥70, prior hip/vertebral fracture, or GC ≥7.5 mg/day). NOGG 2024 Section 7 Rec 1 (Strong).'
+    : 'Planned duration: at least 5 years, then reassess fracture risk. NOGG 2024 Section 7 Rec 1 (Strong).';
+}
+
+// Wraps a bisphosphonate recipe with patient-specific planned-duration monitoring entry.
+// Also adds Strong dental-hygiene-at-initiation advice (Step 11) for all antiresorptives.
+function withBPInitiationContext(
+  rec: TreatmentRecommendation,
+  patient: PatientInput,
+): TreatmentRecommendation {
+  const isIV =
+    rec.agent === 'zoledronate' ||
+    (rec.agent === 'ibandronate' && rec.dose.includes('IV'));
+  const monitoring = [
+    plannedBPDuration(patient, isIV),
+    ...rec.monitoring,
+    'Dental hygiene (Strong, NOGG 2024 Rec 9): maintain good oral hygiene; attend routine dental check-ups; report dental mobility, jaw pain, swelling, or oral ulceration promptly.',
+    'Dental procedures during treatment (Conditional, NOGG 2024 Rec 11): there are NO data showing that stopping bisphosphonate or denosumab reduces the risk of ONJ. Do NOT routinely stop treatment before dental procedures.',
+  ];
+  return { ...rec, monitoring };
+}
 
 function alendronate(): TreatmentRecommendation {
   return {
@@ -2172,6 +2397,8 @@ function denosumab(egfr: number | null): TreatmentRecommendation {
       'Strict 6-monthly schedule — clinical risk begins to rise after 6 months + 2 weeks; treat >7 months as urgent',
       'DEXA at 1–2 years',
       'CRITICAL: Plan sequential antiresorptive (alendronate or single-dose zoledronate) BEFORE stopping denosumab. Routine cessation is not supported.',
+      'Dental hygiene (Strong, NOGG 2024 Rec 9): maintain good oral hygiene; attend routine dental check-ups; report dental mobility, jaw pain, swelling, or oral ulceration promptly.',
+      'Dental procedures during treatment (Conditional, NOGG 2024 Rec 11): there are NO data showing that stopping denosumab reduces the risk of ONJ. Do NOT routinely stop treatment before dental procedures.',
     ],
     irishPrescribingNote:
       'POSITIONING: first-line only in specific groups (eGFR <35, men on ADT, BP contraindications). Otherwise second-line per HSE MMP cascade — alendronate first-line for most patients. ' +

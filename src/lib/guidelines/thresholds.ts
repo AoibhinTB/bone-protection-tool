@@ -1,7 +1,54 @@
 // Versioned threshold data — all values sourced from published guidelines
 // Update version strings when guidelines are revised
 
-import type { GuidelineSource, FraxAdjustment, PatientInput } from './types';
+import type { GuidelineSource, FraxAdjustment, PatientInput, GlucocorticoidDose } from './types';
+
+// ─── Glucocorticoid helpers (v1.13) ───────────────────────────────────────
+// Canonical numeric dose input (mg/day prednisolone equivalent) is read first.
+// Legacy categorical (glucocorticoidUse) is used as a fallback for UI compat.
+
+const LEGACY_GC_DOSE_MG: Record<GlucocorticoidDose, number> = {
+  very_low: 1.25,  // <2.5 mg/day band — midpoint
+  low:       5,    // 2.5–7.4 mg/day band
+  medium:   10,    // 7.5–20 mg/day band
+  high:     25,    // >20 mg/day band — midpoint
+};
+
+/** Effective current GC dose in mg/day. null if not on GC. */
+export function effectiveGCDoseMgDay(p: PatientInput): number | null {
+  // Canonical numeric field wins
+  if (p.glucocorticoidDoseMgDay !== null && p.glucocorticoidDoseMgDay !== undefined) {
+    return p.glucocorticoidDoseMgDay > 0 ? p.glucocorticoidDoseMgDay : null;
+  }
+  // Fall back to legacy categorical
+  if (p.glucocorticoidUse?.current === true) {
+    return LEGACY_GC_DOSE_MG[p.glucocorticoidUse.dose];
+  }
+  return null;
+}
+
+/** Currently on glucocorticoid (any dose >0). */
+export function isOnGC(p: PatientInput): boolean {
+  return effectiveGCDoseMgDay(p) !== null;
+}
+
+/** Current GC dose ≥7.5 mg/day prednisolone equivalent. */
+export function isOnHighDoseGC(p: PatientInput): boolean {
+  const d = effectiveGCDoseMgDay(p);
+  return d !== null && d >= 7.5;
+}
+
+/** Current GC dose ≥2.5 mg/day (medium or high band). */
+export function isOnMediumOrHighDoseGC(p: PatientInput): boolean {
+  const d = effectiveGCDoseMgDay(p);
+  return d !== null && d >= 2.5;
+}
+
+/** Elapsed duration of current GC use in months (0 if not on GC). */
+export function gcDurationMonths(p: PatientInput): number {
+  if (p.glucocorticoidUse?.current === true) return p.glucocorticoidUse.durationMonths;
+  return 0;
+}
 
 // ─── Guideline versions ────────────────────────────────────────────────────
 
@@ -87,17 +134,26 @@ export function applyFraxAdjustments(
   let hip = rawHip;
   const adjustments: FraxAdjustment[] = [];
 
-  // High-dose glucocorticoids (≥7.5 mg/day prednisolone equivalent for ≥3 months)
-  // FRAX with GC box ticked uses a conservative average; adjust for high dose.
-  if (
-    patient.glucocorticoidUse?.current &&
-    (patient.glucocorticoidUse.dose === 'medium' || patient.glucocorticoidUse.dose === 'high') &&
-    patient.glucocorticoidUse.durationMonths >= 3
-  ) {
-    mof = mof * 1.15;
-    hip = hip * 1.20;
-    adjustments.push({ factor: 'High-dose glucocorticoid (≥7.5 mg/day)', multiplier: 1.15, appliedTo: 'MOF' });
-    adjustments.push({ factor: 'High-dose glucocorticoid (≥7.5 mg/day)', multiplier: 1.20, appliedTo: 'hip' });
+  // Glucocorticoid dose-specific FRAX adjustment (NOGG 2024 Table 8, v1.13).
+  // Three-tier correction applied AFTER FRAX is calculated with the GC box ticked.
+  // - <2.5 mg/day:    hip ×0.65 (−35%), MOF ×0.80 (−20%)  — FRAX overestimates at very low dose
+  // - 2.5 – 7.5 mg/day: no adjustment                       — FRAX accurate
+  // - ≥7.5 mg/day:    hip ×1.20, MOF ×1.15                  — FRAX underestimates at high dose
+  // Source: Kanis et al 2011 / NOGG 2024 Table 8.
+  const gcDose = effectiveGCDoseMgDay(patient);
+  if (gcDose !== null) {
+    if (gcDose < 2.5) {
+      mof = mof * 0.80;
+      hip = hip * 0.65;
+      adjustments.push({ factor: `Low-dose glucocorticoid (${gcDose} mg/day, <2.5)`, multiplier: 0.80, appliedTo: 'MOF' });
+      adjustments.push({ factor: `Low-dose glucocorticoid (${gcDose} mg/day, <2.5)`, multiplier: 0.65, appliedTo: 'hip' });
+    } else if (gcDose >= 7.5) {
+      mof = mof * 1.15;
+      hip = hip * 1.20;
+      adjustments.push({ factor: `High-dose glucocorticoid (${gcDose} mg/day, ≥7.5)`, multiplier: 1.15, appliedTo: 'MOF' });
+      adjustments.push({ factor: `High-dose glucocorticoid (${gcDose} mg/day, ≥7.5)`, multiplier: 1.20, appliedTo: 'hip' });
+    }
+    // Medium dose 2.5–7.5: no adjustment (FRAX is accurate at this dose)
   }
 
   // Type 2 diabetes — FRAX underestimates fracture risk
@@ -171,6 +227,24 @@ export const BP_HOLIDAY = {
   ivZoledronate: { reviewAt: 3 }, // years of IV zoledronate before holiday review
   holidayDurationMonthsMin: 18,   // NOGG 2024 Rec 17: 18–36 months (NOT "2–3 years")
   holidayDurationMonthsMax: 36,
+} as const;
+
+// v1.13 Step 8 — drug-specific reassessment intervals after a pause (NOGG 2024 Section 7 Rec 4, Strong).
+// Reflects the different offset kinetics of each bisphosphonate.
+export const PAUSE_REASSESSMENT_INTERVAL_MONTHS: Record<
+  'alendronate' | 'risedronate' | 'ibandronate' | 'zoledronate',
+  number
+> = {
+  risedronate: 18,
+  ibandronate: 18,
+  alendronate: 24,
+  zoledronate: 36,
+};
+
+// v1.13 Step 13 — after-10-years (oral) / after-6-years (IV) individual basis recommendation.
+export const BP_INDIVIDUAL_BASIS_AFTER_YEARS = {
+  oral: 10,
+  iv: 6,
 } as const;
 
 // ─── GIOP thresholds ──────────────────────────────────────────────────────

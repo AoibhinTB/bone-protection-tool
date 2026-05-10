@@ -33,21 +33,31 @@ export function generateRiskFactorsIdentified(
   }
 
   // Glucocorticoids
-  if (patient.glucocorticoidUse?.current) {
-    const dose = patient.glucocorticoidUse.dose;
-    if (dose === 'medium' || dose === 'high') {
-      items.push({
-        factor: 'Glucocorticoids ≥7.5 mg/day',
-        effect: 'GIOP pathway applied; FRAX MOF ×1.15, hip ×1.20; start treatment immediately, do not wait for DEXA',
-      });
-    } else if (dose === 'low' && patient.glucocorticoidUse.durationMonths >= 3) {
-      const triggered = patient.age >= 65 || patient.priorFragilityFracture;
-      items.push({
-        factor: `Glucocorticoids ${patient.glucocorticoidUse.durationMonths} mo`,
-        effect: triggered
-          ? 'GIOP pathway applied (≥3 mo low-dose + age ≥65 or prior fracture)'
-          : 'GIOP context: lower BMD treatment threshold (T-score ≤−1.5) applies; DEXA recommended',
-      });
+  // Glucocorticoid effect summary — driven by the canonical numeric dose helper.
+  {
+    const gcDose =
+      patient.glucocorticoidDoseMgDay !== null && patient.glucocorticoidDoseMgDay > 0
+        ? patient.glucocorticoidDoseMgDay
+        : patient.glucocorticoidUse?.current
+        ? ({ very_low: 1.25, low: 5, medium: 10, high: 25 } as const)[patient.glucocorticoidUse.dose]
+        : null;
+    if (gcDose !== null) {
+      if (gcDose >= 7.5) {
+        items.push({
+          factor: `Glucocorticoids ${gcDose} mg/day (≥7.5)`,
+          effect: 'Table 8 FRAX correction: MOF ×1.15, hip ×1.20. GIOP immediate-start criterion (c).',
+        });
+      } else if (gcDose < 2.5) {
+        items.push({
+          factor: `Glucocorticoids ${gcDose} mg/day (<2.5)`,
+          effect: 'Table 8 downward FRAX correction: MOF ×0.80, hip ×0.65 (FRAX overestimates at very low dose).',
+        });
+      } else {
+        items.push({
+          factor: `Glucocorticoids ${gcDose} mg/day (2.5–7.5)`,
+          effect: 'GIOP pathway applies; no FRAX adjustment at medium dose. Lower BMD threshold (T ≤−1.5) for treatment.',
+        });
+      }
     }
   }
 

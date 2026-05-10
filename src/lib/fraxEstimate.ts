@@ -124,7 +124,15 @@ export function estimateFrax(patient: PatientInput): FraxEstimate {
   const [baseMof, baseHip] = interpolate(table, patient.age);
 
   // Binary risk factor linear predictor
-  const gc = patient.glucocorticoidUse !== null && patient.glucocorticoidUse.current;
+  // GC β fires whenever the patient is on a clinically-relevant dose; helper handles
+  // both legacy categorical and new numeric dose fields.
+  const gcDose =
+    (patient.glucocorticoidDoseMgDay !== null && patient.glucocorticoidDoseMgDay !== undefined && patient.glucocorticoidDoseMgDay > 0)
+      ? patient.glucocorticoidDoseMgDay
+      : (patient.glucocorticoidUse?.current
+        ? ({ very_low: 1.25, low: 5, medium: 10, high: 25 } as const)[patient.glucocorticoidUse.dose]
+        : 0);
+  const gc = gcDose > 0;
   const hasSecondary = patient.secondaryOsteoporosis.length > 0 || patient.rheumatoidArthritis;
 
   const lp = (b: typeof beta.mof) =>

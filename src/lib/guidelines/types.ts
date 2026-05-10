@@ -25,6 +25,13 @@ export interface GlucocorticoidUse {
   dose: GlucocorticoidDose;
 }
 
+// v1.13 schema change: numeric GC dose field is now the canonical input for the
+// three-tier FRAX Table 8 adjustment, GIOP immediate-start criteria, VHR
+// classification, BP extension criteria, and holiday eligibility. The legacy
+// categorical field (glucocorticoidUse) is kept for UI compatibility; engine
+// reads the numeric field via the effectiveGCDoseMgDay() helper which falls
+// back to a mapping of the legacy categorical when the numeric is null.
+
 export type SecondaryOsteoporosisCause =
   | 'type1_diabetes'
   | 'osteogenesis_imperfecta'
@@ -126,6 +133,14 @@ export interface PatientInput {
 
   // Medications
   glucocorticoidUse: GlucocorticoidUse | null;
+  /** Canonical GC dose input (mg/day prednisolone equivalent). v1.13. */
+  glucocorticoidDoseMgDay: number | null;
+  /** Patient previously took oral GC and has now stopped. v1.13 — drives Section 9.4 withdrawal review. */
+  glucocorticoidPreviouslyUsed: boolean;
+  /** Bone turnover markers (CTX / P1NP) rising during a bisphosphonate pause. v1.13 — drives restart consideration (NOGG Section 6.6). */
+  boneTurnoverMarkersRising: boolean | null;
+  /** BMD has decreased on repeat DEXA during a pause. v1.13 — drives restart consideration. */
+  bmdDecreasedDuringPause: boolean | null;
   adtUse: boolean;                    // Androgen Deprivation Therapy (prostate cancer)
   aromataseInhibitorUse: boolean;     // Breast cancer treatment
 

@@ -2,7 +2,7 @@
 // Source: NOGG 2024 Recs 2–7, IOS 2024, NICE NG187
 
 import type { PatientInput, InvestigationRecommendation } from './types';
-import { BLOOD_RANGES, GIOP } from './thresholds';
+import { BLOOD_RANGES, GIOP, isOnGC, gcDurationMonths } from './thresholds';
 
 export function assessInvestigationsNeeded(
   patient: PatientInput,
@@ -165,12 +165,12 @@ export function assessInvestigationsNeeded(
     patient.sex === 'male' &&
     (patient.secondaryOsteoporosis.includes('hypogonadism') ||
       (patient.age < 55 && patient.dexaResults !== null && lowestTScore(patient.dexaResults) <= -2.5 &&
-        patient.secondaryOsteoporosis.length === 0 && !patient.glucocorticoidUse?.current) ||
+        patient.secondaryOsteoporosis.length === 0 && !isOnGC(patient)) ||
       // Severe unexplained osteoporosis in a man — testosterone is the main reversible cause to exclude
       (patient.dexaResults !== null &&
         lowestTScore(patient.dexaResults) <= -3.0 &&
         patient.secondaryOsteoporosis.length === 0 &&
-        !patient.glucocorticoidUse?.current))
+        !isOnGC(patient)))
   ) {
     needed.push({
       investigation: 'testosterone',
@@ -202,7 +202,7 @@ export function assessInvestigationsNeeded(
     patient.age < 55 &&
     lowestT <= -2.5 &&
     patient.secondaryOsteoporosis.length === 0 &&
-    !patient.glucocorticoidUse?.current &&
+    !isOnGC(patient) &&
     !patient.adtUse &&
     !patient.aromataseInhibitorUse;
 
@@ -254,7 +254,7 @@ export function assessInvestigationsNeeded(
   const vertebralNoOtherCause =
     patient.priorVertebralFracture &&
     patient.secondaryOsteoporosis.length === 0 &&
-    !patient.glucocorticoidUse;
+    !isOnGC(patient);
   if (anaemia || esrCrpElevated || vertebralNoOtherCause) {
     const reasons: string[] = [];
     if (anaemia) reasons.push(`anaemia (Hb ${hb} g/L; threshold <${anaemiaThreshold} for ${patient.sex})`);
@@ -323,7 +323,7 @@ function dexaIndications(patient: PatientInput): InvestigationRecommendation[] {
     const urgentDEXA =
       patient.priorHipFracture ||
       patient.priorVertebralFracture ||
-      (patient.glucocorticoidUse?.current === true);
+      isOnGC(patient);
     items.push({
       investigation: 'dexa',
       reason: specificReason,
@@ -348,10 +348,7 @@ function dexaIndications(patient: PatientInput): InvestigationRecommendation[] {
 }
 
 function specificDexaReason(patient: PatientInput): string | null {
-  if (
-    patient.glucocorticoidUse?.current &&
-    patient.glucocorticoidUse.durationMonths >= GIOP.highDoseMinMonths
-  ) {
+  if (isOnGC(patient) && gcDurationMonths(patient) >= GIOP.highDoseMinMonths) {
     return 'DEXA indicated: glucocorticoid use ≥3 months — baseline BMD required for GIOP risk stratification. ' +
       'Note: treatment should NOT be delayed while awaiting DEXA if starting prednisolone ≥7.5mg/day (NOGG 2024 Rec 22).';
   }
@@ -390,11 +387,9 @@ function vfaIndicationReason(patient: PatientInput): string | null {
   }
   // Long-term (≥3 months) current GC, or recent past oral GC stopped within ~12 months.
   // Silent VFs may have occurred during the high-risk GC period.
-  const longTermCurrentGC =
-    patient.glucocorticoidUse?.current === true &&
-    patient.glucocorticoidUse.durationMonths >= 3;
+  const longTermCurrentGC = isOnGC(patient) && gcDurationMonths(patient) >= 3;
   if (longTermCurrentGC) {
-    reasons.push(`long-term current glucocorticoid use (${patient.glucocorticoidUse!.durationMonths} months)`);
+    reasons.push(`long-term current glucocorticoid use (${gcDurationMonths(patient)} months)`);
   } else if (patient.recentOralGlucocorticoidUse) {
     reasons.push('recent oral glucocorticoid therapy (stopped within last 12 months)');
   }
@@ -420,7 +415,7 @@ function vfaIndicationReason(patient: PatientInput): string | null {
 function hasAnyOsteoporosisRiskFactor(p: PatientInput): boolean {
   if (p.priorFragilityFracture || p.priorHipFracture || p.priorVertebralFracture) return true;
   if (p.dexaResults && lowestTScore(p.dexaResults) <= -2.5) return true;
-  if (p.glucocorticoidUse?.current === true || p.recentOralGlucocorticoidUse) return true;
+  if (isOnGC(p) || p.recentOralGlucocorticoidUse) return true;
   if (p.adtUse || p.aromataseInhibitorUse || p.earlyMenopause) return true;
   if (p.parentalHipFracture) return true;
   if (p.currentSmoker) return true;
@@ -446,7 +441,7 @@ function countClinicalRiskFactors(patient: PatientInput): number {
   return [
     patient.priorFragilityFracture,
     patient.parentalHipFracture,
-    patient.glucocorticoidUse?.current,
+    isOnGC(patient),
     patient.rheumatoidArthritis,
     patient.currentSmoker,
     patient.alcoholUnitsPerWeek >= 21,

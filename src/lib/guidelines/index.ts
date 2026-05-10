@@ -203,7 +203,9 @@ function buildSummary(patient: PatientInput, riskCategory: RiskCategory): string
   else if (patient.priorVertebralFracture) parts.push(`vertebral fracture (×${patient.numberOfPriorFractures})`);
   else if (patient.priorFragilityFracture) parts.push('prior fragility fracture');
 
-  if (patient.glucocorticoidUse?.current) {
+  if (patient.glucocorticoidDoseMgDay !== null && patient.glucocorticoidDoseMgDay > 0) {
+    parts.push(`GC ${patient.glucocorticoidDoseMgDay} mg/day`);
+  } else if (patient.glucocorticoidUse?.current) {
     parts.push(`${patient.glucocorticoidUse.dose}-dose GC ×${patient.glucocorticoidUse.durationMonths}mo`);
   }
   if (patient.adtUse)                      parts.push('on ADT');
