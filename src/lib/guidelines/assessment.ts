@@ -1,5 +1,6 @@
 // Determines what investigations are indicated before or alongside treatment
-// Source: NOGG 2024 Recs 2–7, IOS 2024, NICE NG187
+// Source: NOGG 2024 Recs 2–7, NICE NG187 (v1.18: standalone IOS 2024 attribution removed —
+// no IOS prescribing guideline document identified; NOGG 2024 covers DEXA case-finding independently)
 
 import type { PatientInput, InvestigationRecommendation } from './types';
 import { BLOOD_RANGES, GIOP, isOnGC, gcDurationMonths } from './thresholds';
@@ -308,11 +309,11 @@ export function assessInvestigationsNeeded(
 function dexaIndications(patient: PatientInput): InvestigationRecommendation[] {
   const items: InvestigationRecommendation[] = [];
 
-  // Routine case-finding by age/sex (IOS 2024; NOGG 2024)
+  // Routine case-finding by age/sex (NOGG 2024 Rec 2)
   if (patient.sex === 'female' && patient.age >= 65) {
     items.push({
       investigation: 'dexa',
-      reason: 'DEXA indicated: routine case-finding strategy for women aged ≥65 years (IOS 2024; NOGG 2024).',
+      reason: 'DEXA indicated: routine case-finding strategy for women aged ≥65 years (NOGG 2024 Rec 2).',
       urgency: 'routine',
     });
     return items; // one reason is enough
@@ -347,7 +348,7 @@ function dexaIndications(patient: PatientInput): InvestigationRecommendation[] {
     if (rfCount >= 2) {
       items.push({
         investigation: 'dexa',
-        reason: `DEXA indicated: age ≥50 with ${rfCount} clinical risk factors and no prior BMD measurement (IOS 2024; NOGG 2024).`,
+        reason: `DEXA indicated: age ≥50 with ${rfCount} clinical risk factors and no prior BMD measurement (NOGG 2024 Rec 2).`,
         urgency: 'routine',
       });
     }

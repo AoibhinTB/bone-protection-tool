@@ -120,14 +120,14 @@ export function stratifyRisk(patient: PatientInput): RiskStratification {
     }
   }
 
-  // Early menopause history (now age ≥50): T-score ≤ -1.5 warrants treatment (IOS 2024 / NOGG 2024)
+  // Early menopause history (now age ≥50): T-score ≤ -1.5 warrants treatment (NOGG 2024; international consensus)
   // Patients are age ≥50 here (age <50 path handled above) — early menopause = lifetime cumulative bone deficit
   if (patient.sex === 'female' && patient.earlyMenopause && patient.dexaResults) {
     const lowest = lowestTScore(patient.dexaResults);
     if (lowest <= -1.5) {
       return result('high', 'red', threshold.lowerMOF, threshold.upperMOF, rawMOF, rawHip, adjustedMOF, adjustedHip, adjustments,
         `History of early menopause with T-score ${lowest}: lower intervention threshold (≤-1.5) applies. ` +
-        'Early oestrogen deficiency causes cumulative bone loss beyond normal age-related risk (IOS 2024 / NOGG 2024).');
+        'Early oestrogen deficiency causes cumulative bone loss beyond normal age-related risk (NOGG 2024; international consensus).');
     }
   }
 

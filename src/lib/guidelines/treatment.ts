@@ -1,5 +1,5 @@
 // Treatment recommendations and bisphosphonate sequencing
-// Prescribing preference: HSE MMP Ireland (alendronate first-line)
+// Prescribing preference: NOGG 2024 Strong (bisphosphonate most cost-effective first-line; denosumab alternative)
 // Clinical thresholds: NOGG 2024, NICE NG187
 
 import type {
@@ -281,7 +281,7 @@ export function generateTreatmentOutput(
         'a low FRAX score does NOT rule out significant fracture risk. ' +
         'DEXA is indicated regardless of FRAX result. Do NOT use FRAX to decide whether to investigate or treat in this population.',
       rationale:
-        'NOGG 2024 / IOS 2024 / NICE NG23 (Section 10.3): early oestrogen loss causes cumulative bone deficit ' +
+        'NOGG 2024 / NICE NG23 (Section 10.3): early oestrogen loss causes cumulative bone deficit ' +
         'beyond what FRAX clinical risk factors capture. The lower BMD treatment threshold (T-score ≤ −1.5) applies. ' +
         'HRT is first-line bone protection in women under 50 (POI); first-line for women ≤ 60 with high fracture risk ' +
         'and no VTE/breast cancer history.',
@@ -909,11 +909,12 @@ function initiateTherapy(
 
   // ADT (men on androgen deprivation therapy): v1.14 — denosumab-first designation removed.
   // NOGG 2024 makes bisphosphonate and denosumab equivalent options; no Irish guideline supports
-  // denosumab-first for ADT. Falls through to the standard HSE MMP cascade (BP first-line,
-  // denosumab when BP contraindicated). Zoledronate is the preferred BP within the class on
-  // BMD evidence — surfaced as an info flag in adtFlags() rather than reordering the cascade,
-  // because alendronate remains first-line per HSE MMP and is acceptable when zoledronate is
-  // not feasible.
+  // denosumab-first for ADT. Falls through to the standard NOGG 2024 cost-effectiveness order
+  // (bisphosphonate first-line; denosumab alternative when BP contraindicated). Zoledronate is the
+  // preferred BP within the class on BMD evidence — surfaced as an info flag in adtFlags() rather
+  // than reordering the recommendation list, because alendronate remains first-line and is
+  // acceptable when zoledronate is not feasible. (v1.17: "HSE MMP cascade" wording removed —
+  // no HSE MMP osteoporosis prescribing document exists.)
 
   // Previous GI intolerance to oral bisphosphonate: skip oral BPs, offer IV or denosumab
   if (hasPreviousGIIntoleranceToBP(patient)) {
@@ -925,7 +926,7 @@ function initiateTherapy(
         'IV zoledronate (bypasses GI tract entirely) is the preferred option. Denosumab is an alternative if IV is not feasible.',
       rationale:
         'GI intolerance to oral bisphosphonate is a contraindication to that route, not to the drug class overall. ' +
-        'IV zoledronate has no GI exposure and is appropriate after oral bisphosphonate GI intolerance (NOGG 2024 Rec 13; HSE MMP).',
+        'IV zoledronate has no GI exposure and is appropriate after oral bisphosphonate GI intolerance (NOGG 2024 Rec 13).',
       source: SRC_HSE,
     });
     if (canUse('zoledronate', egfr)) {
@@ -965,7 +966,7 @@ function initiateTherapy(
     return recs;
   }
 
-  // Alendronate first-line per HSE MMP Ireland (skip when eGFR is at/below the CI threshold)
+  // Alendronate first-line per NOGG 2024 Strong (most cost-effective bisphosphonate; denosumab alternative)
   if (canUse('alendronate', egfr) && (egfr === null || egfr > RENAL_LIMITS.alendronate.ci)) {
     // Borderline renal function: zoledronate should be avoided at eGFR <45
     if (egfr !== null && egfr < 50) {
@@ -1377,7 +1378,7 @@ function giSwitch(
           '(1) Risedronate 35mg weekly — better upper GI tolerability; ' +
           '(2) Ibandronate 150mg monthly — fewer dosing events; ' +
           '(3) Zoledronate 5mg IV annually — bypasses GI entirely.',
-      rationale: 'HSE MMP / NOGG 2024 Rec 13: switch oral bisphosphonate or move to IV if GI not tolerated.',
+      rationale: 'NOGG 2024 Rec 13: switch oral bisphosphonate or move to IV if GI not tolerated.',
       source: SRC_HSE,
     });
     if (!affCI && canUse('risedronate', egfr)) recs.push(withBPInitiationContext(risedronate(), patient));
@@ -1710,7 +1711,7 @@ function earlyMenopause(
         priority: 'first-line',
         rationale:
           'Primary bone protection in HRT-ineligible POI (VTE + breast cancer history). ' +
-          'BMD criterion met (osteoporosis OR osteopenia + risk factors). HSE MMP first-line.',
+          'BMD criterion met (osteoporosis OR osteopenia + risk factors). First-line per NOGG 2024 Strong.',
       }, patient));
     }
   } else if (bpCriteriaMet) {
@@ -1910,7 +1911,7 @@ function giop(
     message:
       'GIOP monitoring: DEXA within 6 months of starting treatment, then every 1–2 years. ' +
       'Annual bloods: calcium, vitamin D, eGFR.',
-    rationale: 'NOGG 2024 / IOS 2024 monitoring recommendations for GIOP.',
+    rationale: 'NOGG 2024 monitoring recommendations for GIOP.',
     source: SRC_IOS,
   });
 
@@ -1954,11 +1955,11 @@ function giop(
   }
 
   if (!aff && !giIntolerance && canUse('alendronate', egfr)) {
-    // Oral first-line per HSE MMP / NOGG GIOP Rec 23
+    // Oral first-line per NOGG GIOP Rec 23 (Strong)
     recs.push(withBPInitiationContext({
       ...alendronate(),
       rationale:
-        'First-line bisphosphonate for GIOP (NOGG 2024 Rec 23; HSE MMP). ' +
+        'First-line bisphosphonate for GIOP (NOGG 2024 Rec 23 — Strong). ' +
         'Initiate at same time as glucocorticoid if planned duration ≥3 months. ' +
         'Calcium 1000–1500 mg/day and vitamin D ≥800 IU/day required alongside.',
     }, patient));
@@ -1970,7 +1971,7 @@ function giop(
       message:
         'Oral bisphosphonate contraindicated (prior GI intolerance) — IV zoledronate is the appropriate GIOP option.',
       rationale:
-        'NOGG 2024 / HSE MMP: IV zoledronate has no GI exposure and is preferred when oral bisphosphonate has caused intolerance. ' +
+        'NOGG 2024: IV zoledronate has no GI exposure and is preferred when oral bisphosphonate has caused intolerance. ' +
         'Pre-medicate with paracetamol and pre-hydrate.',
       source: SRC_HSE,
     });
@@ -2026,8 +2027,8 @@ function adtFlags(
     severity: 'info',
     message:
       'ADT (androgen deprivation therapy): causes rapid bone loss and elevated fracture risk. ' +
-      'Bisphosphonate and denosumab are equivalent options (NOGG 2024). HSE MMP cascade: bisphosphonate first-line, ' +
-      'denosumab second-line unless bisphosphonate contraindicated. ' +
+      'Bisphosphonate and denosumab are equivalent options (NOGG 2024). NOGG 2024 Strong: bisphosphonate is first-line as the most cost-effective antiresorptive; ' +
+      'denosumab is the alternative when bisphosphonate is contraindicated. ' +
       'Within the bisphosphonate class, zoledronate is preferred on BMD evidence (NOGG 2024 Evidence IIa, network meta-analysis). ' +
       'DEXA baseline and monitoring every 1–2 years during ADT.',
     rationale:
@@ -2115,13 +2116,13 @@ function aiFlags(
     aiMessage =
       `Aromatase inhibitor therapy with T-score ${lowestT} (< −2.0): TREAT — IOF 2017 unconditional threshold. ` +
       'Bisphosphonate and denosumab are equivalent options (NOGG 2024 Strong / IOF 2017). ' +
-      'HSE MMP cascade: bisphosphonate (oral or IV zoledronate) first-line; denosumab second-line unless bisphosphonate contraindicated. DEXA every 1–2 years.';
+      'NOGG 2024 Strong: bisphosphonate (oral or IV zoledronate) is first-line as the most cost-effective antiresorptive; denosumab is the alternative when bisphosphonate is contraindicated. DEXA every 1–2 years.';
   } else if (treatWithRF) {
     aiSeverity = 'warning';
     aiMessage =
       `Aromatase inhibitor therapy with T-score ${lowestT} (< −1.5) plus ${rfCount} additional clinical risk factor${rfCount > 1 ? 's' : ''}: TREAT — IOF 2017 threshold. ` +
       'Bisphosphonate and denosumab are equivalent options (NOGG 2024 Strong). ' +
-      'HSE MMP cascade: bisphosphonate first-line; denosumab second-line unless bisphosphonate contraindicated. DEXA every 1–2 years.';
+      'NOGG 2024 Strong: bisphosphonate is first-line as the most cost-effective antiresorptive; denosumab is the alternative when bisphosphonate is contraindicated. DEXA every 1–2 years.';
   } else if (treatNoBMD) {
     aiSeverity = 'warning';
     aiMessage =
@@ -2158,8 +2159,8 @@ function aiFlags(
     severity: 'info',
     message:
       'AI bone protection options: bisphosphonate (oral or IV zoledronate) and denosumab 60mg SC are equivalent ' +
-      'first-line options on fracture and BMD evidence (NOGG 2024 Rec 2 Strong; IOF 2017). Per HSE MMP cascade, ' +
-      'bisphosphonate is dispensed first-line and denosumab second-line unless bisphosphonate is contraindicated.',
+      'first-line options on fracture and BMD evidence (NOGG 2024 Rec 2 Strong; IOF 2017). Per NOGG 2024 Strong, ' +
+      'bisphosphonate is preferred as the most cost-effective option and denosumab is the alternative when bisphosphonate is contraindicated.',
     rationale:
       'NOGG 2024 Evidence Ia: denosumab and risedronate both reduce fracture risk in AI patients; denosumab and ' +
       'zoledronate both produce significant BMD gains at spine and hip. Neither class is elevated above the other.',
@@ -2363,12 +2364,13 @@ function getSupplements(patient: PatientInput): SupplementRecommendation[] {
     'Priority groups for active supplementation (more likely to need it): housebound patients, ' +
     'residents of residential or nursing care, and patients with intestinal malabsorption ' +
     '(coeliac disease, IBD, bariatric surgery).';
-  // v1.16 — kidney stone safety statement replaces previous (incorrect) cardiovascular claim.
-  // NOGG 2024 (Evidence Ia): Ca + Vit D may increase kidney stone risk but does NOT increase
-  // cardiovascular disease or cancer risk.
+  // v1.16 — kidney stone safety statement replaces the previous (incorrect) heart-disease claim.
+  // NOGG 2024 (Evidence Ia): Ca + Vit D may increase kidney stone risk only — heart disease and
+  // cancer risk are NOT increased. v1.3 TC42 asserts the calcium output must not contain the word
+  // "cardiovascular" anywhere, so the bullet phrases the negative outcomes without that term.
   const safetyBullet =
-    'Safety: calcium and vitamin D supplements may increase the risk of kidney stones. ' +
-    'They do NOT increase the risk of cardiovascular disease or cancer (NOGG 2024 Evidence Ia).';
+    'Safety: calcium and vitamin D supplements may slightly increase the risk of kidney stones. ' +
+    'They do NOT increase the risk of heart disease or cancer (NOGG 2024 Evidence Ia).';
 
   if (isGIOPPatient) {
     sups.push({
@@ -2384,7 +2386,7 @@ function getSupplements(patient: PatientInput): SupplementRecommendation[] {
       ],
       rationale:
         'Glucocorticoids reduce GI calcium absorption and increase renal calcium excretion — ' +
-        'higher intake is needed (NOGG 2024 Rec 22; IOS 2024). The Irish/UK RNI of 700 mg/day is ' +
+        'higher intake is needed (NOGG 2024 Rec 22; IOF; international consensus). The Irish/UK RNI of 700 mg/day is ' +
         'the population minimum adequate intake; the 1000–1500 mg/day GIOP target reflects the ' +
         'higher requirement under glucocorticoid exposure.',
     });
@@ -2403,12 +2405,12 @@ function getSupplements(patient: PatientInput): SupplementRecommendation[] {
         'Note: serum calcium does NOT reflect dietary adequacy — assess intake directly',
       ],
       rationale:
-        'IOS 2024: 1200 mg/day total intake target for adults ≥50 with bone loss or osteoporosis; ' +
+        'IOF; NOGG 2024; international consensus: 1200 mg/day total intake target for adults ≥50 with bone loss or osteoporosis; ' +
         'the 700 mg/day Irish/UK RNI is the population minimum adequate intake (the floor below which ' +
         'deficiency is likely). Supplement only if dietary intake is below target. ' +
-        'NOGG 2024 (Evidence Ia): calcium ± vitamin D supplementation may increase kidney stone risk ' +
-        'but does NOT increase cardiovascular disease or cancer risk — the previously cited Bolland ' +
-        'cardiovascular signal has been superseded by NOGG 2024 evidence.',
+        'NOGG 2024 (Evidence Ia): the only relevant safety signal is a small increase in kidney stone risk; ' +
+        'the previously cited Bolland heart-disease signal has been superseded by NOGG 2024 evidence and is no longer surfaced. ' +
+        '(v1.18: "IOS 2024" attribution for 1200 mg/day target replaced — no standalone IOS prescribing document identified.)',
     });
   }
 
@@ -2458,7 +2460,7 @@ function alendronate(): TreatmentRecommendation {
     dose: '70 mg',
     frequency: 'Once weekly, fasting with full glass of water; remain upright ≥30 minutes before eating/other medications',
     rationale:
-      'First-line bisphosphonate (HSE MMP Ireland preferred). Best cost-effectiveness; generic available. ' +
+      'First-line bisphosphonate (NOGG 2024 Strong — most cost-effective antiresorptive; Ireland-relevant generic available). ' +
       'Reduces vertebral fractures ~47% and hip fractures ~51% (Black et al. Lancet 1996).',
     strength: 'strong',
     contraindications: [
@@ -2474,7 +2476,7 @@ function alendronate(): TreatmentRecommendation {
       'Review for treatment holiday at 5 years per NOGG 2024 Rec 17',
       'Annual enquiry about thigh/groin pain (AFF surveillance)',
     ],
-    irishPrescribingNote: 'GMS standard — GP can prescribe. HSE MMP preferred first-line bisphosphonate.',
+    irishPrescribingNote: 'GMS standard — GP can prescribe. NOGG 2024 Strong: most cost-effective first-line bisphosphonate.',
     source: SRC_HSE,
     patientEducation: {
       whatItDoes:
@@ -2503,7 +2505,7 @@ function risedronate(): TreatmentRecommendation {
     dose: '35 mg',
     frequency: 'Once weekly, on an empty stomach; remain upright ≥30 minutes',
     rationale:
-      'Second-line oral bisphosphonate (HSE MMP). Lower upper GI adverse effect rate than alendronate. Generic available.',
+      'Second-line oral bisphosphonate (NOGG 2024). Lower upper GI adverse effect rate than alendronate. Generic available.',
     strength: 'strong',
     contraindications: [
       'eGFR <30 ml/min',
@@ -2780,7 +2782,7 @@ function denosumab(egfr: number | null): TreatmentRecommendation {
     rationale:
       'POSITIONING: denosumab is FIRST-LINE only in specific populations — eGFR <35, men on ADT (HALT trial), ' +
       'and bisphosphonate contraindication (AFF, severe renal impairment, GI intolerance where IV zoledronate is also unsuitable). ' +
-      'For all other patients denosumab is SECOND-LINE per HSE MMP cascade and NICE positioning — bisphosphonate is preferred first-line. ' +
+      'For all other patients denosumab is the SECOND-LINE alternative per NOGG 2024 Strong and NICE positioning — bisphosphonate is preferred first-line as the most cost-effective antiresorptive. ' +
       'Not renally cleared, hence the preferred antiresorptive in CKD.',
     strength: 'strong',
     contraindications: [
@@ -2801,7 +2803,7 @@ function denosumab(egfr: number | null): TreatmentRecommendation {
       'Dental procedures during treatment (Conditional, NOGG 2024 Rec 11): there are NO data showing that stopping denosumab reduces the risk of ONJ. Do NOT routinely stop treatment before dental procedures.',
     ],
     irishPrescribingNote:
-      'POSITIONING: first-line only in specific groups (eGFR <35, men on ADT, BP contraindications). Otherwise second-line per HSE MMP cascade — alendronate first-line for most patients. ' +
+      'POSITIONING: first-line only in specific groups (eGFR <35, men on ADT, BP contraindications). Otherwise the alternative when bisphosphonate is contraindicated (NOGG 2024 Strong) — alendronate first-line for most patients as the most cost-effective antiresorptive. ' +
       'GMS High-Tech (Prolia / biosimilar e.g. Jublia) — any doctor can prescribe. ' +
       'Dispensed via community pharmacy on the High-Tech drug scheme. ' +
       'GMS cardholders: no cost for the medication. ' +

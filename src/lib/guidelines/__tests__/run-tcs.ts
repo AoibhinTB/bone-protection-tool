@@ -302,9 +302,10 @@ function tc8(): TCResult {
 // 69M ADT for prostate cancer, T-score -2.3, eGFR 65, Vit D 30
 
 function tc9(): TCResult {
-  // v1.2 corrected: ADT no longer designates denosumab as PRIMARY/first-line.
-  // Standard HSE MMP cascade applies: bisphosphonate first-line, denosumab when BP contraindicated.
-  // Spec assertion: output must NOT designate denosumab as PRIMARY or first-line for ADT specifically.
+  // v1.2 corrected (revised v1.18): ADT no longer designates denosumab as PRIMARY/first-line.
+  // Standard NOGG 2024 Strong order: bisphosphonate first-line as the most cost-effective antiresorptive,
+  // denosumab as the alternative when BP contraindicated. Spec assertion: output must NOT designate
+  // denosumab as PRIMARY or first-line for ADT specifically.
   const failures: string[] = [];
   const patient = basePatient({
     age: 69,
@@ -317,9 +318,9 @@ function tc9(): TCResult {
   const decision = runClinicalDecision(patient);
   check(failures, 'risk = high (ADT + T-score ≤ -2.0)', decision.riskStratification.category === 'high', `got ${decision.riskStratification.category}`);
   check(failures, 'adt_bone_loss flag fires', hasFlag(decision, 'adt_bone_loss'));
-  // Treatment options must include alendronate as a recommended option (HSE MMP first-line).
+  // Treatment options must include alendronate as a recommended option (NOGG 2024 Strong first-line).
   const alenRec = decision.treatmentRecommendations.find(r => r.agent === 'alendronate');
-  check(failures, 'alendronate is recommended (HSE MMP first-line)', !!alenRec);
+  check(failures, 'alendronate is recommended (NOGG 2024 Strong first-line)', !!alenRec);
   // Denosumab must NOT appear as primary/first-line for ADT specifically.
   const denoRec = decision.treatmentRecommendations.find(r => r.agent === 'denosumab');
   const denoIsPrimary = !!denoRec && denoRec.priority === 'first-line';
@@ -1081,6 +1082,293 @@ function tc41(): TCResult {
   return { name: 'TC41 — 58F high-dose GC, Table 8 upward correction', passed: failures.length === 0, failures, decision };
 }
 
+// ═══════════════════════════════════════════════════════════════════════════
+// v1.3 NEW TEST CASES (TC42–TC52) — covers v1.15/v1.16 Ca/VitD/lifestyle/POI
+// ═══════════════════════════════════════════════════════════════════════════
+
+// Helper: search every supplement bullet, headline and rationale for a substring.
+function hasAnySupplementText(decision: ClinicalDecision, text: string): boolean {
+  const lc = text.toLowerCase();
+  return decision.supplements.some(s =>
+    s.headline.toLowerCase().includes(lc) ||
+    s.bullets.some(b => b.toLowerCase().includes(lc)) ||
+    (s.rationale ?? '').toLowerCase().includes(lc),
+  );
+}
+
+// ─── TC42 ─────────────────────────────────────────────────────────────────
+// 70F T -2.6, low dietary calcium, Vit D 55. Output must NOT mention "cardiovascular"
+// in calcium/supplement context AND MUST mention "kidney stones".
+function tc42(): TCResult {
+  const failures: string[] = [];
+  const patient = basePatient({
+    age: 70,
+    sex: 'female',
+    dexaResults: { lumbarSpineTScore: -2.6, totalHipTScore: -2.6, femoralNeckTScore: -2.6, forearmTScore: null },
+    renalFunction: { egfr: 65 },
+    bloodResults: { adjustedCalciumMmol: 2.30, vitaminDNmol: 55, egfr: 65, alp: 80, tshMUL: 2.0, hbGramsPerLitre: 140, esrOrCrp: 'normal' },
+  });
+  const decision = runClinicalDecision(patient);
+  const calcium = decision.supplements.find(s => s.supplement === 'calcium');
+  const calciumText = (
+    (calcium?.headline ?? '') + ' ' +
+    (calcium?.bullets ?? []).join(' ') + ' ' +
+    (calcium?.rationale ?? '')
+  ).toLowerCase();
+  check(failures, 'calcium output present', !!calcium);
+  check(failures, 'calcium output does NOT mention "cardiovascular"',
+    !calciumText.includes('cardiovascular'),
+    calciumText.includes('cardiovascular') ? 'found "cardiovascular" in calcium output' : '');
+  check(failures, 'calcium output mentions "kidney stones"',
+    calciumText.includes('kidney stones'));
+  return { name: 'TC42 — calcium safety: no CV claim, kidney stones stated', passed: failures.length === 0, failures, decision };
+}
+
+// ─── TC43 ─────────────────────────────────────────────────────────────────
+// 68F T -2.8. Calcium output must contain both 700 mg AND 1200 mg figures.
+function tc43(): TCResult {
+  const failures: string[] = [];
+  const patient = basePatient({
+    age: 68,
+    sex: 'female',
+    dexaResults: { lumbarSpineTScore: -2.8, totalHipTScore: -2.8, femoralNeckTScore: -2.8, forearmTScore: null },
+    renalFunction: { egfr: 70 },
+    bloodResults: { adjustedCalciumMmol: 2.32, vitaminDNmol: 60, egfr: 70, alp: 80, tshMUL: 2.0, hbGramsPerLitre: 140, esrOrCrp: 'normal' },
+  });
+  const decision = runClinicalDecision(patient);
+  check(failures, 'calcium output mentions 700 mg/day RNI floor',
+    hasSupplementText(decision, 'calcium', '700'));
+  check(failures, 'calcium output mentions 1200 mg/day target',
+    hasSupplementText(decision, 'calcium', '1200'));
+  return { name: 'TC43 — calcium dual threshold (700 + 1200 mg/day)', passed: failures.length === 0, failures, decision };
+}
+
+// ─── TC44 ─────────────────────────────────────────────────────────────────
+// 84F care home + housebound + Vit D 30. Priority-groups note must fire in supplements.
+// (No housebound/residential schema field; the priority-groups bullet always fires for clinician
+// awareness — this asserts the bullet is present in the supplements section.)
+function tc44(): TCResult {
+  const failures: string[] = [];
+  const patient = basePatient({
+    age: 84,
+    sex: 'female',
+    dexaResults: { lumbarSpineTScore: -2.9, totalHipTScore: -2.9, femoralNeckTScore: -2.9, forearmTScore: null },
+    renalFunction: { egfr: 50 },
+    bloodResults: { adjustedCalciumMmol: 2.30, vitaminDNmol: 30, egfr: 50, alp: 80, tshMUL: 2.0, hbGramsPerLitre: 130, esrOrCrp: 'normal' },
+  });
+  const decision = runClinicalDecision(patient);
+  check(failures, 'supplements mention "housebound"',
+    hasAnySupplementText(decision, 'housebound'));
+  check(failures, 'supplements mention "residential" or "nursing care"',
+    hasAnySupplementText(decision, 'residential') || hasAnySupplementText(decision, 'nursing care'));
+  check(failures, 'supplements mention malabsorption (coeliac/IBD/bariatric)',
+    hasAnySupplementText(decision, 'coeliac') ||
+    hasAnySupplementText(decision, 'malabsorption') ||
+    hasAnySupplementText(decision, 'bariatric'));
+  return { name: 'TC44 — calcium priority groups note', passed: failures.length === 0, failures, decision };
+}
+
+// ─── TC45 ─────────────────────────────────────────────────────────────────
+// 72F Vit D 35 (insufficient tier). Vit D output must contain falls/fracture nuance and
+// the ≥60,000 IU bolus warning. Must NOT contain blanket "does not prevent fractures or falls".
+function tc45(): TCResult {
+  const failures: string[] = [];
+  const patient = basePatient({
+    age: 72,
+    sex: 'female',
+    dexaResults: { lumbarSpineTScore: -2.5, totalHipTScore: -2.5, femoralNeckTScore: -2.5, forearmTScore: null },
+    renalFunction: { egfr: 65 },
+    bloodResults: { adjustedCalciumMmol: 2.30, vitaminDNmol: 35, egfr: 65, alp: 80, tshMUL: 2.0, hbGramsPerLitre: 135, esrOrCrp: 'normal' },
+  });
+  const decision = runClinicalDecision(patient);
+  check(failures, 'vit D output: "does not reduce fracture"',
+    hasSupplementText(decision, 'vitamin_d', 'does not reduce fracture'));
+  check(failures, 'vit D output: "may reduce falls"',
+    hasSupplementText(decision, 'vitamin_d', 'may reduce falls'));
+  check(failures, 'vit D output does NOT contain blanket "does not prevent fractures or falls"',
+    !hasSupplementText(decision, 'vitamin_d', 'does not prevent fractures or falls'));
+  check(failures, 'vit D output: ≥60,000 IU bolus warning',
+    hasSupplementText(decision, 'vitamin_d', '60,000'));
+  return { name: 'TC45 — Vit D nuance + ≥60kIU bolus warning', passed: failures.length === 0, failures, decision };
+}
+
+// ─── TC46 ─────────────────────────────────────────────────────────────────
+// 65F T -2.6. Lifestyle output must lead with healthy balanced diet recommendation.
+function tc46(): TCResult {
+  const failures: string[] = [];
+  const patient = basePatient({
+    age: 65,
+    sex: 'female',
+    dexaResults: { lumbarSpineTScore: -2.6, totalHipTScore: -2.6, femoralNeckTScore: -2.6, forearmTScore: null },
+    renalFunction: { egfr: 70 },
+    bloodResults: { adjustedCalciumMmol: 2.30, vitaminDNmol: 60, egfr: 70, alp: 80, tshMUL: 2.0, hbGramsPerLitre: 135, esrOrCrp: 'normal' },
+  });
+  const decision = runClinicalDecision(patient);
+  check(failures, 'lifestyle has at least 1 entry', decision.lifestyleAdvice.length >= 1);
+  const first = (decision.lifestyleAdvice[0] ?? '').toLowerCase();
+  check(failures, 'lifestyleAdvice[0] contains "healthy"', first.includes('healthy'));
+  check(failures, 'lifestyleAdvice[0] contains "nutrient" or "balanced"',
+    first.includes('nutrient') || first.includes('balanced'));
+  check(failures, 'lifestyleAdvice[0] mentions diet', first.includes('diet'));
+  return { name: 'TC46 — lifestyle: healthy diet first item', passed: failures.length === 0, failures, decision };
+}
+
+// ─── TC47 ─────────────────────────────────────────────────────────────────
+// 60M alcohol 21 u/wk (≥3/day) T -2.7. Alcohol advice must use ≤2 units/day daily framing.
+function tc47(): TCResult {
+  const failures: string[] = [];
+  const patient = basePatient({
+    age: 60,
+    sex: 'male',
+    alcoholUnitsPerWeek: 21,
+    dexaResults: { lumbarSpineTScore: -2.7, totalHipTScore: -2.7, femoralNeckTScore: -2.7, forearmTScore: null },
+    renalFunction: { egfr: 70 },
+    bloodResults: { adjustedCalciumMmol: 2.30, vitaminDNmol: 60, egfr: 70, alp: 80, tshMUL: 2.0, hbGramsPerLitre: 140, esrOrCrp: 'normal' },
+  });
+  const decision = runClinicalDecision(patient);
+  const alcoholAdvice = decision.lifestyleAdvice.find(a => a.toLowerCase().includes('alcohol'));
+  check(failures, 'alcohol advice present', !!alcoholAdvice);
+  const t = (alcoholAdvice ?? '').toLowerCase();
+  check(failures, 'alcohol advice contains "≤2 units/day" or "2 units/day"',
+    t.includes('≤2 units/day') || t.includes('2 units/day'));
+  return { name: 'TC47 — alcohol ≤2 units/day daily framing', passed: failures.length === 0, failures, decision };
+}
+
+// ─── TC48 ─────────────────────────────────────────────────────────────────
+// 66F T -2.6, no falls history. Falls flag must fire on the population-level scope wording.
+function tc48(): TCResult {
+  const failures: string[] = [];
+  const patient = basePatient({
+    age: 66,
+    sex: 'female',
+    fallsInLastYear: 0,
+    dexaResults: { lumbarSpineTScore: -2.6, totalHipTScore: -2.6, femoralNeckTScore: -2.6, forearmTScore: null },
+    renalFunction: { egfr: 70 },
+    bloodResults: { adjustedCalciumMmol: 2.30, vitaminDNmol: 60, egfr: 70, alp: 80, tshMUL: 2.0, hbGramsPerLitre: 140, esrOrCrp: 'normal' },
+  });
+  const decision = runClinicalDecision(patient);
+  check(failures, 'falls flag fires despite no falls history', hasFlag(decision, 'falls_risk_assessment'));
+  check(failures, 'falls flag uses population-level scope ("ALL patients")',
+    hasFlagText(decision, 'all patients'));
+  return { name: 'TC48 — falls flag scope: ALL osteoporosis patients', passed: failures.length === 0, failures, decision };
+}
+
+// ─── TC49 ─────────────────────────────────────────────────────────────────
+// 38F POI confirmed, T -1.4 osteopenia, FRAX MOF 3.2% (low). FRAX-underestimation flag must
+// fire at severity=warning with "do NOT use FRAX" wording. Treatment NOT suppressed by low FRAX.
+function tc49(): TCResult {
+  const failures: string[] = [];
+  const patient = basePatient({
+    age: 38,
+    sex: 'female',
+    earlyMenopause: true,
+    ageAtMenopause: 36,
+    fraxMOFPercent: 3.2,
+    fraxHipPercent: 0.5,
+    dexaResults: { lumbarSpineTScore: -1.4, totalHipTScore: -1.4, femoralNeckTScore: -1.4, forearmTScore: null },
+    renalFunction: { egfr: 80 },
+    bloodResults: { adjustedCalciumMmol: 2.32, vitaminDNmol: 65, egfr: 80, alp: 80, tshMUL: 2.0, hbGramsPerLitre: 135, esrOrCrp: 'normal' },
+  });
+  const decision = runClinicalDecision(patient);
+  const poiFlag = decision.flags.find(f => f.id === 'early_menopause_frax_underestimate');
+  check(failures, 'POI FRAX-underestimation flag fires', !!poiFlag);
+  check(failures, 'flag severity is "warning"', poiFlag?.severity === 'warning',
+    `got ${poiFlag?.severity ?? 'undefined'}`);
+  check(failures, 'flag contains "FRAX UNDERESTIMATES" or "underestimates"',
+    hasFlagText(decision, 'underestimates'));
+  check(failures, 'flag contains "do NOT use FRAX" wording',
+    hasFlagText(decision, 'do not use frax'));
+  // Treatment must NOT be suppressed — HRT recommended despite low FRAX.
+  check(failures, 'HRT is recommended despite low FRAX',
+    hasAgent(decision, 'hrt'));
+  return { name: 'TC49 — POI FRAX underestimation warning', passed: failures.length === 0, failures, decision };
+}
+
+// ─── TC50 ─────────────────────────────────────────────────────────────────
+// 41F POI + VTE + breast cancer history + T -2.6. HRT contraindicated combinatorially →
+// poi_bp_layered_hrt_ineligible flag fires AND alendronate is in the recommendation list.
+function tc50(): TCResult {
+  const failures: string[] = [];
+  const patient = basePatient({
+    age: 41,
+    sex: 'female',
+    earlyMenopause: true,
+    ageAtMenopause: 39,
+    vteHistory: true,
+    breastCancerHistory: true,
+    dexaResults: { lumbarSpineTScore: -2.6, totalHipTScore: -2.6, femoralNeckTScore: -2.6, forearmTScore: null },
+    renalFunction: { egfr: 75 },
+    bloodResults: { adjustedCalciumMmol: 2.32, vitaminDNmol: 65, egfr: 75, alp: 80, tshMUL: 2.0, hbGramsPerLitre: 135, esrOrCrp: 'normal' },
+  });
+  const decision = runClinicalDecision(patient);
+  check(failures, 'poi_bp_layered_hrt_ineligible flag fires',
+    hasFlag(decision, 'poi_bp_layered_hrt_ineligible'));
+  check(failures, 'alendronate recommended', hasAgent(decision, 'alendronate'));
+  // Both VTE and breast cancer safety flags should be visible for clinician documentation.
+  check(failures, 'POI VTE flag fires', hasFlag(decision, 'poi_hrt_vte'));
+  check(failures, 'POI breast cancer flag fires', hasFlag(decision, 'poi_hrt_breast_cancer'));
+  check(failures, 'endocrinology referral present',
+    hasReferral(decision, 'endocrinology'));
+  return { name: 'TC50 — POI + HRT-CI: alendronate layered', passed: failures.length === 0, failures, decision };
+}
+
+// ─── TC51 ─────────────────────────────────────────────────────────────────
+// 44F POI on transdermal HRT, T -1.8 osteopenia, currentSmoker. "Consider BP if HRT
+// insufficient" flag fires; mandatory BP recommendation must NOT fire.
+function tc51(): TCResult {
+  const failures: string[] = [];
+  const patient = basePatient({
+    age: 44,
+    sex: 'female',
+    earlyMenopause: true,
+    ageAtMenopause: 41,
+    currentSmoker: true,
+    dexaResults: { lumbarSpineTScore: -1.8, totalHipTScore: -1.8, femoralNeckTScore: -1.8, forearmTScore: null },
+    renalFunction: { egfr: 80 },
+    bloodResults: { adjustedCalciumMmol: 2.32, vitaminDNmol: 65, egfr: 80, alp: 80, tshMUL: 2.0, hbGramsPerLitre: 135, esrOrCrp: 'normal' },
+  });
+  const decision = runClinicalDecision(patient);
+  check(failures, 'poi_bp_consider_if_hrt_insufficient flag fires',
+    hasFlag(decision, 'poi_bp_consider_if_hrt_insufficient'));
+  check(failures, 'HRT recommended (first-line)', hasAgent(decision, 'hrt'));
+  check(failures, 'no automatic alendronate recommendation',
+    !hasAgent(decision, 'alendronate'));
+  check(failures, 'no layered-HRT-ineligible flag (since not jointly contraindicated)',
+    !hasFlag(decision, 'poi_bp_layered_hrt_ineligible'));
+  return { name: 'TC51 — POI osteopenia + smoker: consider-BP flag', passed: failures.length === 0, failures, decision };
+}
+
+// ─── TC52 ─────────────────────────────────────────────────────────────────
+// 39F POI, T -1.5 osteopenia, no VTE/breast cancer. HRT first-line; output must specify
+// transdermal preference + lower VTE rationale.
+function tc52(): TCResult {
+  const failures: string[] = [];
+  const patient = basePatient({
+    age: 39,
+    sex: 'female',
+    earlyMenopause: true,
+    ageAtMenopause: 36,
+    dexaResults: { lumbarSpineTScore: -1.5, totalHipTScore: -1.5, femoralNeckTScore: -1.5, forearmTScore: null },
+    renalFunction: { egfr: 80 },
+    bloodResults: { adjustedCalciumMmol: 2.32, vitaminDNmol: 65, egfr: 80, alp: 80, tshMUL: 2.0, hbGramsPerLitre: 140, esrOrCrp: 'normal' },
+  });
+  const decision = runClinicalDecision(patient);
+  const poiFlag = decision.flags.find(f => f.id === 'poi_hrt_first_line');
+  check(failures, 'poi_hrt_first_line flag fires', !!poiFlag);
+  const msg = (poiFlag?.message ?? '').toLowerCase();
+  check(failures, 'poi_hrt_first_line message mentions "transdermal"',
+    msg.includes('transdermal'));
+  check(failures, 'poi_hrt_first_line message mentions "preferred"',
+    msg.includes('preferred'));
+  check(failures, 'poi_hrt_first_line message mentions VTE rationale',
+    msg.includes('vte'));
+  check(failures, 'HRT recommended', hasAgent(decision, 'hrt'));
+  // VTE / breast cancer safety checks are inputs to the decision — no false-positive flags expected.
+  check(failures, 'no false-positive VTE flag', !hasFlag(decision, 'poi_hrt_vte'));
+  check(failures, 'no false-positive breast cancer flag', !hasFlag(decision, 'poi_hrt_breast_cancer'));
+  return { name: 'TC52 — POI: transdermal HRT preference stated', passed: failures.length === 0, failures, decision };
+}
+
 // ─── Runner ───────────────────────────────────────────────────────────────
 
 const TCs: Array<() => TCResult> = [
@@ -1088,6 +1376,7 @@ const TCs: Array<() => TCResult> = [
   tc11, tc12, tc13, tc14, tc15, tc16, tc17, tc18, tc19, tc20, tc21, tc22,
   tc23, tc24, tc25, tc26, tc27, tc28, tc29, tc30, tc31, tc32,
   tc33, tc34, tc35, tc36, tc37, tc38, tc39, tc40, tc41,
+  tc42, tc43, tc44, tc45, tc46, tc47, tc48, tc49, tc50, tc51, tc52,
 ];
 
 const results = TCs.map(fn => fn());

@@ -222,7 +222,7 @@ export const VERY_HIGH_RISK = {
 // conservative renal clearance vs alendronate / zoledronate). The tool follows the
 // clinical-spec simplification because the BMI/CKD-MBD risk profile of CKD 3b–5
 // outweighs the marginal SmPC permission, and denosumab is the preferred agent in
-// this band per NOGG / HSE MMP cascade.
+// this band per NOGG 2024 Strong (bisphosphonate first-line as the most cost-effective antiresorptive; denosumab alternative).
 //
 // Stage 5 CKD: separate escalation logic in treatment.ts adds an urgent flag and
 // bumps nephrology referral urgency at eGFR <15.
