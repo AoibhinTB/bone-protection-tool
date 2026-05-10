@@ -145,12 +145,22 @@ export const VERY_HIGH_RISK = {
 // ─── Renal function thresholds ────────────────────────────────────────────
 // Sources: SmPCs; NOGG 2024; NICE NG187
 
+// Spec table simplification: ALL bisphosphonates are contraindicated at eGFR <35,
+// even though SmPCs license risedronate and ibandronate down to <30 (oral, more
+// conservative renal clearance vs alendronate / zoledronate). The tool follows the
+// clinical-spec simplification because the BMI/CKD-MBD risk profile of CKD 3b–5
+// outweighs the marginal SmPC permission, and denosumab is the preferred agent in
+// this band per NOGG / HSE MMP cascade.
+//
+// Stage 5 CKD: separate escalation logic in treatment.ts adds an urgent flag and
+// bumps nephrology referral urgency at eGFR <15.
+
 export const RENAL_LIMITS = {
-  alendronate:  { ci: 35 },   // eGFR <35: contraindicated
-  risedronate:  { ci: 30 },   // eGFR <30: contraindicated
-  zoledronate:  { ci: 35 },   // eGFR <35: avoid
-  ibandronate:  { ci: 30 },   // eGFR <30: contraindicated
-  denosumab:    { ci: null, hypocalcaemiaWatch: 35 }, // no formal CI; mandatory Ca check if eGFR <35 (NOGG 2024)
+  alendronate:  { ci: 35 },   // eGFR <35: contraindicated (SmPC + spec table)
+  risedronate:  { ci: 35 },   // eGFR <35: contraindicated per spec table (SmPC strict CI is <30)
+  zoledronate:  { ci: 35 },   // eGFR <35: contraindicated
+  ibandronate:  { ci: 35 },   // eGFR <35: contraindicated per spec table (SmPC strict CI is <30)
+  denosumab:    { ci: null, hypocalcaemiaWatch: 35, extremeRiskBelow: 15 }, // no formal CI; mandatory Ca check <35; specialist-only <15
 } as const;
 
 // ─── Bisphosphonate treatment duration thresholds ─────────────────────────

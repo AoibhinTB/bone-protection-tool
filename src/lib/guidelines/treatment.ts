@@ -818,12 +818,16 @@ function initiateTherapy(
       id: 'renal_bp_ci',
       severity: 'warning',
       message:
-        `eGFR ${egfr} — bisphosphonates contraindicated (<${RENAL_LIMITS.alendronate.ci}). Use denosumab.`,
+        `eGFR ${egfr} — all bisphosphonates contraindicated (<${RENAL_LIMITS.alendronate.ci}). Use denosumab.`,
       rationale:
         'Bisphosphonates accumulate in severe renal impairment. ' +
-        'Alendronate/zoledronate contraindicated if eGFR <35; risedronate if eGFR <30.',
+        'Per spec table: all BPs contraindicated at eGFR <35 (oral and IV). ' +
+        'Denosumab is not renally cleared and is the preferred antiresorptive in this band.',
       source: SRC_HSE,
     });
+
+    // Stage 5 CKD (<15 ml/min) — extreme hypocalcaemia risk; specialist-only.
+    const isStage5 = egfr < RENAL_LIMITS.denosumab.extremeRiskBelow;
 
     if (egfr < RENAL_LIMITS.denosumab.hypocalcaemiaWatch) {
       flags.push({
@@ -838,13 +842,33 @@ function initiateTherapy(
       });
       referrals.push({
         specialty: 'nephrology',
-        reason: `Severe renal impairment (eGFR ${egfr} ml/min) with osteoporosis — specialist guidance on safe bone protection.`,
-        urgency: 'routine',
+        reason: isStage5
+          ? `Stage 5 CKD (eGFR ${egfr} ml/min, <15) with osteoporosis — extreme hypocalcaemia risk; URGENT specialist input before any antiresorptive.`
+          : `Severe renal impairment (eGFR ${egfr} ml/min) with osteoporosis — specialist guidance on safe bone protection.`,
+        urgency: isStage5 ? 'urgent' : 'routine',
+      });
+    }
+
+    if (isStage5) {
+      flags.push({
+        id: 'severe_ckd_specialist_only',
+        severity: 'urgent',
+        message:
+          `eGFR ${egfr} (Stage 5 CKD, <15 ml/min) — extreme hypocalcaemia risk with denosumab. Specialist initiation only. Bisphosphonates remain contraindicated. Refer urgently.`,
+        rationale:
+          'Stage 5 CKD (eGFR <15 ml/min, non-dialysis) carries an extreme risk of severe symptomatic hypocalcaemia following denosumab. ' +
+          'Patients in this band should not be initiated on denosumab (or any antiresorptive) without specialist nephrology / metabolic bone input. ' +
+          'Active vitamin D, calcium repletion, and individualised dosing decisions are required. ' +
+          'Bisphosphonates are contraindicated in this band per SmPCs and clinical convention.',
+        source: SRC_NICE,
       });
     }
 
     addVitDBlock(patient, flags);
-    recs.push(denosumab(egfr));
+    // At Stage 5, defer drug recommendation pending specialist input — surface only the flags.
+    if (!isStage5) {
+      recs.push(denosumab(egfr));
+    }
     return recs;
   }
 
