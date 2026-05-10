@@ -357,6 +357,43 @@ export function generateTreatmentOutput(
         'ISCD 2023: 33% radius (1/3 distal radius) is the standard forearm site for DXA reporting.',
       source: SRC_ISCD,
     });
+
+    // Borderline forearm-only (-2.5 to -3.0) with no fragility fracture, no secondary
+    // cause, and no other FRAX clinical risk factors → monitor; no treatment yet.
+    const fr = patient.dexaResults!.forearmTScore!;
+    const hasFx =
+      patient.priorFragilityFracture ||
+      patient.priorHipFracture ||
+      patient.priorVertebralFracture;
+    const hasSecondary = patient.secondaryOsteoporosis.length > 0;
+    const otherRFs =
+      patient.parentalHipFracture ||
+      patient.currentSmoker ||
+      patient.alcoholUnitsPerWeek >= 21 ||
+      (patient.bmi !== null && patient.bmi < 19) ||
+      patient.rheumatoidArthritis ||
+      patient.type2Diabetes ||
+      patient.fallsInLastYear >= 2 ||
+      patient.parkinsonsDisease ||
+      (patient.glucocorticoidUse?.current === true) ||
+      patient.adtUse ||
+      patient.aromataseInhibitorUse ||
+      patient.earlyMenopause;
+
+    if (fr > -3.0 && fr <= -2.5 && !hasFx && !hasSecondary && !otherRFs) {
+      flags.push({
+        id: 'forearm_borderline_monitor',
+        severity: 'info',
+        message:
+          `Borderline forearm-only osteoporosis (T ${fr}) — no fractures, no secondary cause, no other risk factors. ` +
+          'Monitor: repeat DEXA in 2 years. Treatment not indicated unless risk factors develop.',
+        rationale:
+          'ISCD 2023 / NOGG 2024: borderline forearm-only osteoporosis without other risk factors warrants surveillance, ' +
+          'not reflex treatment. Re-DEXA at 2 years to detect progression. Reassess earlier if any fragility fracture, ' +
+          'newly identified secondary cause, or new clinical risk factor develops.',
+        source: SRC_ISCD,
+      });
+    }
   }
 
   // Compute AI lower-threshold override: T-score ≤-1.5 on aromatase inhibitor mandates treatment

@@ -125,6 +125,36 @@ export function stratifyRisk(patient: PatientInput): RiskStratification {
     }
   }
 
+  // Forearm-only severe osteoporosis with ≥1 FRAX clinical risk factor →
+  // treatment indicated regardless of FRAX/standard-site BMD (ISCD 2023 / NOGG).
+  // Only fires when standard sites (LS, total hip, FN) are NOT below −2.5 — otherwise
+  // those paths handle classification. Primary hyperparathyroidism must be excluded
+  // first (Ca, ALP, PTH); the forearm_only_osteoporosis flag in treatment.ts surfaces
+  // that workup requirement.
+  if (patient.dexaResults) {
+    const fr = patient.dexaResults.forearmTScore;
+    const ls = patient.dexaResults.lumbarSpineTScore;
+    const th = patient.dexaResults.totalHipTScore;
+    const fn = patient.dexaResults.femoralNeckTScore;
+    const standardSitesOK =
+      (ls === null || ls > -2.5) &&
+      (th === null || th > -2.5) &&
+      (fn === null || fn > -2.5);
+    if (
+      fr !== null &&
+      fr <= -3.0 &&
+      standardSitesOK &&
+      countFraxClinicalRiskFactors(patient) >= 1
+    ) {
+      return result(
+        'high', 'red', threshold.lowerMOF, threshold.upperMOF, rawMOF, rawHip, adjustedMOF, adjustedHip, adjustments,
+        `Forearm T-score ${fr} ≤ −3.0 with ≥1 clinical risk factor and standard sites not below −2.5 — ` +
+        'treatment indicated regardless of FRAX (ISCD 2023; NOGG 2024). Exclude primary hyperparathyroidism first ' +
+        '(Ca, ALP, PTH — preferential cortical bone loss).'
+      );
+    }
+  }
+
   // Previous fragility fracture (any site) → treat regardless of FRAX (NOGG 2024 Rec 8).
   // Hip and clinical vertebral fractures alone are sufficient for clinical diagnosis of osteoporosis
   // without DEXA. Other fragility fracture sites also drive treatment per NOGG 2024.
