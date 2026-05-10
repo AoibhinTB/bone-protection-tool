@@ -11,13 +11,22 @@ export function assessInvestigationsNeeded(
 
   // FRAX — external calculation required if not provided
   if (patient.fraxMOFPercent === null && patient.age >= 50) {
+    // v1.14 Step 8 — explicit AI/ADT secondary-cause instruction in the FRAX prompt.
+    const secondaryCauseNotes: string[] = [];
+    if (patient.aromataseInhibitorUse) {
+      secondaryCauseNotes.push('aromatase inhibitor therapy must be entered as a secondary cause of osteoporosis when calculating FRAX (NOGG 2024 Section 7, Rec 1)');
+    }
+    if (patient.adtUse) {
+      secondaryCauseNotes.push('androgen deprivation therapy must be entered as a secondary cause of osteoporosis when calculating FRAX (NOGG 2024 Section 7, Rec 1)');
+    }
     needed.push({
       investigation: 'frax',
       reason:
         'FRAX 10-year fracture probability not provided. ' +
         'Calculate at frax.shef.ac.uk using country code 49 (Ireland). ' +
         'Enter clinical risk factors; add BMD T-score if DEXA is available. ' +
-        'Apply NOGG 2024 arithmetic adjustments if high-dose GC, T2DM, falls ≥2/yr, or Parkinson\'s present.',
+        'Apply NOGG 2024 arithmetic adjustments if high-dose GC, T2DM, falls ≥2/yr, or Parkinson\'s present.' +
+        (secondaryCauseNotes.length > 0 ? ' ' + secondaryCauseNotes.join('. ') + '.' : ''),
       urgency: 'routine',
     });
   }

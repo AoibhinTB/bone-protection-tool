@@ -36,6 +36,7 @@ function basePatient(overrides: Partial<PatientInput>): PatientInput {
     bmdDecreasedDuringPause: null,
     adtUse: false,
     aromataseInhibitorUse: false,
+    hadAdjuvantHighDoseBisphosphonate: false,
     earlyMenopause: false,
     ageAtMenopause: null,
     heightLossCm: null,
@@ -301,6 +302,9 @@ function tc8(): TCResult {
 // 69M ADT for prostate cancer, T-score -2.3, eGFR 65, Vit D 30
 
 function tc9(): TCResult {
+  // v1.2 corrected: ADT no longer designates denosumab as PRIMARY/first-line.
+  // Standard HSE MMP cascade applies: bisphosphonate first-line, denosumab when BP contraindicated.
+  // Spec assertion: output must NOT designate denosumab as PRIMARY or first-line for ADT specifically.
   const failures: string[] = [];
   const patient = basePatient({
     age: 69,
@@ -312,17 +316,25 @@ function tc9(): TCResult {
   });
   const decision = runClinicalDecision(patient);
   check(failures, 'risk = high (ADT + T-score ≤ -2.0)', decision.riskStratification.category === 'high', `got ${decision.riskStratification.category}`);
-  check(failures, 'ADT bone loss flag with denosumab preference', hasFlag(decision, 'adt_bone_loss'));
-  // ADT-specific: denosumab must be primary first-line; alendronate appears as second-line alternative.
-  const denoRec = decision.treatmentRecommendations.find(r => r.agent === 'denosumab');
+  check(failures, 'adt_bone_loss flag fires', hasFlag(decision, 'adt_bone_loss'));
+  // Treatment options must include alendronate as a recommended option (HSE MMP first-line).
   const alenRec = decision.treatmentRecommendations.find(r => r.agent === 'alendronate');
-  check(failures, 'denosumab is recommended', !!denoRec);
-  check(failures, 'denosumab is FIRST-line (primary)', !!denoRec && denoRec.priority !== 'alternative');
-  check(failures, 'denosumab appears before alendronate in list',
-    !!denoRec && !!alenRec && decision.treatmentRecommendations.indexOf(denoRec) < decision.treatmentRecommendations.indexOf(alenRec));
-  check(failures, 'alendronate is second-line alternative', !!alenRec && alenRec.priority === 'alternative');
+  check(failures, 'alendronate is recommended (HSE MMP first-line)', !!alenRec);
+  // Denosumab must NOT appear as primary/first-line for ADT specifically.
+  const denoRec = decision.treatmentRecommendations.find(r => r.agent === 'denosumab');
+  const denoIsPrimary = !!denoRec && denoRec.priority === 'first-line';
+  check(failures, 'denosumab is NOT designated first-line for ADT', !denoIsPrimary,
+    denoRec ? `denosumab present with priority=${denoRec.priority}` : 'denosumab absent');
+  // Output text must not present denosumab as PRIMARY/first-line for ADT.
+  const adtFlag = decision.flags.find(f => f.id === 'adt_bone_loss');
+  const adtMsg = (adtFlag?.message ?? '').toLowerCase();
+  check(failures, 'adt_bone_loss message does not call denosumab "first-line"',
+    !adtMsg.includes('first-line bone protection: denosumab') && !adtMsg.includes('denosumab is first-line'));
+  // Equivalence wording present.
+  check(failures, 'adt_bone_loss notes BP and denosumab are equivalent',
+    adtMsg.includes('equivalent'));
   check(failures, 'Vit D insufficient text', hasSupplementText(decision, 'vitamin_d', 'insufficient'));
-  return { name: 'TC9 — 69M ADT', passed: failures.length === 0, failures, decision };
+  return { name: 'TC9 — 69M ADT (v1.2 corrected)', passed: failures.length === 0, failures, decision };
 }
 
 // ─── TC10 ─────────────────────────────────────────────────────────────────
@@ -466,7 +478,10 @@ function tc15(): TCResult {
 }
 
 // ─── TC16 ─────────────────────────────────────────────────────────────────
-// 61F on AI, T -1.8 (osteopenia), FRAX 11.5% — AI-specific lower threshold
+// v1.2 corrected: 61F on AI, T -1.8, FRAX 11.5% (below IT 12.2% at age 60).
+// IOF 2017: T < -2.0 unconditional; T < -1.5 with ≥1 RF; ≥2 RFs without BMD.
+// T -1.8 with no additional RFs → does NOT meet treatment threshold.
+// Outcome: intermediate, no treatment, AI near-threshold reassessment flag (12–24 months).
 function tc16(): TCResult {
   const failures: string[] = [];
   const patient = basePatient({
@@ -480,10 +495,20 @@ function tc16(): TCResult {
     fraxHipPercent: 1.5,
   });
   const decision = runClinicalDecision(patient);
-  check(failures, 'risk = high (AI lower threshold T ≤ -1.5)', decision.riskStratification.category === 'high', `got ${decision.riskStratification.category}`);
+  check(failures, 'risk = intermediate (T -1.8, no additional RFs, FRAX below IT)',
+    decision.riskStratification.category === 'intermediate', `got ${decision.riskStratification.category}`);
   check(failures, 'AI CTIBL flag', hasFlag(decision, 'ai_ctibl'));
-  check(failures, 'recommends alendronate or zoledronate', hasAgent(decision, 'alendronate') || hasAgent(decision, 'zoledronate'));
-  return { name: 'TC16 — 61F AI lower threshold', passed: failures.length === 0, failures, decision };
+  check(failures, 'AI near-threshold 12–24 month reassessment flag', hasFlag(decision, 'ai_near_threshold_reassess'));
+  check(failures, 'AI near-threshold flag uses 12–24 month wording',
+    hasFlagText(decision, '12–24 months'));
+  // Spec assertion: must NOT state "T-score ≤-1.5 regardless of FRAX" or attribute to Irish practice.
+  check(failures, 'output does NOT use blanket -1.5 wording',
+    !hasFlagText(decision, '≤-1.5 regardless of frax') && !hasFlagText(decision, 'irish practice'));
+  // No drug treatment recommendation expected.
+  check(failures, 'no drug treatment recommended at this visit',
+    decision.treatmentRecommendations.length === 0,
+    `got ${decision.treatmentRecommendations.length} recommendations`);
+  return { name: 'TC16 — 61F AI T-1.8 no RF (v1.2 corrected)', passed: failures.length === 0, failures, decision };
 }
 
 // ─── TC17 ─────────────────────────────────────────────────────────────────
@@ -610,11 +635,459 @@ function tc22(): TCResult {
   return { name: 'TC22 — 78F VHR refuses injections', passed: failures.length === 0, failures, decision };
 }
 
+// ═══════════════════════════════════════════════════════════════════════════
+// v1.2 NEW TEST CASES (TC23–TC41)
+// ═══════════════════════════════════════════════════════════════════════════
+
+// ─── TC23 ─────────────────────────────────────────────────────────────────
+// 65F low-dose GC (2mg/day): Table 8 ×0.80 MOF, ×0.65 hip should pull both axes below IT.
+// Uncorrected MOF 17.5% above IT 16.5%; corrected 14% below. No fx, no DEXA → no treatment;
+// near-threshold flag fires.
+function tc23(): TCResult {
+  const failures: string[] = [];
+  const patient = basePatient({
+    age: 65,
+    sex: 'female',
+    glucocorticoidDoseMgDay: 2,
+    fraxMOFPercent: 17.5,
+    fraxHipPercent: 3.8,
+    renalFunction: { egfr: 70 },
+    bloodResults: { adjustedCalciumMmol: 2.30, vitaminDNmol: 60, egfr: 70, alp: 80, tshMUL: 2.0, hbGramsPerLitre: 140, esrOrCrp: 'normal' },
+  });
+  const decision = runClinicalDecision(patient);
+  const adjMOF = decision.riskStratification.adjustedFraxMOFPercent;
+  const adjHip = decision.riskStratification.adjustedFraxHipPercent;
+  check(failures, 'Table 8 low-dose MOF correction (×0.80 ≈ 14.0%)',
+    adjMOF !== null && Math.abs(adjMOF - 14.0) < 0.2, `got adjMOF=${adjMOF}`);
+  check(failures, 'Table 8 low-dose hip correction (×0.65 ≈ 2.47%)',
+    adjHip !== null && Math.abs(adjHip - 2.47) < 0.2, `got adjHip=${adjHip}`);
+  check(failures, 'risk = intermediate after correction',
+    decision.riskStratification.category === 'intermediate', `got ${decision.riskStratification.category}`);
+  check(failures, 'no immediate-start GIOP flag', !hasFlag(decision, 'giop_immediate_start'));
+  check(failures, 'GIOP near-threshold reassessment flag fires', hasFlag(decision, 'giop_near_threshold_reassess'));
+  check(failures, 'no drug treatment recommended at this visit',
+    decision.treatmentRecommendations.length === 0,
+    `got ${decision.treatmentRecommendations.length}`);
+  return { name: 'TC23 — 65F low-dose GC, Table 8 downward correction', passed: failures.length === 0, failures, decision };
+}
+
+// ─── TC24 ─────────────────────────────────────────────────────────────────
+// 62F medium-dose GC + prior wrist fracture → GIOP immediate-start criterion (a).
+// No dose floor; criterion (a) fires regardless of GC dose.
+function tc24(): TCResult {
+  const failures: string[] = [];
+  const patient = basePatient({
+    age: 62,
+    sex: 'female',
+    glucocorticoidDoseMgDay: 3,
+    glucocorticoidUse: { current: true, dose: 'low', durationMonths: 1 },
+    priorFragilityFracture: true,
+    dexaResults: { lumbarSpineTScore: -1.6, totalHipTScore: -1.6, femoralNeckTScore: -1.6, forearmTScore: null },
+    renalFunction: { egfr: 65 },
+    bloodResults: { adjustedCalciumMmol: 2.30, vitaminDNmol: 55, egfr: 65, alp: 80, tshMUL: 2.0, hbGramsPerLitre: 140, esrOrCrp: 'normal' },
+  });
+  const decision = runClinicalDecision(patient);
+  check(failures, 'risk = high', decision.riskStratification.category === 'high', `got ${decision.riskStratification.category}`);
+  check(failures, 'GIOP immediate-start flag fires (criterion a)', hasFlag(decision, 'giop_immediate_start'));
+  check(failures, 'flag references prior fracture (criterion a) any GC dose', hasFlagText(decision, 'prior fragility fracture'));
+  check(failures, 'recommends alendronate', hasAgent(decision, 'alendronate'));
+  return { name: 'TC24 — 62F GIOP criterion (a) any-dose prior fx', passed: failures.length === 0, failures, decision };
+}
+
+// ─── TC25 ─────────────────────────────────────────────────────────────────
+// 73F medium-dose GC, no fracture → GIOP immediate-start criterion (b) (female ≥70 any dose).
+function tc25(): TCResult {
+  const failures: string[] = [];
+  const patient = basePatient({
+    age: 73,
+    sex: 'female',
+    glucocorticoidDoseMgDay: 4,
+    glucocorticoidUse: { current: true, dose: 'low', durationMonths: 1 },
+    fraxMOFPercent: 18.5,
+    fraxHipPercent: 4.5,
+    dexaResults: { lumbarSpineTScore: -1.4, totalHipTScore: -1.4, femoralNeckTScore: -1.4, forearmTScore: null },
+    renalFunction: { egfr: 60 },
+    bloodResults: { adjustedCalciumMmol: 2.30, vitaminDNmol: 65, egfr: 60, alp: 80, tshMUL: 2.0, hbGramsPerLitre: 140, esrOrCrp: 'normal' },
+  });
+  const decision = runClinicalDecision(patient);
+  // FRAX category is intermediate (MOF 18.5% < IT 20.3%); GIOP criterion (b) overrides via immediate-start.
+  check(failures, 'GIOP immediate-start flag fires (criterion b)', hasFlag(decision, 'giop_immediate_start'));
+  check(failures, 'flag references female ≥70 (criterion b)', hasFlagText(decision, 'female ≥70'));
+  check(failures, 'recommends alendronate', hasAgent(decision, 'alendronate'));
+  return { name: 'TC25 — 73F GIOP criterion (b) female ≥70', passed: failures.length === 0, failures, decision };
+}
+
+// ─── TC26 ─────────────────────────────────────────────────────────────────
+// GC withdrawal — both MOF and hip below IT after recalculation → withdrawal eligible.
+function tc26(): TCResult {
+  const failures: string[] = [];
+  const patient = basePatient({
+    age: 64,
+    sex: 'female',
+    glucocorticoidPreviouslyUsed: true,
+    glucocorticoidDoseMgDay: null,
+    fraxMOFPercent: 10.5,
+    fraxHipPercent: 2.1,
+    dexaResults: { lumbarSpineTScore: -1.9, totalHipTScore: -1.9, femoralNeckTScore: -1.9, forearmTScore: null },
+    renalFunction: { egfr: 68 },
+    bloodResults: { adjustedCalciumMmol: 2.32, vitaminDNmol: 70, egfr: 68, alp: 80, tshMUL: 2.0, hbGramsPerLitre: 140, esrOrCrp: 'normal' },
+    currentTreatment: { agent: 'alendronate', durationMonths: 24, reasonStopped: null, currentlyOn: true },
+  });
+  const decision = runClinicalDecision(patient);
+  check(failures, 'GC withdrawal review flag fires (eligible)', hasFlag(decision, 'gc_withdrawal_bp_review'));
+  check(failures, 'flag references both MOF and hip below IT', hasFlagText(decision, 'both below'));
+  check(failures, 'no continue-treatment variant fires', !hasFlag(decision, 'gc_withdrawal_continue_treatment'));
+  return { name: 'TC26 — GC withdrawal eligible (both axes below IT)', passed: failures.length === 0, failures, decision };
+}
+
+// ─── TC27 ─────────────────────────────────────────────────────────────────
+// GC withdrawal — hip remains above IT → must continue.
+function tc27(): TCResult {
+  const failures: string[] = [];
+  const patient = basePatient({
+    age: 71,
+    sex: 'female',
+    glucocorticoidPreviouslyUsed: true,
+    glucocorticoidDoseMgDay: null,
+    fraxMOFPercent: 19.0,
+    fraxHipPercent: 5.6,
+    dexaResults: { lumbarSpineTScore: -2.0, totalHipTScore: -2.0, femoralNeckTScore: -2.0, forearmTScore: null },
+    renalFunction: { egfr: 62 },
+    bloodResults: { adjustedCalciumMmol: 2.32, vitaminDNmol: 70, egfr: 62, alp: 80, tshMUL: 2.0, hbGramsPerLitre: 140, esrOrCrp: 'normal' },
+    currentTreatment: { agent: 'alendronate', durationMonths: 24, reasonStopped: null, currentlyOn: true },
+  });
+  const decision = runClinicalDecision(patient);
+  check(failures, 'GC withdrawal CONTINUE-TREATMENT flag fires', hasFlag(decision, 'gc_withdrawal_continue_treatment'));
+  check(failures, 'flag mentions hip above IT', hasFlagText(decision, 'hip 5.6%'));
+  check(failures, 'eligible variant does NOT fire', !hasFlag(decision, 'gc_withdrawal_bp_review'));
+  return { name: 'TC27 — GC withdrawal continue (hip above IT)', passed: failures.length === 0, failures, decision };
+}
+
+// ─── TC28 ─────────────────────────────────────────────────────────────────
+// 60M medium-dose GC near-threshold (no DEXA, FRAX MOF 10.5% / IT 12.2% = 86%) → 12–18m flag.
+function tc28(): TCResult {
+  const failures: string[] = [];
+  const patient = basePatient({
+    age: 60,
+    sex: 'male',
+    glucocorticoidDoseMgDay: 6,
+    glucocorticoidUse: { current: true, dose: 'medium', durationMonths: 1 },
+    fraxMOFPercent: 10.5,
+    fraxHipPercent: 2.0,
+    renalFunction: { egfr: 72 },
+    bloodResults: { adjustedCalciumMmol: 2.30, vitaminDNmol: 60, egfr: 72, alp: 80, tshMUL: 2.0, hbGramsPerLitre: 140, esrOrCrp: 'normal' },
+  });
+  const decision = runClinicalDecision(patient);
+  check(failures, 'risk = intermediate', decision.riskStratification.category === 'intermediate', `got ${decision.riskStratification.category}`);
+  check(failures, 'no immediate-start', !hasFlag(decision, 'giop_immediate_start'));
+  check(failures, 'GIOP near-threshold reassessment flag fires', hasFlag(decision, 'giop_near_threshold_reassess'));
+  check(failures, 'reassessment uses 12–18 month wording', hasFlagText(decision, '12–18 months'));
+  check(failures, 'no drug treatment recommended', decision.treatmentRecommendations.length === 0);
+  return { name: 'TC28 — 60M medium-dose GC near-threshold', passed: failures.length === 0, failures, decision };
+}
+
+// ─── TC29 ─────────────────────────────────────────────────────────────────
+// Drug-specific holiday: alendronate → 2 years (24 months).
+function tc29(): TCResult {
+  const failures: string[] = [];
+  const patient = basePatient({
+    age: 63,
+    sex: 'female',
+    fraxMOFPercent: 8.0,
+    fraxHipPercent: 1.5,
+    dexaResults: { lumbarSpineTScore: -1.9, totalHipTScore: -1.9, femoralNeckTScore: -1.9, forearmTScore: null },
+    renalFunction: { egfr: 70 },
+    bloodResults: { adjustedCalciumMmol: 2.32, vitaminDNmol: 70, egfr: 70, alp: 80, tshMUL: 2.0, hbGramsPerLitre: 140, esrOrCrp: 'normal' },
+    currentTreatment: { agent: 'alendronate', durationMonths: 60, reasonStopped: null, currentlyOn: true },
+  });
+  const decision = runClinicalDecision(patient);
+  check(failures, 'pause flag fires', hasFlag(decision, 'bp_holiday_appropriate'));
+  check(failures, 'alendronate 2-year reassessment interval', hasFlagText(decision, '2 years'));
+  check(failures, 'restart-on-fracture-during-pause noted', hasFlagText(decision, 'fracture occurs during the pause'));
+  return { name: 'TC29 — alendronate pause = 2 years', passed: failures.length === 0, failures, decision };
+}
+
+// ─── TC30 ─────────────────────────────────────────────────────────────────
+// Drug-specific holiday: risedronate → 18 months.
+function tc30(): TCResult {
+  const failures: string[] = [];
+  const patient = basePatient({
+    age: 60,
+    sex: 'female',
+    fraxMOFPercent: 7.0,
+    fraxHipPercent: 1.3,
+    dexaResults: { lumbarSpineTScore: -1.9, totalHipTScore: -1.9, femoralNeckTScore: -1.9, forearmTScore: null },
+    renalFunction: { egfr: 70 },
+    bloodResults: { adjustedCalciumMmol: 2.32, vitaminDNmol: 70, egfr: 70, alp: 80, tshMUL: 2.0, hbGramsPerLitre: 140, esrOrCrp: 'normal' },
+    currentTreatment: { agent: 'risedronate', durationMonths: 60, reasonStopped: null, currentlyOn: true },
+  });
+  const decision = runClinicalDecision(patient);
+  check(failures, 'pause flag fires', hasFlag(decision, 'bp_holiday_appropriate'));
+  check(failures, 'risedronate 18-month reassessment interval', hasFlagText(decision, '18 months'));
+  return { name: 'TC30 — risedronate pause = 18 months', passed: failures.length === 0, failures, decision };
+}
+
+// ─── TC31 ─────────────────────────────────────────────────────────────────
+// Drug-specific holiday: ibandronate → 18 months.
+function tc31(): TCResult {
+  const failures: string[] = [];
+  const patient = basePatient({
+    age: 58,
+    sex: 'female',
+    fraxMOFPercent: 6.0,
+    fraxHipPercent: 1.0,
+    dexaResults: { lumbarSpineTScore: -1.9, totalHipTScore: -1.9, femoralNeckTScore: -1.9, forearmTScore: null },
+    renalFunction: { egfr: 72 },
+    bloodResults: { adjustedCalciumMmol: 2.32, vitaminDNmol: 70, egfr: 72, alp: 80, tshMUL: 2.0, hbGramsPerLitre: 140, esrOrCrp: 'normal' },
+    currentTreatment: { agent: 'ibandronate', durationMonths: 60, reasonStopped: null, currentlyOn: true },
+  });
+  const decision = runClinicalDecision(patient);
+  check(failures, 'pause flag fires', hasFlag(decision, 'bp_holiday_appropriate'));
+  check(failures, 'ibandronate 18-month reassessment interval', hasFlagText(decision, '18 months'));
+  return { name: 'TC31 — ibandronate pause = 18 months', passed: failures.length === 0, failures, decision };
+}
+
+// ─── TC32 ─────────────────────────────────────────────────────────────────
+// Drug-specific holiday: zoledronate → 3 years (36 months).
+function tc32(): TCResult {
+  const failures: string[] = [];
+  const patient = basePatient({
+    age: 65,
+    sex: 'female',
+    fraxMOFPercent: 9.0,
+    fraxHipPercent: 1.8,
+    dexaResults: { lumbarSpineTScore: -1.8, totalHipTScore: -1.8, femoralNeckTScore: -1.8, forearmTScore: null },
+    renalFunction: { egfr: 70 },
+    bloodResults: { adjustedCalciumMmol: 2.32, vitaminDNmol: 70, egfr: 70, alp: 80, tshMUL: 2.0, hbGramsPerLitre: 140, esrOrCrp: 'normal' },
+    currentTreatment: { agent: 'zoledronate', durationMonths: 36, reasonStopped: null, currentlyOn: true },
+  });
+  const decision = runClinicalDecision(patient);
+  check(failures, 'pause flag fires', hasFlag(decision, 'bp_holiday_appropriate'));
+  check(failures, 'zoledronate 3-year reassessment interval', hasFlagText(decision, '3 years'));
+  return { name: 'TC32 — zoledronate pause = 3 years', passed: failures.length === 0, failures, decision };
+}
+
+// ─── TC33 ─────────────────────────────────────────────────────────────────
+// 67F alendronate paused 10 months ago, new wrist fracture last month → immediate restart.
+function tc33(): TCResult {
+  const failures: string[] = [];
+  const patient = basePatient({
+    age: 67,
+    sex: 'female',
+    priorFragilityFracture: true,
+    recentFractureWithin2Years: true,
+    numberOfPriorFractures: 1,
+    dexaResults: { lumbarSpineTScore: -2.2, totalHipTScore: -2.2, femoralNeckTScore: -2.2, forearmTScore: null },
+    renalFunction: { egfr: 65 },
+    bloodResults: { adjustedCalciumMmol: 2.32, vitaminDNmol: 68, egfr: 65, alp: 80, tshMUL: 2.0, hbGramsPerLitre: 140, esrOrCrp: 'normal' },
+    previousTreatments: [{ agent: 'alendronate', durationMonths: 60, reasonStopped: 'treatment_holiday', currentlyOn: false }],
+  });
+  const decision = runClinicalDecision(patient);
+  check(failures, 'fracture-during-pause restart flag fires', hasFlag(decision, 'bp_pause_fracture_restart'));
+  check(failures, 'restart instruction does not wait for drug-specific interval',
+    hasFlagText(decision, 'do not wait for the drug-specific'));
+  check(failures, 'recommends alendronate (restart)', hasAgent(decision, 'alendronate'));
+  return { name: 'TC33 — fracture during pause → immediate restart', passed: failures.length === 0, failures, decision };
+}
+
+// ─── TC34 ─────────────────────────────────────────────────────────────────
+// 69F year-3 alendronate, hip fracture 6 weeks ago → adherence pathway, NOT auto-failure.
+function tc34(): TCResult {
+  const failures: string[] = [];
+  const patient = basePatient({
+    age: 69,
+    sex: 'female',
+    priorFragilityFracture: true,
+    priorHipFracture: true,
+    recentFractureWithin2Years: true,
+    numberOfPriorFractures: 1,
+    dexaResults: { lumbarSpineTScore: -2.4, totalHipTScore: -2.4, femoralNeckTScore: -2.4, forearmTScore: null },
+    renalFunction: { egfr: 60 },
+    bloodResults: { adjustedCalciumMmol: 2.32, vitaminDNmol: 55, egfr: 60, alp: 80, tshMUL: 2.0, hbGramsPerLitre: 140, esrOrCrp: 'normal' },
+    currentTreatment: { agent: 'alendronate', durationMonths: 36, reasonStopped: null, currentlyOn: true },
+  });
+  const decision = runClinicalDecision(patient);
+  check(failures, 'on-treatment fracture pathway flag fires', hasFlag(decision, 'on_treatment_fracture_pathway'));
+  check(failures, 'flag mentions adherence review (<80%)', hasFlagText(decision, '<80%'));
+  check(failures, 'flag mentions secondary cause investigation', hasFlagText(decision, 'secondary cause'));
+  check(failures, 'NOT auto-classified as treatment failure', !hasFlag(decision, 'treatment_failure'));
+  // No automatic switch to denosumab/zoledronate in the recommendation list (failure path) before
+  // adherence + secondary cause are confirmed.
+  const hasFailureSwitch = hasFlag(decision, 'treatment_failure_switch');
+  check(failures, 'no automatic class switch flag', !hasFailureSwitch);
+  return { name: 'TC34 — on-treatment fracture: adherence pathway not auto-failure', passed: failures.length === 0, failures, decision };
+}
+
+// ─── TC35 ─────────────────────────────────────────────────────────────────
+// 74F on alendronate 10.5y → after-10-years individual basis flag.
+function tc35(): TCResult {
+  const failures: string[] = [];
+  const patient = basePatient({
+    age: 74,
+    sex: 'female',
+    fraxMOFPercent: 18.0,
+    fraxHipPercent: 4.0,
+    dexaResults: { lumbarSpineTScore: -2.0, totalHipTScore: -2.0, femoralNeckTScore: -2.0, forearmTScore: null },
+    renalFunction: { egfr: 65 },
+    bloodResults: { adjustedCalciumMmol: 2.32, vitaminDNmol: 65, egfr: 65, alp: 80, tshMUL: 2.0, hbGramsPerLitre: 140, esrOrCrp: 'normal' },
+    currentTreatment: { agent: 'alendronate', durationMonths: 126, reasonStopped: null, currentlyOn: true },
+  });
+  const decision = runClinicalDecision(patient);
+  check(failures, 'after-10-years individual basis flag fires', hasFlag(decision, 'bp_individual_basis_after_long_course'));
+  check(failures, 'flag mentions individual basis', hasFlagText(decision, 'individual basis'));
+  return { name: 'TC35 — alendronate ≥10y individual basis', passed: failures.length === 0, failures, decision };
+}
+
+// ─── TC36 ─────────────────────────────────────────────────────────────────
+// 71F on IV zoledronate 6.5y → after-6-years (IV) individual basis flag.
+function tc36(): TCResult {
+  const failures: string[] = [];
+  const patient = basePatient({
+    age: 71,
+    sex: 'female',
+    fraxMOFPercent: 16.0,
+    fraxHipPercent: 3.5,
+    dexaResults: { lumbarSpineTScore: -2.1, totalHipTScore: -2.1, femoralNeckTScore: -2.1, forearmTScore: null },
+    renalFunction: { egfr: 58 },
+    bloodResults: { adjustedCalciumMmol: 2.32, vitaminDNmol: 65, egfr: 58, alp: 80, tshMUL: 2.0, hbGramsPerLitre: 140, esrOrCrp: 'normal' },
+    currentTreatment: { agent: 'zoledronate', durationMonths: 78, reasonStopped: null, currentlyOn: true },
+  });
+  const decision = runClinicalDecision(patient);
+  check(failures, 'after-6-years IV individual basis flag fires', hasFlag(decision, 'bp_individual_basis_after_long_course'));
+  check(failures, 'flag mentions IV zoledronate', hasFlagText(decision, 'IV zoledronate'));
+  return { name: 'TC36 — IV zoledronate ≥6y individual basis', passed: failures.length === 0, failures, decision };
+}
+
+// ─── TC37 ─────────────────────────────────────────────────────────────────
+// 66F alendronate paused 18mo, BTM rising (ALP 145 from 78). T-2.0, FRAX 16% < IT 20.3% (age 70+).
+function tc37(): TCResult {
+  const failures: string[] = [];
+  const patient = basePatient({
+    age: 66,
+    sex: 'female',
+    boneTurnoverMarkersRising: true,
+    fraxMOFPercent: 16.0,
+    fraxHipPercent: 3.0,
+    dexaResults: { lumbarSpineTScore: -2.0, totalHipTScore: -2.0, femoralNeckTScore: -2.0, forearmTScore: null },
+    renalFunction: { egfr: 70 },
+    bloodResults: { adjustedCalciumMmol: 2.32, vitaminDNmol: 65, egfr: 70, alp: 145, tshMUL: 2.0, hbGramsPerLitre: 140, esrOrCrp: 'normal' },
+    previousTreatments: [{ agent: 'alendronate', durationMonths: 60, reasonStopped: 'treatment_holiday', currentlyOn: false }],
+  });
+  const decision = runClinicalDecision(patient);
+  check(failures, 'BP pause restart-signal flag fires', hasFlag(decision, 'bp_pause_restart_signal'));
+  check(failures, 'flag references rising bone turnover', hasFlagText(decision, 'rising bone turnover markers'));
+  check(failures, 'flag mentions LFTs/GGT caveat for ALP elevation', hasFlagText(decision, 'lfts'));
+  // Conditional: must be flagged but no auto-restart treatment recommendation forced.
+  return { name: 'TC37 — BTM rising during pause: restart signal', passed: failures.length === 0, failures, decision };
+}
+
+// ─── TC38 ─────────────────────────────────────────────────────────────────
+// 72M ADT, FRAX MOF 17.5% (86% of IT 20.3%), hip 4.8% (88% of IT 5.4%) → ADT 12–18m flag.
+function tc38(): TCResult {
+  const failures: string[] = [];
+  const patient = basePatient({
+    age: 72,
+    sex: 'male',
+    adtUse: true,
+    fraxMOFPercent: 17.5,
+    fraxHipPercent: 4.8,
+    dexaResults: { lumbarSpineTScore: -1.6, totalHipTScore: -1.6, femoralNeckTScore: -1.6, forearmTScore: null },
+    renalFunction: { egfr: 65 },
+    bloodResults: { adjustedCalciumMmol: 2.30, vitaminDNmol: 65, egfr: 65, alp: 80, tshMUL: 2.0, hbGramsPerLitre: 140, esrOrCrp: 'normal' },
+  });
+  const decision = runClinicalDecision(patient);
+  check(failures, 'risk = intermediate', decision.riskStratification.category === 'intermediate',
+    `got ${decision.riskStratification.category}`);
+  check(failures, 'ADT near-threshold flag fires', hasFlag(decision, 'adt_near_threshold_reassess'));
+  check(failures, 'flag uses 12–18 month wording', hasFlagText(decision, '12–18 months'));
+  check(failures, 'flag uses ADT-specific language (not 12–24)', !hasFlagText(decision, '12–24 months after starting adt'));
+  check(failures, 'no drug treatment at this visit', decision.treatmentRecommendations.length === 0);
+  return { name: 'TC38 — ADT near-threshold 12–18m', passed: failures.length === 0, failures, decision };
+}
+
+// ─── TC39 ─────────────────────────────────────────────────────────────────
+// 63F AI, T-1.6 no RFs, FRAX MOF 10.8% near IT 12.2% → AI 12–24m flag (distinct from ADT 12–18m).
+function tc39(): TCResult {
+  const failures: string[] = [];
+  const patient = basePatient({
+    age: 63,
+    sex: 'female',
+    aromataseInhibitorUse: true,
+    fraxMOFPercent: 10.8,
+    fraxHipPercent: 1.9,
+    dexaResults: { lumbarSpineTScore: -1.6, totalHipTScore: -1.6, femoralNeckTScore: -1.6, forearmTScore: null },
+    renalFunction: { egfr: 70 },
+    bloodResults: { adjustedCalciumMmol: 2.32, vitaminDNmol: 65, egfr: 70, alp: 80, tshMUL: 2.0, hbGramsPerLitre: 140, esrOrCrp: 'normal' },
+  });
+  const decision = runClinicalDecision(patient);
+  check(failures, 'risk = intermediate', decision.riskStratification.category === 'intermediate',
+    `got ${decision.riskStratification.category}`);
+  check(failures, 'AI near-threshold flag fires', hasFlag(decision, 'ai_near_threshold_reassess'));
+  check(failures, 'flag uses 12–24 month wording (not 12–18)', hasFlagText(decision, '12–24 months'));
+  check(failures, 'flag explicitly distinguishes AI from ADT/GIOP', hasFlagText(decision, 'differs from'));
+  check(failures, 'no drug treatment at this visit', decision.treatmentRecommendations.length === 0);
+  return { name: 'TC39 — AI near-threshold 12–24m', passed: failures.length === 0, failures, decision };
+}
+
+// ─── TC40 ─────────────────────────────────────────────────────────────────
+// 66F T-2.7, starting alendronate. Dental hygiene + no-data-stopping in monitoring.
+function tc40(): TCResult {
+  const failures: string[] = [];
+  const patient = basePatient({
+    age: 66,
+    sex: 'female',
+    dexaResults: { lumbarSpineTScore: -2.7, totalHipTScore: -2.4, femoralNeckTScore: -2.4, forearmTScore: null },
+    renalFunction: { egfr: 70 },
+    bloodResults: { adjustedCalciumMmol: 2.32, vitaminDNmol: 65, egfr: 70, alp: 80, tshMUL: 2.0, hbGramsPerLitre: 140, esrOrCrp: 'normal' },
+  });
+  const decision = runClinicalDecision(patient);
+  check(failures, 'recommends alendronate', hasAgent(decision, 'alendronate'));
+  const alenRec = decision.treatmentRecommendations.find(r => r.agent === 'alendronate');
+  const monitoringText = (alenRec?.monitoring ?? []).join(' | ').toLowerCase();
+  check(failures, 'monitoring includes dental hygiene/dental check-up',
+    monitoringText.includes('dental') || monitoringText.includes('oral hygiene'));
+  check(failures, 'monitoring includes no-data-for-stopping-before-dental wording',
+    monitoringText.includes('no data') || monitoringText.includes('do not routinely stop'));
+  return { name: 'TC40 — dental hygiene fires at BP initiation', passed: failures.length === 0, failures, decision };
+}
+
+// ─── TC41 ─────────────────────────────────────────────────────────────────
+// 58F prednisolone 15mg/day high-dose. Table 8 ×1.15 MOF, ×1.20 hip pushes both above IT.
+// Criterion (c) immediate-start.
+function tc41(): TCResult {
+  const failures: string[] = [];
+  const patient = basePatient({
+    age: 58,
+    sex: 'female',
+    glucocorticoidDoseMgDay: 15,
+    glucocorticoidUse: { current: true, dose: 'high', durationMonths: 1 },
+    fraxMOFPercent: 8.5,
+    fraxHipPercent: 1.3,
+    dexaResults: { lumbarSpineTScore: -1.8, totalHipTScore: -1.8, femoralNeckTScore: -1.8, forearmTScore: null },
+    renalFunction: { egfr: 70 },
+    bloodResults: { adjustedCalciumMmol: 2.32, vitaminDNmol: 65, egfr: 70, alp: 80, tshMUL: 2.0, hbGramsPerLitre: 140, esrOrCrp: 'normal' },
+  });
+  const decision = runClinicalDecision(patient);
+  const adjMOF = decision.riskStratification.adjustedFraxMOFPercent;
+  const adjHip = decision.riskStratification.adjustedFraxHipPercent;
+  check(failures, 'Table 8 high-dose MOF correction (×1.15 ≈ 9.78%)',
+    adjMOF !== null && Math.abs(adjMOF - 9.78) < 0.1, `got adjMOF=${adjMOF}`);
+  check(failures, 'Table 8 high-dose hip correction (×1.20 ≈ 1.56%)',
+    adjHip !== null && Math.abs(adjHip - 1.56) < 0.05, `got adjHip=${adjHip}`);
+  check(failures, 'risk = high', decision.riskStratification.category === 'high', `got ${decision.riskStratification.category}`);
+  check(failures, 'GIOP immediate-start flag fires (criterion c)', hasFlag(decision, 'giop_immediate_start'));
+  check(failures, 'flag references high-dose ≥7.5 mg/day', hasFlagText(decision, '≥7.5 mg/day'));
+  check(failures, 'recommends alendronate', hasAgent(decision, 'alendronate'));
+  return { name: 'TC41 — 58F high-dose GC, Table 8 upward correction', passed: failures.length === 0, failures, decision };
+}
+
 // ─── Runner ───────────────────────────────────────────────────────────────
 
 const TCs: Array<() => TCResult> = [
   tc1, tc2, tc3, tc4, tc5, tc6, tc7, tc8, tc9, tc10,
   tc11, tc12, tc13, tc14, tc15, tc16, tc17, tc18, tc19, tc20, tc21, tc22,
+  tc23, tc24, tc25, tc26, tc27, tc28, tc29, tc30, tc31, tc32,
+  tc33, tc34, tc35, tc36, tc37, tc38, tc39, tc40, tc41,
 ];
 
 const results = TCs.map(fn => fn());

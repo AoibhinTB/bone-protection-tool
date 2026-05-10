@@ -143,6 +143,10 @@ export interface PatientInput {
   bmdDecreasedDuringPause: boolean | null;
   adtUse: boolean;                    // Androgen Deprivation Therapy (prostate cancer)
   aromataseInhibitorUse: boolean;     // Breast cancer treatment
+  /** v1.14 — patient has received adjuvant high-dose bisphosphonate as part of breast cancer
+   *  management (higher/more frequent dosing than standard osteoporosis treatment). When true
+   *  AND AI continuing → end-of-course fracture risk reassessment flag fires (NOGG 2024 Rec 4 Conditional). */
+  hadAdjuvantHighDoseBisphosphonate: boolean;
 
   // Special populations
   earlyMenopause: boolean;            // Menopause < 45 years

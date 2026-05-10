@@ -27,6 +27,7 @@ import {
   gcDurationMonths,
   PAUSE_REASSESSMENT_INTERVAL_MONTHS,
   BP_INDIVIDUAL_BASIS_AFTER_YEARS,
+  aiAdditionalRiskFactorCount,
 } from './thresholds';
 import type { RiskStratification } from './types';
 
@@ -308,7 +309,8 @@ export function generateTreatmentOutput(
         id: 'bp_pause_restart_signal',
         severity: 'warning',
         message:
-          `Bisphosphonate pause restart signal: ${triggers.join('; ')}. Consider restarting bisphosphonate before the scheduled FRAX reassessment.`,
+          `Bisphosphonate pause restart signal: ${triggers.join('; ')}. Consider restarting bisphosphonate before the scheduled FRAX reassessment. ` +
+          'Note: if the trigger includes elevated ALP, exclude liver source first (LFTs / GGT) before attributing to rising bone turnover.',
         rationale:
           'NOGG 2024 Section 6.6 Rec 7 (Conditional): in addition to fracture (Rec 3) and scheduled FRAX reassessment (Rec 4), ' +
           'consider restart if biochemical markers indicate relapse from suppressed bone turnover OR BMD has decreased on repeat DEXA. ' +
@@ -316,29 +318,88 @@ export function generateTreatmentOutput(
         source: SRC_NOGG,
       });
     }
+    // v1.14 — fracture during pause: immediate FRAX reassessment + restart, regardless of
+    // drug-specific reassessment interval (NOGG 2024 Section 7 Rec 3 Strong).
+    if (onPause && patient.recentFractureWithin2Years === true) {
+      flags.push({
+        id: 'bp_pause_fracture_restart',
+        severity: 'warning',
+        message:
+          'FRACTURE DURING PAUSE — RESTART TREATMENT. New fragility fracture during bisphosphonate pause. ' +
+          'Reassess FRAX with BMD immediately; do not wait for the drug-specific reassessment interval. ' +
+          'If FRAX is above the age-specific intervention threshold, or T-score ≤ −2.5, restart treatment.',
+        rationale:
+          'NOGG 2024 Section 7 Rec 3 (Strong): a new fragility fracture during a bisphosphonate pause is an absolute ' +
+          'indication for immediate FRAX reassessment and treatment restart. The drug-specific reassessment interval ' +
+          '(Rec 4) is overridden by an interval fracture event.',
+        source: SRC_NOGG,
+      });
+    }
   }
 
-  // ── GC withdrawal — Section 9.4 review of bone protection (v1.13) ──
+  // ── GC withdrawal — Section 9.4 review of bone protection (v1.13/v1.14) ──
   // Patient was previously on oral GC, has now stopped, AND is currently on a bisphosphonate.
   // Bone-protective therapy may be considered for withdrawal IF FRAX (with BMD) reassessment
-  // shows BOTH MOF and hip below the age-specific intervention threshold.
+  // shows BOTH MOF and hip below the age-specific intervention threshold. If FRAX is provided,
+  // emit either:
+  //   - gc_withdrawal_bp_review (eligible)         — both axes below IT
+  //   - gc_withdrawal_continue_treatment (continue) — at least one axis above IT
+  // If FRAX not provided, emit the umbrella gc_withdrawal_bp_review with a recalc prompt.
   if (
     patient.glucocorticoidPreviouslyUsed &&
     !isOnGC(patient) &&
     patient.currentTreatment?.currentlyOn === true &&
     isBisphosphonate(patient.currentTreatment.agent)
   ) {
-    flags.push({
-      id: 'gc_withdrawal_bp_review',
-      severity: 'info',
-      message:
-        'Glucocorticoid stopped — review bisphosphonate need. Withdrawal of bone-protective therapy may be considered, but only if FRAX reassessment (with BMD) shows BOTH MOF and hip probabilities below the age-specific intervention threshold. If either is above threshold, continue bone protection. Recalculate FRAX without the GC checkbox for this reassessment.',
-      rationale:
-        'NOGG 2024 Section 9.4 (Strong): on cessation of GC therapy, withdrawal of antiresorptive may be appropriate ' +
-        'where both MOF and hip 10-year probabilities lie below the age-specific intervention threshold. ' +
-        'The Table 8 GC dose adjustment no longer applies once GC is stopped — recalculate FRAX with the GC box unticked.',
-      source: SRC_NOGG,
-    });
+    const ageThr = getAgeThreshold(patient.age);
+    const mof = riskStratification.adjustedFraxMOFPercent;
+    const hip = riskStratification.adjustedFraxHipPercent;
+    const haveFrax = mof !== null && hip !== null && ageThr !== null;
+    const mofBelow = haveFrax && (mof as number) < ageThr!.itMOF;
+    const hipBelow = haveFrax && (hip as number) < ageThr!.itHip;
+
+    if (haveFrax && mofBelow && hipBelow) {
+      flags.push({
+        id: 'gc_withdrawal_bp_review',
+        severity: 'info',
+        message:
+          `Glucocorticoid stopped. FRAX reassessment (without GC — Table 8 correction not applied): MOF ${mof}% and hip ${hip}%, both below age-specific intervention thresholds (${ageThr!.itMOF}% / ${ageThr!.itHip}%). Bone-protective therapy withdrawal may be considered.`,
+        rationale:
+          'NOGG 2024 Section 9.4 (Strong): on cessation of GC therapy, withdrawal of antiresorptive may be considered ' +
+          'where BOTH MOF and hip 10-year probabilities lie below the age-specific intervention threshold. ' +
+          'Recalculated FRAX confirms both axes below threshold; clinical judgement applies.',
+        source: SRC_NOGG,
+      });
+    } else if (haveFrax && (!mofBelow || !hipBelow)) {
+      const aboveText = !mofBelow && !hipBelow
+        ? `MOF ${mof}% (IT ${ageThr!.itMOF}%) and hip ${hip}% (IT ${ageThr!.itHip}%) both above`
+        : !mofBelow
+        ? `MOF ${mof}% remains above IT ${ageThr!.itMOF}%; hip ${hip}% below IT ${ageThr!.itHip}%`
+        : `hip ${hip}% remains above IT ${ageThr!.itHip}%; MOF ${mof}% below IT ${ageThr!.itMOF}%`;
+      flags.push({
+        id: 'gc_withdrawal_continue_treatment',
+        severity: 'warning',
+        message:
+          `Glucocorticoid stopped — CONTINUE TREATMENT. ${aboveText} the age-specific intervention threshold. Bone protection must continue; both MOF and hip must be below threshold for withdrawal to be considered.`,
+        rationale:
+          'NOGG 2024 Section 9.4 (Strong): withdrawal of bone-protective therapy after GC cessation requires BOTH ' +
+          'MOF and hip 10-year probabilities below the age-specific intervention threshold. If either axis is above ' +
+          'threshold, continue bone protection.',
+        source: SRC_NOGG,
+      });
+    } else {
+      flags.push({
+        id: 'gc_withdrawal_bp_review',
+        severity: 'info',
+        message:
+          'Glucocorticoid stopped — review bisphosphonate need. Withdrawal of bone-protective therapy may be considered, but only if FRAX reassessment (with BMD) shows BOTH MOF and hip probabilities below the age-specific intervention threshold. If either is above threshold, continue bone protection. Recalculate FRAX without the GC checkbox for this reassessment.',
+        rationale:
+          'NOGG 2024 Section 9.4 (Strong): on cessation of GC therapy, withdrawal of antiresorptive may be appropriate ' +
+          'where both MOF and hip 10-year probabilities lie below the age-specific intervention threshold. ' +
+          'The Table 8 GC dose adjustment no longer applies once GC is stopped — recalculate FRAX with the GC box unticked.',
+        source: SRC_NOGG,
+      });
+    }
   }
 
   // ── Malabsorption surface flag — Ca and Vit D absorption may be impaired ──
@@ -451,16 +512,27 @@ export function generateTreatmentOutput(
     }
   }
 
-  // Compute AI lower-threshold override: T-score ≤-1.5 on aromatase inhibitor mandates treatment
-  // regardless of FRAX category (CTIBL guidelines / NOGG 2024 Section 7)
+  // v1.14 — IOF 2017 international consensus AI treatment threshold (cited by NOGG 2024).
+  // Replaces the previous blanket T-score ≤ −1.5 rule (no IOS source supported it).
+  //   T-score < −2.0 (any site) → treat unconditionally
+  //   T-score < −1.5 + ≥1 additional FRAX clinical risk factor → treat
+  //   no T-score (no DEXA) + ≥2 FRAX clinical risk factors → treat
+  //   otherwise → fall through to the standard FRAX-driven cascade (high-risk by FRAX still treats)
   const aiLowerThresholdMet = (() => {
-    if (!patient.aromataseInhibitorUse || !patient.dexaResults) return false;
-    const scores = [
-      patient.dexaResults.lumbarSpineTScore,
-      patient.dexaResults.totalHipTScore,
-      patient.dexaResults.femoralNeckTScore,
-    ].filter((t): t is number => t != null);
-    return scores.length > 0 && Math.min(...scores) <= -1.5;
+    if (!patient.aromataseInhibitorUse) return false;
+    const tScores = patient.dexaResults
+      ? [
+          patient.dexaResults.lumbarSpineTScore,
+          patient.dexaResults.totalHipTScore,
+          patient.dexaResults.femoralNeckTScore,
+        ].filter((t): t is number => t != null)
+      : [];
+    const lowestT = tScores.length > 0 ? Math.min(...tScores) : null;
+    const rfCount = aiAdditionalRiskFactorCount(patient);
+    if (lowestT !== null && lowestT < -2.0) return true;
+    if (lowestT !== null && lowestT < -1.5 && rfCount >= 1) return true;
+    if (lowestT === null && rfCount >= 2) return true;
+    return false;
   })();
 
   // Low risk — lifestyle only
@@ -472,12 +544,15 @@ export function generateTreatmentOutput(
 
   // Intermediate risk without DEXA — branch on whether BMD is unavailable per NOGG 2024 Rec 6.
   // Bypass: recent fracture (treat immediately) or AI threshold met (DEXA not required to decide).
+  // Bypass: GIOP — Section 9 owns the GC pathway (immediate-start criteria, near-threshold flag,
+  // assess-and-treat). Falling through to giop() preserves dose-specific logic.
   if (
     riskCategory === 'intermediate' &&
     !patient.dexaResults &&
     !patient.currentTreatment &&
     !patient.recentFractureWithin2Years &&
-    !aiLowerThresholdMet
+    !aiLowerThresholdMet &&
+    !isOnGC(patient)
   ) {
     if (patient.bmdUnavailable) {
       // NOGG 2024 Rec 6: BMD unavailable / contraindicated / impractical
@@ -544,6 +619,50 @@ export function generateTreatmentOutput(
     }
   }
 
+  // v1.14 — Intermediate risk with DEXA already available, T-score above −2.5, no override:
+  // BMD did not reclassify to high. NOGG 2024: amber zone with BMD that did not push above IT
+  // → no treatment. Lifestyle advice + monitor.
+  // Overrides that bypass this guard:
+  //   - recent fragility fracture (imminent risk)
+  //   - AI IOF 2017 threshold met
+  //   - existing treatment (sequencing logic owns the decision)
+  //   - on GC (GIOP path owns the decision)
+  //   - early menopause (special-population path owns the decision)
+  if (
+    riskCategory === 'intermediate' &&
+    patient.dexaResults &&
+    !patient.currentTreatment &&
+    !patient.recentFractureWithin2Years &&
+    !aiLowerThresholdMet &&
+    !isOnGC(patient) &&
+    !patient.earlyMenopause
+  ) {
+    const ts = [
+      patient.dexaResults.lumbarSpineTScore,
+      patient.dexaResults.totalHipTScore,
+      patient.dexaResults.femoralNeckTScore,
+    ].filter((t): t is number => t != null);
+    const lowestT = ts.length > 0 ? Math.min(...ts) : null;
+    if (lowestT === null || lowestT > -2.5) {
+      flags.push({
+        id: 'intermediate_with_bmd_no_treatment',
+        severity: 'info',
+        message:
+          'Intermediate FRAX risk with BMD: T-score does not meet the osteoporosis threshold (≤ −2.5) and FRAX is below the age-specific intervention threshold. No bone protection indicated at this time. Reassess when risk factors change.',
+        rationale:
+          'NOGG 2024 Section 3.1 (Strong): in the amber zone, BMD reclassifies the patient to either low (no treatment) ' +
+          'or high (treat) risk. When BMD does not push the patient above the intervention threshold and no special ' +
+          'override applies (recent fracture, GC, AI IOF 2017 criteria), treatment is not indicated.',
+        source: SRC_NOGG,
+      });
+      // Flags downstream of this point that are *contextual* (AI/ADT near-threshold reassessment,
+      // dental hygiene, etc.) still need to fire, so we push contextual flags before returning.
+      adtFlags(patient, riskCategory, riskStratification, flags, referrals);
+      aiFlags(patient, riskCategory, riskStratification, flags);
+      return { recommendations: [], flags, referrals, supplements };
+    }
+  }
+
   // High / very high risk: DEXA is for baseline comparison only — treatment must NOT be delayed.
   // (NOGG 2024 Rec 3, Strong.)
   if (
@@ -581,8 +700,8 @@ export function generateTreatmentOutput(
   }
 
   // ── Contextual flags ──
-  adtFlags(patient, flags);
-  aiFlags(patient, flags);
+  adtFlags(patient, riskCategory, riskStratification, flags, referrals);
+  aiFlags(patient, riskCategory, riskStratification, flags);
   affFlags(patient, flags);
 
   // ── High → very high re-designation consideration (NOGG 2024 Section 3 + Table 2) ──
@@ -775,23 +894,13 @@ function initiateTherapy(
     return recs;
   }
 
-  // ADT (men on androgen deprivation therapy): denosumab is first-line by RCT evidence
-  // (HALT trial, Smith et al. NEJM 2009 — 62% vertebral fracture reduction). Alendronate is
-  // an acceptable alternative but second-line in this specific population.
-  if (patient.adtUse && !hasAFFHistory(patient) && !hasPreviousGIIntoleranceToBP(patient)) {
-    addVitDBlock(patient, flags);
-    recs.push({ ...denosumab(egfr), priority: 'first-line' });
-    if (canUse('alendronate', egfr)) {
-      recs.push(withBPInitiationContext({
-        ...alendronate(),
-        priority: 'alternative',
-        rationale:
-          'Second-line alternative on ADT. Consider if denosumab not feasible (cost, adherence, patient preference). ' +
-          'Note: denosumab has the strongest fracture-reduction RCT evidence in this population (HALT trial, Smith et al. NEJM 2009).',
-      }, patient));
-    }
-    return recs;
-  }
+  // ADT (men on androgen deprivation therapy): v1.14 — denosumab-first designation removed.
+  // NOGG 2024 makes bisphosphonate and denosumab equivalent options; no Irish guideline supports
+  // denosumab-first for ADT. Falls through to the standard HSE MMP cascade (BP first-line,
+  // denosumab when BP contraindicated). Zoledronate is the preferred BP within the class on
+  // BMD evidence — surfaced as an info flag in adtFlags() rather than reordering the cascade,
+  // because alendronate remains first-line per HSE MMP and is acceptable when zoledronate is
+  // not feasible.
 
   // Previous GI intolerance to oral bisphosphonate: skip oral BPs, offer IV or denosumab
   if (hasPreviousGIIntoleranceToBP(patient)) {
@@ -988,8 +1097,13 @@ function sequencing(
   // If during the first 5y oral / 3y IV course, the fracture is also an extension indication
   // (Section 7 Rec 1–2). Switch class only on confirmed failure.
   const explicitTreatmentFailure = current.reasonStopped === 'treatment_failure';
+  // v1.14 — broaden trigger: a fracture-within-24-months on a patient who has been on treatment
+  // for ≥12 months is the spec-aligned on-treatment fracture signal (NOGG 2024 Section 6.3 Rec 5).
+  // Retain the multi-fracture heuristic as a secondary trigger.
   const possibleOnTxFracture =
-    current.currentlyOn && current.durationMonths >= 12 && patient.numberOfPriorFractures >= 2;
+    current.currentlyOn &&
+    current.durationMonths >= 12 &&
+    (patient.recentFractureWithin2Years === true || patient.numberOfPriorFractures >= 2);
 
   if (possibleOnTxFracture && !explicitTreatmentFailure) {
     flags.push({
@@ -1093,14 +1207,19 @@ function sequencing(
         const reassessMonths = PAUSE_REASSESSMENT_INTERVAL_MONTHS[
           current.agent as 'alendronate' | 'risedronate' | 'ibandronate' | 'zoledronate'
         ];
+        // v1.14 — render months exactly when not whole-year, otherwise present as "N years (N months)"
+        const reassessText =
+          reassessMonths % 12 === 0
+            ? `${reassessMonths / 12} years (${reassessMonths} months)`
+            : `${reassessMonths} months`;
         flags.push({
           id: 'bp_holiday_appropriate',
           severity: 'info',
           message:
             `${holidayYear}-year bisphosphonate reassessment: fracture risk appears low/intermediate ` +
             `(${pauseDecision.reasons.join('; ')}). ` +
-            `An individualised treatment pause may be considered. Reassess with FRAX + femoral neck BMD at ` +
-            `${reassessMonths} months for ${current.agent} (drug-specific offset kinetics; NOGG 2024 Section 7 Rec 4). ` +
+            `An individualised treatment pause may be considered. Reassess with FRAX + femoral neck BMD in ` +
+            `${reassessText} for ${current.agent} (drug-specific offset kinetics; NOGG 2024 Section 7 Rec 4). ` +
             'If a new fracture occurs during the pause, FRAX reassessment and restart is triggered immediately ' +
             'regardless of the above interval (NOGG Section 7 Rec 3). ' +
             'This is NOT a routine recommendation — there is no standard policy for all patients.' +
@@ -1807,23 +1926,85 @@ function giop(
 
 // ─── Context flags ────────────────────────────────────────────────────────
 
-function adtFlags(patient: PatientInput, flags: ClinicalFlag[]): void {
+function adtFlags(
+  patient: PatientInput,
+  riskCategory: RiskCategory,
+  riskStratification: RiskStratification,
+  flags: ClinicalFlag[],
+  referrals: ReferralRecommendation[],
+): void {
   if (!patient.adtUse) return;
+
+  // v1.14 Step 1 — bisphosphonate and denosumab presented as equivalent. Zoledronate noted as
+  // preferred BP for ADT on BMD evidence. Denosumab no longer described as first-line.
   flags.push({
     id: 'adt_bone_loss',
     severity: 'info',
     message:
       'ADT (androgen deprivation therapy): causes rapid bone loss and elevated fracture risk. ' +
-      'First-line bone protection: denosumab 60mg SC every 6 months (strongest trial evidence — HALT trial). ' +
-      'Alternatives: alendronate or zoledronate. DEXA baseline and monitoring every 1–2 years during ADT.',
+      'Bisphosphonate and denosumab are equivalent options (NOGG 2024). HSE MMP cascade: bisphosphonate first-line, ' +
+      'denosumab second-line unless bisphosphonate contraindicated. ' +
+      'Within the bisphosphonate class, zoledronate is preferred on BMD evidence (NOGG 2024 Evidence IIa, network meta-analysis). ' +
+      'DEXA baseline and monitoring every 1–2 years during ADT.',
     rationale:
-      'NOGG 2024 Section 7 / NICE NG187: denosumab 60mg is licensed and has RCT evidence for fracture ' +
-      'prevention in men on ADT (Smith et al. NEJM 2009 — 62% vertebral fracture reduction).',
+      'NOGG 2024 Section 7 supports the Brown et al 2020 ADT consensus; HALT trial (Smith et al. NEJM 2009) ' +
+      'demonstrated denosumab fracture reduction vs placebo but does not establish denosumab superiority over ' +
+      'bisphosphonates — no head-to-head fracture endpoint trial exists.',
     source: SRC_NOGG,
   });
+
+  // v1.14 Step 2 — ADT near-threshold reassessment (12–18 months).
+  const ageThr = getAgeThreshold(patient.age);
+  const adjMOF = riskStratification.adjustedFraxMOFPercent;
+  const adjHip = riskStratification.adjustedFraxHipPercent;
+  if (ageThr !== null) {
+    const mofNearIT = adjMOF !== null && adjMOF < ageThr.itMOF && adjMOF >= ageThr.itMOF * 0.8;
+    const hipNearIT = adjHip !== null && adjHip < ageThr.itHip && adjHip >= ageThr.itHip * 0.8;
+    if (mofNearIT || hipNearIT) {
+      flags.push({
+        id: 'adt_near_threshold_reassess',
+        severity: 'info',
+        message:
+          'ADT near-threshold reassessment: FRAX is below but within 20% of the age-specific intervention threshold. ' +
+          'Reassess FRAX with BMD 12–18 months after starting ADT. (Note: ADT interval differs from AI 12–24 months.)',
+        rationale:
+          'NOGG 2024 Section 7, Rec 3 (Conditional): men starting ADT with FRAX near to but below the IT — ' +
+          'particularly those going on to additional systemic therapies (e.g. concomitant glucocorticoids) — ' +
+          'should have FRAX with BMD reassessed 12–18 months after ADT initiation.',
+        source: SRC_NOGG,
+      });
+    }
+  }
+
+  // v1.14 Step 3 — ADT consider-referral when treatment threshold is met.
+  // This is a Conditional "consider referring" flag, not a mandatory referral. It must not
+  // conflate with the VHR mandatory referral pathway, which is handled separately.
+  if (riskCategory === 'high' || riskCategory === 'very_high') {
+    flags.push({
+      id: 'adt_consider_secondary_care_referral',
+      severity: 'info',
+      message:
+        'ADT patient meets the treatment threshold — consider referring to secondary care for assessment and ' +
+        'initiation of bone protection. (Conditional — not mandatory; does not replace the VHR pathway if present.)',
+      rationale:
+        'NOGG 2024 Section 7, Rec 2 (Conditional): consider referring men with high fracture risk requiring drug ' +
+        'treatment to secondary care for assessment and initiation of treatment.',
+      source: SRC_NOGG,
+    });
+    referrals.push({
+      specialty: 'metabolic_bone',
+      reason: 'ADT with high fracture risk — consider secondary care for assessment and initiation of bone protection (NOGG 2024 Section 7, Rec 2 Conditional).',
+      urgency: 'routine',
+    });
+  }
 }
 
-function aiFlags(patient: PatientInput, flags: ClinicalFlag[]): void {
+function aiFlags(
+  patient: PatientInput,
+  riskCategory: RiskCategory,
+  riskStratification: RiskStratification,
+  flags: ClinicalFlag[],
+): void {
   if (!patient.aromataseInhibitorUse) return;
 
   const tScores = patient.dexaResults
@@ -1834,22 +2015,116 @@ function aiFlags(patient: PatientInput, flags: ClinicalFlag[]): void {
       ].filter((t): t is number => t != null)
     : [];
   const lowestT = tScores.length > 0 ? Math.min(...tScores) : null;
-  const meetsAIThreshold = lowestT !== null && lowestT <= -1.5;
+  const rfCount = aiAdditionalRiskFactorCount(patient);
+
+  // v1.14 Step 4 — IOF 2017 international consensus (cited by NOGG 2024). Replaces the previous
+  // blanket T-score ≤ −1.5 rule.
+  const treatUnconditional = lowestT !== null && lowestT < -2.0;
+  const treatWithRF = lowestT !== null && lowestT < -1.5 && lowestT >= -2.0 && rfCount >= 1;
+  const treatNoBMD = lowestT === null && rfCount >= 2;
+  const monitorOnly = lowestT !== null && lowestT >= -1.5 && rfCount === 0;
+
+  let aiMessage: string;
+  let aiSeverity: ClinicalFlag['severity'] = 'info';
+  if (treatUnconditional) {
+    aiSeverity = 'warning';
+    aiMessage =
+      `Aromatase inhibitor therapy with T-score ${lowestT} (< −2.0): TREAT — IOF 2017 unconditional threshold. ` +
+      'Bisphosphonate and denosumab are equivalent options (NOGG 2024 Strong / IOF 2017). ' +
+      'HSE MMP cascade: bisphosphonate (oral or IV zoledronate) first-line; denosumab second-line unless bisphosphonate contraindicated. DEXA every 1–2 years.';
+  } else if (treatWithRF) {
+    aiSeverity = 'warning';
+    aiMessage =
+      `Aromatase inhibitor therapy with T-score ${lowestT} (< −1.5) plus ${rfCount} additional clinical risk factor${rfCount > 1 ? 's' : ''}: TREAT — IOF 2017 threshold. ` +
+      'Bisphosphonate and denosumab are equivalent options (NOGG 2024 Strong). ' +
+      'HSE MMP cascade: bisphosphonate first-line; denosumab second-line unless bisphosphonate contraindicated. DEXA every 1–2 years.';
+  } else if (treatNoBMD) {
+    aiSeverity = 'warning';
+    aiMessage =
+      `Aromatase inhibitor therapy with ${rfCount} clinical risk factors and no DEXA available: TREAT — IOF 2017 threshold. ` +
+      'Bisphosphonate and denosumab are equivalent options (NOGG 2024 Strong). DEXA at earliest opportunity for monitoring.';
+  } else if (monitorOnly) {
+    aiMessage =
+      `Aromatase inhibitor therapy with T-score ${lowestT} (≥ −1.5) and no additional clinical risk factors: ` +
+      'monitor BMD change at 1 year and apply standard postmenopausal osteoporosis guidelines (IOF 2017). ' +
+      'Treatment is not indicated at this time on AI grounds alone — but FRAX above the age-specific intervention threshold still warrants treatment per NOGG Rec 2 (Strong).';
+  } else {
+    aiMessage =
+      'Aromatase inhibitor therapy: assess by IOF 2017 thresholds — T-score < −2.0 unconditional; ' +
+      'T-score < −1.5 with ≥1 risk factor; ≥2 risk factors without BMD; or FRAX above age-specific IT (treat regardless of T-score). ' +
+      'Bisphosphonate and denosumab are equivalent options (NOGG 2024 Strong). DEXA every 1–2 years.';
+  }
 
   flags.push({
     id: 'ai_ctibl',
-    severity: meetsAIThreshold ? 'warning' : 'info',
-    message:
-      meetsAIThreshold
-        ? `Aromatase inhibitor therapy with T-score ${lowestT} ≤-1.5: TREAT — lower threshold applies due to rapid rate of bone loss on AI therapy. ` +
-          'Treatment indication is independent of FRAX score. First-line: alendronate or zoledronate. DEXA every 1–2 years.'
-        : 'Aromatase inhibitor therapy: treat bone loss if T-score ≤-1.5 (regardless of FRAX) due to rapid rate of bone loss in this population. ' +
-          'Also treat if T-score ≤-2.5, or if FRAX is in the high/very high zone. DEXA every 1–2 years.',
+    severity: aiSeverity,
+    message: aiMessage,
     rationale:
-      'NOGG 2024 Section 7 / CTIBL guidelines: AI therapy causes rapid oestrogen suppression and accelerated bone loss. ' +
-      'Treatment threshold is T-score ≤-1.5 regardless of FRAX score, due to rapid bone loss rate.',
+      'IOF/CABS/ECTS/IEG/ESCEO/IMS/SIOG 2017 Joint Position Statement (Rizzoli R et al, Osteoporos Int 2017), cited by NOGG 2024. ' +
+      'AI therapy causes rapid oestrogen suppression and accelerated bone loss — but the previous blanket T-score ≤ −1.5 rule ' +
+      'over-treated AI patients without supporting Irish guideline. The IOF 2017 thresholds restrict T-score < −1.5 to patients ' +
+      'with ≥1 additional risk factor.',
     source: SRC_CTIBL,
   });
+
+  // v1.14 Step 5 — explicit equivalence flag covering treatment options (NOGG Rec 2 Strong).
+  // Surfaced even when AI threshold not met, so clinicians see the option set up-front.
+  flags.push({
+    id: 'ai_treatment_options_equivalent',
+    severity: 'info',
+    message:
+      'AI bone protection options: bisphosphonate (oral or IV zoledronate) and denosumab 60mg SC are equivalent ' +
+      'first-line options on fracture and BMD evidence (NOGG 2024 Rec 2 Strong; IOF 2017). Per HSE MMP cascade, ' +
+      'bisphosphonate is dispensed first-line and denosumab second-line unless bisphosphonate is contraindicated.',
+    rationale:
+      'NOGG 2024 Evidence Ia: denosumab and risedronate both reduce fracture risk in AI patients; denosumab and ' +
+      'zoledronate both produce significant BMD gains at spine and hip. Neither class is elevated above the other.',
+    source: SRC_NOGG,
+  });
+
+  // v1.14 Step 6 — AI near-threshold reassessment (12–24 months — note: differs from ADT/GIOP 12–18m).
+  const ageThr = getAgeThreshold(patient.age);
+  const adjMOF = riskStratification.adjustedFraxMOFPercent;
+  const adjHip = riskStratification.adjustedFraxHipPercent;
+  if (ageThr !== null) {
+    const mofNearIT = adjMOF !== null && adjMOF < ageThr.itMOF && adjMOF >= ageThr.itMOF * 0.8;
+    const hipNearIT = adjHip !== null && adjHip < ageThr.itHip && adjHip >= ageThr.itHip * 0.8;
+    if (mofNearIT || hipNearIT) {
+      flags.push({
+        id: 'ai_near_threshold_reassess',
+        severity: 'info',
+        message:
+          'AI near-threshold reassessment: FRAX is below but within 20% of the age-specific intervention threshold. ' +
+          'Reassess FRAX with BMD 12–24 months after starting AI therapy. (Note: AI interval is 12–24 months — differs from ADT/GIOP 12–18 months.)',
+        rationale:
+          'NOGG 2024 Section 7, Rec 3 (Conditional) / IOF 2017: women starting AI with FRAX near to but below the IT — ' +
+          'particularly those going on to additional systemic therapies (e.g. concomitant glucocorticoids) — ' +
+          'should have FRAX with BMD reassessed 12–24 months after AI initiation.',
+        source: SRC_NOGG,
+      });
+    }
+  }
+
+  // v1.14 Step 7 — adjuvant high-dose bisphosphonate end-of-course reassessment.
+  if (patient.hadAdjuvantHighDoseBisphosphonate) {
+    flags.push({
+      id: 'ai_adjuvant_bp_end_of_course_reassess',
+      severity: 'info',
+      message:
+        'Patient has received adjuvant high-dose bisphosphonate as part of breast cancer management. ' +
+        'Assess fracture risk at the end of that bisphosphonate course — particularly if AI therapy is continuing.',
+      rationale:
+        'NOGG 2024 Section 7, Rec 4 (Conditional): adjuvant high-dose bisphosphonate (higher/more frequent dosing ' +
+        'than standard osteoporosis treatment) provides residual skeletal protection that may not extend through ' +
+        'continued AI therapy — fracture risk should be re-evaluated when the adjuvant course ends.',
+      source: SRC_NOGG,
+    });
+  }
+
+  // Mark riskCategory as observed (not currently used for AI branching beyond the IOF 2017 thresholds
+  // above; surfacing it here keeps the signature uniform with adtFlags and lets future IOF revisions
+  // gate on overall FRAX category without another signature change).
+  void riskCategory;
 }
 
 function affFlags(patient: PatientInput, flags: ClinicalFlag[]): void {

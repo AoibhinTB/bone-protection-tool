@@ -50,6 +50,22 @@ export function gcDurationMonths(p: PatientInput): number {
   return 0;
 }
 
+// v1.14 — count of standard FRAX clinical risk factors a patient has, *excluding* the
+// AI-/ADT-/early-menopause condition itself (those are the primary trigger, not "additional").
+// Used by the IOF 2017 AI threshold logic.
+export function aiAdditionalRiskFactorCount(p: PatientInput): number {
+  let n = 0;
+  if (p.priorFragilityFracture || p.priorHipFracture || p.priorVertebralFracture) n++;
+  if (p.parentalHipFracture) n++;
+  if (p.currentSmoker) n++;
+  if (p.alcoholUnitsPerWeek >= 21) n++;
+  if (p.bmi !== null && p.bmi < 19) n++;
+  if (p.rheumatoidArthritis) n++;
+  if (isOnGC(p)) n++;
+  if (p.secondaryOsteoporosis.length > 0) n++;
+  return n;
+}
+
 // ─── Guideline versions ────────────────────────────────────────────────────
 
 export const GUIDELINE_VERSIONS = {

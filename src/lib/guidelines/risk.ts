@@ -11,6 +11,7 @@ import {
   isOnGC,
   isOnHighDoseGC,
   gcDurationMonths,
+  aiAdditionalRiskFactorCount,
 } from './thresholds';
 import { estimateFrax } from '../fraxEstimate';
 
@@ -97,13 +98,25 @@ export function stratifyRisk(patient: PatientInput): RiskStratification {
     }
   }
 
-  // Aromatase inhibitor: T-score ≤ -1.5 warrants treatment (CTIBL guidelines / NOGG 2024 Section 7.1)
-  if (patient.aromataseInhibitorUse && patient.dexaResults) {
-    const lowest = lowestTScore(patient.dexaResults);
-    if (lowest <= -1.5) {
-      return result('high', 'red', threshold.lowerMOF, threshold.upperMOF, rawMOF, rawHip, adjustedMOF, adjustedHip, adjustments,
-        `Aromatase inhibitor use with T-score ${lowest}: lower intervention threshold (≤-1.5) applies. ` +
-        'Accelerated cancer treatment–induced bone loss (CTIBL) warrants antiresorptive treatment (NOGG 2024 Section 7.1).');
+  // Aromatase inhibitor: IOF 2017 international consensus (cited by NOGG 2024). v1.14.
+  // Replaces the previous blanket T-score ≤ −1.5 rule.
+  //   T-score < −2.0 (any site)            → high
+  //   T-score < −1.5 + ≥1 additional RF    → high
+  //   No T-score + ≥2 additional RFs       → high
+  if (patient.aromataseInhibitorUse) {
+    const lowest = patient.dexaResults ? lowestTScore(patient.dexaResults) : null;
+    const rfCount = aiAdditionalRiskFactorCount(patient);
+    const meets =
+      (lowest !== null && lowest < -2.0) ||
+      (lowest !== null && lowest < -1.5 && rfCount >= 1) ||
+      (lowest === null && rfCount >= 2);
+    if (meets) {
+      const rationale = lowest !== null && lowest < -2.0
+        ? `Aromatase inhibitor with T-score ${lowest} (< −2.0): IOF 2017 unconditional treatment threshold met (cited by NOGG 2024 Section 7.1).`
+        : lowest !== null
+        ? `Aromatase inhibitor with T-score ${lowest} (< −1.5) + ${rfCount} additional clinical risk factor${rfCount > 1 ? 's' : ''}: IOF 2017 threshold met (cited by NOGG 2024 Section 7.1).`
+        : `Aromatase inhibitor with no DEXA available + ${rfCount} additional clinical risk factors: IOF 2017 threshold met without BMD (cited by NOGG 2024 Section 7.1).`;
+      return result('high', 'red', threshold.lowerMOF, threshold.upperMOF, rawMOF, rawHip, adjustedMOF, adjustedHip, adjustments, rationale);
     }
   }
 

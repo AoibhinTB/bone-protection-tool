@@ -29,6 +29,7 @@ export const defaultPatient: PatientInput = {
   bmdDecreasedDuringPause: null,
   adtUse: false,
   aromataseInhibitorUse: false,
+  hadAdjuvantHighDoseBisphosphonate: false,
   earlyMenopause: false,
   ageAtMenopause: null,
   heightLossCm: null,
