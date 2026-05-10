@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 
 // ─── Toggle (Yes / No) ────────────────────────────────────────────────────
 
@@ -85,14 +85,25 @@ export function NumInput({
   placeholder,
   width = 'w-24',
 }: NumInputProps) {
+  // Hold the raw text the user is typing locally. While the input is focused we
+  // never let the parent re-render clobber what the user has on screen — that
+  // was the cause of the "can't delete the first digit" bug, where a parent
+  // null-fallback (e.g. age: v ?? 65) would re-seed the value mid-edit.
+  // While unfocused, the displayed text mirrors the canonical parent value.
   const [focused, setFocused] = useState(false);
+  const [text, setText] = useState<string>(value === null ? '' : String(value));
+
+  useEffect(() => {
+    if (focused) return; // don't overwrite an in-progress edit
+    setText(value === null ? '' : String(value));
+  }, [value, focused]);
 
   return (
     <div className="flex items-center gap-2">
       <input
         type="number"
         inputMode="decimal"
-        value={focused && value === 0 ? '' : (value ?? '')}
+        value={text}
         min={min}
         max={max}
         step={step}
@@ -101,10 +112,35 @@ export function NumInput({
           setFocused(true);
           e.target.select();
         }}
-        onBlur={() => setFocused(false)}
+        onBlur={() => {
+          setFocused(false);
+          // On blur, reconcile the parent value with what the user typed.
+          // Empty / invalid → null. Any valid number → that number (no clamp;
+          // callers can clamp on their own, but the standard min/max attrs
+          // already give the browser-side hint).
+          if (text === '' || text === '-') {
+            if (value !== null) onChange(null);
+          } else {
+            const n = Number(text);
+            if (!Number.isNaN(n) && n !== value) onChange(n);
+            // Snap displayed text back to the canonical numeric form so
+            // "07" displays as "7" after blur.
+            setText(Number.isNaN(n) ? '' : String(n));
+          }
+        }}
         onChange={(e) => {
           const v = e.target.value;
-          onChange(v === '' ? null : Number(v));
+          setText(v);
+          // Mirror to parent eagerly so live calculations (e.g. FRAX) update
+          // as the user types — but we no longer care if the parent rounds /
+          // floors / coerces, because our local `text` is the source of truth
+          // for what's on screen until blur.
+          if (v === '') {
+            onChange(null);
+          } else {
+            const n = Number(v);
+            if (!Number.isNaN(n)) onChange(n);
+          }
         }}
         className={`${width} border border-slate-300 rounded-md px-3 py-2.5 sm:py-1.5 text-base sm:text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent min-h-[44px] sm:min-h-0`}
       />

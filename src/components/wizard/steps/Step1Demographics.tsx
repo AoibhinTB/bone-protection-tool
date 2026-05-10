@@ -15,7 +15,11 @@ export function Step1Demographics({ data, onChange }: Props) {
       <Field label="Age" hint="Years">
         <NumInput
           value={data.age}
-          onChange={v => onChange({ age: v ?? 65 })}
+          // Coerce null → 0 only as a last resort (e.g. user blurs a blank
+          // input). NumInput's local text buffer absorbs in-progress empties
+          // so the user can clear and retype the first digit without the
+          // value snapping back. PatientInput.age requires number (not null).
+          onChange={v => onChange({ age: v ?? 0 })}
           min={18}
           max={120}
           unit="yrs"
