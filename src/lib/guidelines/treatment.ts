@@ -233,15 +233,24 @@ export function generateTreatmentOutput(
       patient.priorVertebralFracture;
 
     if (hasOsteoporosis || hasFragilityFracture) {
+      const trigger = hasOsteoporosis && hasFragilityFracture
+        ? 'osteoporosis (T ≤ −2.5) and fragility fracture'
+        : hasOsteoporosis
+        ? 'osteoporosis (T ≤ −2.5)'
+        : 'fragility fracture';
       flags.push({
         id: 'falls_risk_assessment',
         severity: 'info',
         message:
-          'Assess falls risk. Offer exercise programme to improve balance and muscle strength to those at risk.',
+          `Falls assessment indicated — ${trigger} present. NOGG 2024 Rec 7 (Strong): a falls assessment should be ` +
+          'undertaken in ALL patients with osteoporosis and ALL patients with fragility fractures. ' +
+          'Offer exercise programmes to improve balance (tai chi, Otago) and/or a combined exercise protocol to those at risk. ' +
+          'Practical measures: home hazard assessment, medication review (sedatives, antihypertensives), vision check, footwear review.',
         rationale:
-          'Falls drive most fragility fractures. Exercise programmes that improve balance and muscle strength ' +
-          '(e.g. Otago, tai chi) reduce fall and fracture risk in older adults. Combine with home-hazard review, ' +
-          'medication review for fall risk, and annual vision check. Source: NOGG 2024 Rec 5.',
+          'Falls drive most fragility fractures. The falls assessment trigger is a property of the patient population ' +
+          '(osteoporosis OR any fragility fracture), not a sub-stratification of "those at risk" — every patient meeting ' +
+          'this criterion should be assessed. Exercise programmes that improve balance and muscle strength ' +
+          '(e.g. Otago, tai chi) reduce fall and fracture risk in older adults. Source: NOGG 2024 Rec 7 (Strong).',
         source: SRC_NOGG,
       });
     }
@@ -261,17 +270,21 @@ export function generateTreatmentOutput(
     });
   }
 
-  // ── Early menopause / POI surface flag — FRAX underestimates ──
+  // ── Early menopause / POI — FRAX underestimation warning (v1.16 Step 8 — Section 10.3) ──
   if (patient.earlyMenopause) {
     flags.push({
       id: 'early_menopause_frax_underestimate',
-      severity: 'info',
+      severity: 'warning',
       message:
-        'Early menopause / POI — FRAX may underestimate fracture risk in this population; lower treatment thresholds apply.',
+        'POI / early menopause: FRAX UNDERESTIMATES fracture risk in this population. ' +
+        'FRAX was not calibrated for women who have been oestrogen-deficient since their 30s or 40s — ' +
+        'a low FRAX score does NOT rule out significant fracture risk. ' +
+        'DEXA is indicated regardless of FRAX result. Do NOT use FRAX to decide whether to investigate or treat in this population.',
       rationale:
-        'Early oestrogen loss causes cumulative bone deficit beyond what FRAX clinical risk factors capture. ' +
-        'NOGG 2024 / IOS 2024: lower BMD treatment threshold (T-score ≤−1.5) applies. HRT is first-line bone protection ' +
-        'in women under 50 (POI); first-line for women ≤60 with high fracture risk and no VTE/breast cancer history.',
+        'NOGG 2024 / IOS 2024 / NICE NG23 (Section 10.3): early oestrogen loss causes cumulative bone deficit ' +
+        'beyond what FRAX clinical risk factors capture. The lower BMD treatment threshold (T-score ≤ −1.5) applies. ' +
+        'HRT is first-line bone protection in women under 50 (POI); first-line for women ≤ 60 with high fracture risk ' +
+        'and no VTE/breast cancer history.',
       source: SRC_IOS,
     });
   }
@@ -1560,10 +1573,18 @@ function earlyMenopause(
     severity: 'info',
     message:
       'Premature ovarian insufficiency / early menopause (<45 years): HRT is first-line for bone protection until at least age 51. ' +
-      'Add bisphosphonate only if DEXA shows osteoporosis AND HRT alone is insufficient or contraindicated.',
+      'TRANSDERMAL HRT (patch / gel) is preferred over oral — lower VTE risk. ' +
+      // v1.16 Step 9 — bisphosphonate threshold loosened. Was: "only if DEXA shows osteoporosis".
+      // Corrected to: T ≤ −2.5 OR osteopenia + additional risk factors AND HRT contraindicated/declined/insufficient.
+      'Add bisphosphonate when HRT is contraindicated, declined, or insufficient AND ' +
+      'DEXA shows osteoporosis (T ≤ −2.5) OR osteopenia (T between −1.0 and −2.5) with additional clinical risk factors. ' +
+      'Do NOT wait for established osteoporosis to develop in HRT-ineligible women — apply the standard FRAX-based pathway.',
     rationale:
-      'NICE NG23 / NOGG 2024: HRT addresses all consequences of oestrogen deficiency. ' +
-      'Bisphosphonates are not first-line in POI — they do not address symptoms, cardiovascular, or cognitive effects of early oestrogen deficiency.',
+      'NICE NG23 / NOGG 2024 / Section 10.3 (v1.16): HRT addresses all consequences of oestrogen deficiency ' +
+      '(bone, cardiovascular, cognitive). Transdermal route avoids first-pass hepatic metabolism and does not ' +
+      'increase VTE risk. The previous tool requirement of established osteoporosis before adding bisphosphonate ' +
+      'in HRT-ineligible women was too restrictive — corrected to the standard FRAX-based pathway with ' +
+      'osteopenia + risk factors as a sufficient threshold.',
     source: SRC_BMS,
   });
 
@@ -1646,7 +1667,70 @@ function earlyMenopause(
     },
   };
 
-  return { recommendations: [rec], flags, referrals };
+  // v1.16 Step 9 — when HRT is contraindicated/declined/insufficient AND BMD criteria met
+  // (T ≤ −2.5 OR osteopenia + risk factors), layer in a bisphosphonate alongside HRT.
+  // We can directly observe the contraindication signals (vteHistory + breastCancerHistory)
+  // and the BMD threshold; "declined" and "insufficient" cannot be inferred from inputs, but the
+  // surfaced flag (poi_hrt_first_line) tells the GP to add a BP in those scenarios.
+  const recommendations: TreatmentRecommendation[] = [rec];
+  const tScores = patient.dexaResults
+    ? [
+        patient.dexaResults.lumbarSpineTScore,
+        patient.dexaResults.totalHipTScore,
+        patient.dexaResults.femoralNeckTScore,
+      ].filter((t): t is number => t != null)
+    : [];
+  const lowestT = tScores.length > 0 ? Math.min(...tScores) : null;
+  const hasOsteoporosis = lowestT !== null && lowestT <= -2.5;
+  const additionalRiskFactors = aiAdditionalRiskFactorCount(patient);
+  const hasOsteopeniaPlusRF =
+    lowestT !== null && lowestT > -2.5 && lowestT <= -1.0 && additionalRiskFactors >= 1;
+  const hrtContraindicated =
+    patient.vteHistory && patient.breastCancerHistory; // both is the conservative HRT-ineligible signal
+  const bpCriteriaMet = hasOsteoporosis || hasOsteopeniaPlusRF;
+
+  if (bpCriteriaMet && hrtContraindicated) {
+    flags.push({
+      id: 'poi_bp_layered_hrt_ineligible',
+      severity: 'warning',
+      message:
+        `POI patient with HRT-ineligible signals (VTE + breast cancer history) and ${
+          hasOsteoporosis ? `osteoporosis (T ${lowestT})` : `osteopenia (T ${lowestT}) + ${additionalRiskFactors} risk factor${additionalRiskFactors > 1 ? 's' : ''}`
+        }: add bisphosphonate as primary bone protection (HRT is not the appropriate choice given combined contraindications).`,
+      rationale:
+        'NOGG 2024 / NICE NG23 / Section 10.3 (v1.16): when HRT is contraindicated by both VTE history and breast ' +
+        'cancer history, bisphosphonate is the primary bone protection. T-score ≤ −2.5 OR osteopenia + clinical risk ' +
+        'factors is sufficient to indicate treatment — do not require established osteoporosis.',
+      source: SRC_BMS,
+    });
+    const egfr = resolveEGFR(patient);
+    if (canUse('alendronate', egfr) && (egfr === null || egfr > RENAL_LIMITS.alendronate.ci)) {
+      recommendations.push(withBPInitiationContext({
+        ...alendronate(),
+        priority: 'first-line',
+        rationale:
+          'Primary bone protection in HRT-ineligible POI (VTE + breast cancer history). ' +
+          'BMD criterion met (osteoporosis OR osteopenia + risk factors). HSE MMP first-line.',
+      }, patient));
+    }
+  } else if (bpCriteriaMet) {
+    // HRT remains first-line but flag bisphosphonate as a "if HRT insufficient/declined" option.
+    flags.push({
+      id: 'poi_bp_consider_if_hrt_insufficient',
+      severity: 'info',
+      message:
+        `POI patient with ${
+          hasOsteoporosis ? `osteoporosis (T ${lowestT})` : `osteopenia (T ${lowestT}) + ${additionalRiskFactors} risk factor${additionalRiskFactors > 1 ? 's' : ''}`
+        }: HRT remains first-line. Add a bisphosphonate (e.g. alendronate) if HRT is declined, contraindicated, or insufficient to arrest bone loss.`,
+      rationale:
+        'Section 10.3 (v1.16): bisphosphonate addition criteria in POI are T-score ≤ −2.5 OR osteopenia + ' +
+        'additional risk factors AND HRT contraindicated/declined/insufficient. The "declined / insufficient" ' +
+        'limb cannot be inferred from inputs and is surfaced as a clinician decision point.',
+      source: SRC_BMS,
+    });
+  }
+
+  return { recommendations, flags, referrals };
 }
 
 // v1.13: GIOP pathway applies to any current GC user in scope (postmenopausal women / men ≥50).
@@ -2182,6 +2266,16 @@ function getSupplements(patient: PatientInput): SupplementRecommendation[] {
     contextBullets.push('CKD: follow KDIGO CKD-MBD guidance; coordinate with nephrology');
   }
   const safetyCeilingBullet = 'Safety ceiling: do not exceed 4,000 IU/day long-term without specialist supervision';
+  // v1.16 Step 3 — large intermittent doses ≥60,000 IU as a single/bolus dose are NOT advised
+  // (NOGG 2024 Evidence Ia). The loading protocols in this tool use divided weekly doses to avoid this.
+  const intermittentBolusWarningBullet =
+    'Do NOT use routine large intermittent vitamin D doses ≥60,000 IU as a single or bolus dose — ' +
+    'associated with increased fracture and falls risk (NOGG 2024 Evidence Ia). ' +
+    'The loading protocols above use divided weekly doses specifically to avoid this; do not substitute with an equivalent single bolus.';
+  // v1.16 Step 2 — Vit D-alone effect framing: does not reduce fracture incidence, may reduce falls.
+  const fractureFallsNuanceBullet =
+    'Vitamin D alone does not reduce fracture incidence, but may reduce falls risk. ' +
+    'It must be combined with pharmacological treatment where indicated (NOGG 2024 Evidence Ib).';
   const calciumWatchBullet =
     (ckd || hyperPTH)
       ? 'Check adjusted calcium 1–2 months after high-dose loading (CKD / hyperparathyroidism)'
@@ -2196,6 +2290,8 @@ function getSupplements(patient: PatientInput): SupplementRecommendation[] {
       'Do NOT administer denosumab until Vit D ≥50 nmol/L',
       ...contextBullets,
       safetyCeilingBullet,
+      intermittentBolusWarningBullet,
+      fractureFallsNuanceBullet,
     ];
   } else if (vitD < BLOOD_RANGES.vitaminD.deficient) {
     vitDHeadline = `Severe deficiency (${vitD} nmol/L) — loading required`;
@@ -2208,6 +2304,8 @@ function getSupplements(patient: PatientInput): SupplementRecommendation[] {
       ...(calciumWatchBullet ? [calciumWatchBullet] : []),
       ...contextBullets,
       safetyCeilingBullet,
+      intermittentBolusWarningBullet,
+      fractureFallsNuanceBullet,
     ];
   } else if (vitD < BLOOD_RANGES.vitaminD.insufficient) {
     vitDHeadline = `Insufficient (${vitD} nmol/L) — start 800–2,000 IU/day`;
@@ -2219,6 +2317,8 @@ function getSupplements(patient: PatientInput): SupplementRecommendation[] {
       `Recheck at ~3 months; target ≥${BLOOD_RANGES.vitaminD.target} nmol/L`,
       ...contextBullets,
       safetyCeilingBullet,
+      intermittentBolusWarningBullet,
+      fractureFallsNuanceBullet,
     ];
   } else if (vitD < BLOOD_RANGES.vitaminD.target) {
     vitDHeadline = `Adequate (${vitD} nmol/L) — maintenance only`;
@@ -2229,6 +2329,8 @@ function getSupplements(patient: PatientInput): SupplementRecommendation[] {
       'Recheck in 6–12 months',
       ...contextBullets,
       safetyCeilingBullet,
+      intermittentBolusWarningBullet,
+      fractureFallsNuanceBullet,
     ];
   } else {
     vitDHeadline = `Target met (${vitD} nmol/L) — maintenance only`;
@@ -2239,6 +2341,8 @@ function getSupplements(patient: PatientInput): SupplementRecommendation[] {
       'No loading required',
       ...contextBullets,
       safetyCeilingBullet,
+      intermittentBolusWarningBullet,
+      fractureFallsNuanceBullet,
     ];
   }
 
@@ -2254,36 +2358,57 @@ function getSupplements(patient: PatientInput): SupplementRecommendation[] {
   });
 
   // ── Calcium ──────────────────────────────────────────────────────────
+  // v1.16 — priority-groups clinical note (NOGG 2024 Rec 26).
+  const priorityGroupsBullet =
+    'Priority groups for active supplementation (more likely to need it): housebound patients, ' +
+    'residents of residential or nursing care, and patients with intestinal malabsorption ' +
+    '(coeliac disease, IBD, bariatric surgery).';
+  // v1.16 — kidney stone safety statement replaces previous (incorrect) cardiovascular claim.
+  // NOGG 2024 (Evidence Ia): Ca + Vit D may increase kidney stone risk but does NOT increase
+  // cardiovascular disease or cancer risk.
+  const safetyBullet =
+    'Safety: calcium and vitamin D supplements may increase the risk of kidney stones. ' +
+    'They do NOT increase the risk of cardiovascular disease or cancer (NOGG 2024 Evidence Ia).';
+
   if (isGIOPPatient) {
     sups.push({
       supplement: 'calcium',
-      headline: 'GIOP: 1000–1500 mg/day total intake',
+      headline: 'GIOP: 1000–1500 mg/day total intake (target); 700 mg/day Irish/UK RNI minimum floor',
       bullets: [
         'Higher requirement on glucocorticoids (reduced GI absorption, increased renal loss)',
         'Dietary sources first; supplement the deficit',
         'Combined Ca + D3 product if needed (Calcichew D3 Forte, Adcal-D3)',
         'Avoid >500–600 mg/day supplement on top of an adequate diet',
+        priorityGroupsBullet,
+        safetyBullet,
       ],
       rationale:
         'Glucocorticoids reduce GI calcium absorption and increase renal calcium excretion — ' +
-        'higher intake is needed (NOGG 2024 Rec 22; IOS 2024).',
+        'higher intake is needed (NOGG 2024 Rec 22; IOS 2024). The Irish/UK RNI of 700 mg/day is ' +
+        'the population minimum adequate intake; the 1000–1500 mg/day GIOP target reflects the ' +
+        'higher requirement under glucocorticoid exposure.',
     });
   } else {
     sups.push({
       supplement: 'calcium',
-      headline: 'Target 1200 mg/day total intake',
+      headline: 'Target 1200 mg/day total intake; 700 mg/day Irish/UK RNI minimum floor',
       bullets: [
+        'Minimum (Irish/UK RNI) 700 mg/day; osteoporosis management target 1200 mg/day total from all sources',
         'Dietary sources preferred — dairy ~300 mg/portion, green veg 100–160 mg/portion, fortified foods',
         'Supplement only the deficit between dietary intake and 1200 mg/day target',
         'Typical supplement dose: 250–600 mg/day depending on diet',
         'Maximum: avoid >500–600 mg/day supplement on top of an adequate diet',
-        'CV-risk caveat: excess supplement (not dietary calcium) linked to cardiovascular events (Bolland BMJ 2010/11)',
+        priorityGroupsBullet,
+        safetyBullet,
         'Note: serum calcium does NOT reflect dietary adequacy — assess intake directly',
       ],
       rationale:
-        'IOS 2024: 1200 mg/day total intake target for adults ≥50 with bone loss or osteoporosis. ' +
-        'Supplement only if dietary intake is below target. Excess supplementation carries cardiovascular risk ' +
-        'evidence not seen with dietary calcium (NOGG 2024 Rec 26).',
+        'IOS 2024: 1200 mg/day total intake target for adults ≥50 with bone loss or osteoporosis; ' +
+        'the 700 mg/day Irish/UK RNI is the population minimum adequate intake (the floor below which ' +
+        'deficiency is likely). Supplement only if dietary intake is below target. ' +
+        'NOGG 2024 (Evidence Ia): calcium ± vitamin D supplementation may increase kidney stone risk ' +
+        'but does NOT increase cardiovascular disease or cancer risk — the previously cited Bolland ' +
+        'cardiovascular signal has been superseded by NOGG 2024 evidence.',
     });
   }
 

@@ -230,18 +230,23 @@ function buildSummary(patient: PatientInput, riskCategory: RiskCategory): string
 }
 
 function lifestyleAdvice(patient: PatientInput): string[] {
+  // v1.16 Step 6 — healthy balanced diet recommendation as first item (NOGG 2024 Strong, Section 12).
   const advice: string[] = [
+    'Advise a healthy, nutrient-rich balanced diet (NOGG 2024 Strong). Adequate dietary calcium is the preferred approach — supplement only the gap between dietary intake and the 1200 mg/day target.',
     'Progressive resistance training and weight-bearing exercise ≥30 min most days (strength training, walking, dancing, back extensor exercises) per NOGG 2024 — progressive load is key to bone stimulation',
-    'Fall prevention: balance training (tai chi / Otago programme for age ≥65), home hazard assessment, annual vision check, medication review for fall risk',
-    'Calcium: healthy diet rich in dairy, leafy greens, fortified foods (700–1200 mg/day from food preferred over supplementation)',
-    'Vitamin D: sunlight exposure, oily fish, fortified foods; supplement in most Irish adults given latitude',
+    // v1.16 Step 7 — falls assessment scope: ALL patients with osteoporosis or any fragility
+    // fracture (not only those identified as at risk). Wording aligned with NOGG 2024 Rec 7.
+    'Falls prevention: a falls assessment should be undertaken in ALL patients with osteoporosis (T-score ≤ −2.5) and ALL patients with any fragility fracture (NOGG 2024 Rec 7 — Strong). Those at risk should be offered exercise programmes to improve balance and/or a combined exercise protocol (tai chi, Otago). Practical measures: home hazard assessment, medication review (sedatives, antihypertensives), vision check, footwear review.',
+    'Calcium: minimum 700 mg/day (Irish/UK RNI) — target 1200 mg/day total from all sources. Dairy, leafy greens, fortified foods preferred over supplementation.',
+    'Vitamin D: sunlight exposure, oily fish, fortified foods; supplement in most Irish adults given latitude. Vitamin D alone does not reduce fracture incidence but may reduce falls risk (NOGG 2024 Evidence Ib) — combine with pharmacological treatment where indicated.',
   ];
 
   if (patient.currentSmoker || patient.vaping) {
     advice.push('Smoking/vaping cessation: smoking is a FRAX risk factor; vaping is a probable risk factor (NOGG 2024 update). Smoking directly impairs bone metabolism.');
   }
+  // v1.16 — alcohol: NOGG 2024 Strong = ≤2 units/day (≤14 units/week).
   if (patient.alcoholUnitsPerWeek >= 14) {
-    advice.push('Reduce alcohol to <14 units/week — threshold for FRAX is ≥3 units/day; excess alcohol increases fall risk and suppresses osteoblast function.');
+    advice.push('Restrict alcohol to ≤2 units/day (≤14 units/week) — NOGG 2024 Strong. The FRAX risk threshold is ≥3 units/day; excess alcohol increases fall risk and suppresses osteoblast function.');
   }
   if (patient.bmi !== null && patient.bmi < 18.5) {
     advice.push('Low BMI (<18.5) is a FRAX risk factor — optimise nutritional intake and address any underlying cause.');
