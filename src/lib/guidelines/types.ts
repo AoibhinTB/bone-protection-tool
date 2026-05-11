@@ -388,6 +388,15 @@ export interface RiskStratification {
 export interface ClinicalDecision {
   patientSummary: string;
   outOfScope: boolean;
+  /**
+   * v1.31 — true iff the engine has placed at least one pharmacological agent in
+   * treatmentRecommendations. Used by Section 17.5 output-gating: Tier 1/2 bloods,
+   * ONJ pre-treatment dental, denosumab pre-dose Ca, AFF prodrome, sequential
+   * therapy planning, drug-specific patient education, monitoring schedule, and
+   * Vit D / calcium prescription frameworks all suppress when this is false
+   * (unless an independent trigger applies — see Section 17.5 for exceptions).
+   */
+  treatmentRecommended: boolean;
   riskStratification: RiskStratification;
   riskFactorsIdentified: RiskFactorEffect[]; // factors that materially changed the recommendation
   investigationsNeeded: InvestigationRecommendation[];

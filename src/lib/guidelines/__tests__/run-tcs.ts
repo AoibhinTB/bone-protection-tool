@@ -2086,7 +2086,80 @@ function tc76(): TCResult {
   const msg = (block?.message ?? '').toLowerCase();
   check(failures, 'message names patient value (40 nmol/L)', msg.includes('40 nmol/l'));
   check(failures, 'message references the 50 nmol/L threshold', msg.includes('50'));
-  return { name: 'TC76 — Step 5 denosumab Vit D block, isolated from Step 2', passed: failures.length === 0, failures, decision };
+  return { name: 'TC77 — Step 5 denosumab Vit D block, isolated from Step 2', passed: failures.length === 0, failures, decision };
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// v1.31 NEW TEST CASE — Output gating by risk category (Section 17.5)
+// ═══════════════════════════════════════════════════════════════════════════
+// NOTE: my previous TC76 (Vit D step-isolation) is renumbered to TC77 in the
+// runner array so the user-requested TC76 number matches the spec.
+
+// ─── TC76 (v1.31) ─────────────────────────────────────────────────────────
+// 62F low-risk patient. No fractures, no FRAX-triggering risk factors,
+// eGFR 75, Vit D 70 nmol/L, calcium 2.32 mmol/L, no GC, no secondary causes,
+// BMI 24. Expected: risk = LOW; treatmentRecommended === false; empty
+// recommendation list. Output contains lifestyle advice + reassessment +
+// risk classification (green). Output does NOT contain any flag whose id
+// matches a treatment-adjacent substring, and does NOT contain Tier 1 or
+// Tier 2 blood entries.
+function tc76_v131(): TCResult {
+  const failures: string[] = [];
+  const patient = basePatient({
+    age: 62,
+    sex: 'female',
+    bmi: 24,
+    fraxMOFPercent: null,
+    fraxHipPercent: null,
+    dexaResults: null,
+    renalFunction: { egfr: 75 },
+    bloodResults: {
+      adjustedCalciumMmol: 2.32,
+      vitaminDNmol: 70,
+      egfr: 75,
+      alp: 80,
+      tshMUL: 2.0,
+      hbGramsPerLitre: 135,
+      esrOrCrp: 'normal',
+    },
+  });
+  const decision = runClinicalDecision(patient);
+
+  // Risk and gating booleans
+  check(failures, 'risk = low',
+    decision.riskStratification.category === 'low', `got ${decision.riskStratification.category}`);
+  check(failures, 'treatmentRecommended === false',
+    decision.treatmentRecommended === false, `got ${decision.treatmentRecommended}`);
+  check(failures, 'recommendation list is empty',
+    decision.treatmentRecommendations.length === 0);
+
+  // Independent outputs that MUST still fire
+  check(failures, 'lifestyle advice present',
+    decision.lifestyleAdvice.length > 0);
+  check(failures, 'reassessment / review schedule present',
+    typeof decision.reviewSchedule === 'string' && decision.reviewSchedule.length > 0);
+  check(failures, 'risk classification (green) present',
+    decision.riskStratification.trafficLight === 'green');
+
+  // Treatment-adjacent flag IDs that must NOT be in the output
+  const forbidden = ['pre_treatment', 'pre_dose', 'onj', 'aff_prodrome',
+                     'sequential_therapy', 'denosumab_calcium_check',
+                     'drug_education', 'monitoring_schedule'];
+  for (const sub of forbidden) {
+    const offending = decision.flags.find(f => f.id.includes(sub));
+    check(failures, `no flag id contains '${sub}'`, !offending,
+      offending ? `found ${offending.id}` : '');
+  }
+
+  // Tier 1 and Tier 2 bloods must NOT be in investigationsNeeded
+  const tier1or2 = decision.investigationsNeeded.filter(
+    inv => inv.tier === 1 || inv.tier === 2,
+  );
+  check(failures, 'no Tier 1 or Tier 2 blood entries',
+    tier1or2.length === 0,
+    tier1or2.length > 0 ? `found ${tier1or2.map(i => i.investigation).join(', ')}` : '');
+
+  return { name: 'TC76 — v1.31 output gating, low-risk patient', passed: failures.length === 0, failures, decision };
 }
 
 // ─── Runner ───────────────────────────────────────────────────────────────
@@ -2104,7 +2177,10 @@ const TCs: Array<() => TCResult> = [
   tc64, tc65, tc66, tc67, tc68, tc69, tc70, tc71, tc72, tc73,
   // v1.30 — denosumab soft prompt
   tc74, tc75,
-  // v1.30 follow-up — Vit D step-isolation test
+  // v1.31 — output gating by risk category (low-risk patient)
+  tc76_v131,
+  // v1.30 follow-up — Vit D step-isolation test (renumbered to TC77 so the
+  // v1.31 spec's TC76 number lines up with the runner)
   tc76,
 ];
 

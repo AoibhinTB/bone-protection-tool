@@ -63,16 +63,110 @@ export function runClinicalDecision(patient: PatientInput): ClinicalDecision {
 
   const riskFactorsIdentified = generateRiskFactorsIdentified(patient, { riskStratification, flags });
 
+  // ── v1.31 Section 17.5 — Output gating by risk category ───────────────
+  // Treatment-adjacent content suppresses when no drug is being recommended,
+  // unless an independent trigger applies (e.g. patient currently on the drug,
+  // Vit D entered as abnormal, secondary-cause workup indication).
+  const treatmentRecommended = recommendations.length > 0;
+  // (onAntiresorptive flag was reserved for the monitoring-schedule gate, but
+  // monitoring lives inside each TreatmentRecommendation card — it self-gates
+  // because cards only render when treatmentRecommendations is non-empty.
+  // Dropped to avoid an unused-variable lint error.)
+  const onDenosumab =
+    patient.currentTreatment?.currentlyOn === true &&
+    patient.currentTreatment.agent === 'denosumab';
+  const onBP =
+    patient.currentTreatment?.currentlyOn === true &&
+    (patient.currentTreatment.agent === 'alendronate' ||
+     patient.currentTreatment.agent === 'risedronate' ||
+     patient.currentTreatment.agent === 'ibandronate' ||
+     patient.currentTreatment.agent === 'zoledronate');
+  const vitDAbnormal =
+    patient.bloodResults?.vitaminDNmol !== null &&
+    patient.bloodResults?.vitaminDNmol !== undefined &&
+    patient.bloodResults.vitaminDNmol < 75;
+
+  // 1) Investigations — gate Tier 1 and Tier 2 on treatmentRecommended. Tier 3
+  //    fires on its own (secondary-cause workup). DEXA / VFA / FRAX entries
+  //    have no tier and fire on independent indications.
+  const gatedInvestigations = investigationsNeeded.filter(inv => {
+    if (inv.tier === 1 || inv.tier === 2) return treatmentRecommended;
+    return true;
+  });
+
+  // 2) Flags — suppress treatment-adjacent prompts when no drug is being
+  //    recommended AND the corresponding independent trigger isn't met.
+  const gatedFlags = flags.filter(f => {
+    // ONJ pre-treatment dental advice — gated on treatmentRecommended.
+    // (Patients already on antiresorptive get ONJ guidance via their
+    // recipe's monitoring section, not via this pre-start flag.)
+    if (f.id === 'dental_check_pre_treatment') return treatmentRecommended;
+    // Sequential therapy planning prompt (Section 17.5, widened per v1.31
+    // follow-up): fires when ANY anabolic is in recommendations, OR the
+    // patient is currently on denosumab, teriparatide, or romosozumab.
+    // The literal Section 17.5 row says "anabolic in recs OR currently on
+    // denosumab" but that excludes the clinically obvious case of a patient
+    // mid-course on romosozumab or teriparatide — both have lifetime / fixed-
+    // duration constraints and a mandatory follow-on antiresorptive, so the
+    // prompt is essential for those patients. Confirmed with the clinical
+    // lead; the spec text should be amended in the next revision.
+    if (f.id === 'sequential_therapy_plan_required') {
+      const anabolicInRecs = recommendations.some(r =>
+        r.agent === 'teriparatide' || r.agent === 'romosozumab' || r.agent === 'abaloparatide',
+      );
+      const onAnabolic =
+        patient.currentTreatment?.currentlyOn === true &&
+        (patient.currentTreatment.agent === 'teriparatide' ||
+         patient.currentTreatment.agent === 'romosozumab' ||
+         patient.currentTreatment.agent === 'abaloparatide');
+      return anabolicInRecs || onDenosumab || onAnabolic;
+    }
+    // Denosumab cessation / timing / sequential alerts — only relevant when
+    // denosumab is in recommendations OR patient is currently on denosumab.
+    // (Recipe pushes alerts when monthsSinceLastDose is set; without a
+    // denosumab record on the patient, these never fire — but defence-
+    // in-depth filter here.)
+    if (f.id.startsWith('denosumab_') &&
+        f.id !== 'denosumab_vitd_block' /* Vit D block fires on the abnormal-Vit-D trigger */) {
+      const denoInRecs = recommendations.some(r => r.agent === 'denosumab');
+      return denoInRecs || onDenosumab;
+    }
+    // AFF prodrome / long-duration surveillance — only when on (or being
+    // recommended) a long-term bisphosphonate.
+    if (f.id === 'aff_prodrome_urgent' || f.id === 'aff_long_duration_surveillance') {
+      const bpInRecs = recommendations.some(r =>
+        r.agent === 'alendronate' || r.agent === 'risedronate' ||
+        r.agent === 'ibandronate' || r.agent === 'zoledronate',
+      );
+      return bpInRecs || onBP;
+    }
+    // All other flags fire on their own clinical triggers (risk-factor
+    // double-counts, blood-result alerts, life-expectancy caveat, falls
+    // assessment, etc.) — pass through.
+    return true;
+  });
+
+  // 3) Supplements — when no drug is being recommended:
+  //    - Calcium supplementation framework (per-mg prescription) → suppress
+  //      (low-risk patients get dietary calcium guidance from lifestyleAdvice).
+  //    - Vit D tiered protocol → keep ONLY when Vit D entered as abnormal.
+  const gatedSupplements = supplements.filter(s => {
+    if (s.supplement === 'calcium') return treatmentRecommended;
+    if (s.supplement === 'vitamin_d') return treatmentRecommended || vitDAbnormal;
+    return true;
+  });
+
   return {
     patientSummary:           buildSummary(patient, riskCategory),
     outOfScope:               false,
+    treatmentRecommended,
     riskStratification,
     riskFactorsIdentified,
-    investigationsNeeded,
-    flags,
+    investigationsNeeded:     gatedInvestigations,
+    flags:                    gatedFlags,
     treatmentRecommendations: recommendations,
     referrals:                deduplicatedReferrals,
-    supplements,
+    supplements:              gatedSupplements,
     lifestyleAdvice:          lifestyleAdvice(patient),
     reviewSchedule:           reviewSchedule(riskCategory),
     guidelinesUsed: [
@@ -163,6 +257,7 @@ function buildOutOfScopeDecision(
   return {
     patientSummary: `${patient.age}yo ${patient.sex} — out of scope for standard algorithm`,
     outOfScope: true,
+    treatmentRecommended: false,
     riskStratification: {
       category: 'out_of_scope',
       trafficLight: 'grey',
