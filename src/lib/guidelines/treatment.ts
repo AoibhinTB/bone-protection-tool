@@ -1071,14 +1071,20 @@ export function generateTreatmentOutput(
     });
   }
 
-  // ── Existing treatment — sequencing logic ──
+  // ── Recommendation generation ──
+  // v1.30 refactor — both sequencing (established treatment) and initiateTherapy
+  // (new treatment) feed into the same post-recommendation flag blocks below
+  // (refusal filter, male-licensing filter, raloxifene filter, soft prompts, etc.).
+  // Previously the sequencing path returned early and skipped these blocks.
+  let recommendations: TreatmentRecommendation[];
   if (patient.currentTreatment) {
     const seq = sequencing(patient, riskCategory, riskStratification, flags, referrals);
-    return { ...seq, supplements };
+    recommendations = seq.recommendations;
+    // sequencing() shares the same flags/referrals arrays by reference, so any
+    // flags/referrals it pushed are already in the parent arrays.
+  } else {
+    recommendations = initiateTherapy(patient, riskCategory, flags, referrals);
   }
-
-  // ── New treatment initiation ──
-  let recommendations = initiateTherapy(patient, riskCategory, flags, referrals);
 
   // ── Patient refuses injections — strip injection-based agents from output ──
   if (patient.refusesInjections) {
@@ -1203,6 +1209,46 @@ export function generateTreatmentOutput(
           'Hip-fracture RCT evidence supports alendronate, risedronate, zoledronate, and denosumab.',
         source: SRC_NOGG,
       });
+    }
+  }
+
+  // ── v1.30 — Denosumab second-line soft prompt ──
+  // Informational nudge (NOT a warning, NOT a blocker) that surfaces when the
+  // engine has produced a denosumab recommendation but the patient does NOT
+  // have any of the four bisphosphonate contraindications that legitimately
+  // route to denosumab as first-line. Spec requirements:
+  //   * info severity (not warning / not urgent)
+  //   * fires alongside the denosumab recommendation, not instead of it
+  //   * does NOT fire when ANY of: eGFR <35; AFF history; oesophageal disease;
+  //     documented GI intolerance to BOTH oral AND IV bisphosphonate
+  //   * does NOT fire when the patient is already established on denosumab
+  //     (continuation scenario — the prescribing decision has been made)
+  {
+    const denoInRecs = recommendations.some(r => r.agent === 'denosumab');
+    const alreadyOnDenosumab =
+      patient.currentTreatment?.agent === 'denosumab' &&
+      patient.currentTreatment.currentlyOn === true;
+    if (denoInRecs && !alreadyOnDenosumab) {
+      const egfr = resolveEGFR(patient);
+      const renalCI = egfr !== null && egfr <= RENAL_LIMITS.alendronate.ci;
+      const affCI = hasAFFHistory(patient);
+      const oesophCI = patient.oesophagealDiseaseHistory === true;
+      const giBothCI = hasGIIntoleranceToBothOralAndIVBP(patient);
+      const anyCI = renalCI || affCI || oesophCI || giBothCI;
+      if (!anyCI) {
+        flags.push({
+          id: 'denosumab_second_line_soft_prompt',
+          severity: 'info',
+          message:
+            'Denosumab is second-line for this patient on cost-effectiveness grounds — bisphosphonate is the recommended first-line treatment per NOGG 2024. ' +
+            'If prescribing denosumab first-line, consider documenting your clinical rationale in the patient record.',
+          rationale:
+            'NOGG 2024 Strong (v1.30): bisphosphonate is preferred first-line as the most cost-effective antiresorptive; denosumab is the alternative when bisphosphonate is contraindicated. ' +
+            'This soft prompt surfaces only when denosumab is recommended in the absence of the four standard bisphosphonate contraindications (eGFR <35, AFF history, oesophageal disease, GI intolerance to BOTH oral and IV bisphosphonate). ' +
+            'It is informational — it does not block the recommendation. A documented clinical rationale (e.g. adherence, patient preference, formulation issues) supports the prescribing decision.',
+          source: SRC_NOGG,
+        });
+      }
     }
   }
 
@@ -3515,4 +3561,22 @@ function hasPreviousGIIntoleranceToBP(patient: PatientInput): boolean {
   return patient.previousTreatments.some(
     t => isBisphosphonate(t.agent) && t.reasonStopped === 'gi_intolerance',
   );
+}
+
+// v1.30 — stricter check than hasPreviousGIIntoleranceToBP. Returns true ONLY
+// when the patient has GI intolerance documented to BOTH an oral bisphosphonate
+// AND an IV bisphosphonate. Used by the denosumab-second-line soft prompt to
+// avoid firing when the patient has a legitimate CI to all bisphosphonates.
+// Note: the schema does not distinguish oral vs IV ibandronate; for this
+// stricter test ibandronate is counted on the oral side (IV ibandronate
+// rarely causes GI intolerance). IV class is therefore zoledronate only.
+function hasGIIntoleranceToBothOralAndIVBP(patient: PatientInput): boolean {
+  const oralGI = patient.previousTreatments.some(
+    t => (t.agent === 'alendronate' || t.agent === 'risedronate' || t.agent === 'ibandronate') &&
+         t.reasonStopped === 'gi_intolerance',
+  );
+  const ivGI = patient.previousTreatments.some(
+    t => t.agent === 'zoledronate' && t.reasonStopped === 'gi_intolerance',
+  );
+  return oralGI && ivGI;
 }

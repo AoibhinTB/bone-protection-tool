@@ -1978,6 +1978,73 @@ function tc73(): TCResult {
   return { name: 'TC73 — ibandronate + age ≥75: low-hip-efficacy warning', passed: failures.length === 0, failures, decision };
 }
 
+// ═══════════════════════════════════════════════════════════════════════════
+// v1.30 NEW TEST CASES (TC74–TC75) — denosumab second-line soft prompt
+// ═══════════════════════════════════════════════════════════════════════════
+
+// ─── TC74 ─────────────────────────────────────────────────────────────────
+// Denosumab in recommendations WITHOUT a bisphosphonate contraindication.
+// The natural firing path: VHR patient currently on long-term alendronate
+// where the sequencing logic offers denosumab as a switch option (line ~1759).
+// eGFR 70, no AFF, no oesophageal disease, no GI intolerance to oral+IV.
+// Soft prompt should fire at INFO severity.
+function tc74(): TCResult {
+  const failures: string[] = [];
+  const patient = basePatient({
+    age: 71,
+    sex: 'female',
+    priorFragilityFracture: true,
+    priorVertebralFracture: true,
+    numberOfPriorFractures: 2,
+    recentVertebralFractureYears: 0.5,
+    dexaResults: { lumbarSpineTScore: -3.6, totalHipTScore: -3.0, femoralNeckTScore: -3.0, forearmTScore: null },
+    renalFunction: { egfr: 70 },
+    bloodResults: { adjustedCalciumMmol: 2.32, vitaminDNmol: 70, egfr: 70, alp: 80, tshMUL: 2.0, hbGramsPerLitre: 135, esrOrCrp: 'normal' },
+    currentTreatment: { agent: 'alendronate', durationMonths: 84, reasonStopped: null, currentlyOn: true, monthsSinceLastDose: 0 },
+  });
+  const decision = runClinicalDecision(patient);
+  check(failures, 'risk = very_high',
+    decision.riskStratification.category === 'very_high', `got ${decision.riskStratification.category}`);
+  check(failures, 'denosumab in recommendations (BP-to-denosumab switch)',
+    hasAgent(decision, 'denosumab'));
+  check(failures, 'denosumab_second_line_soft_prompt fires',
+    hasFlag(decision, 'denosumab_second_line_soft_prompt'));
+  const prompt = decision.flags.find(f => f.id === 'denosumab_second_line_soft_prompt');
+  check(failures, 'prompt severity = info (not warning, not urgent)',
+    prompt?.severity === 'info', `got ${prompt?.severity}`);
+  check(failures, 'message states denosumab is second-line on cost-effectiveness grounds',
+    hasFlagText(decision, 'second-line') && hasFlagText(decision, 'cost-effectiveness'));
+  check(failures, 'message invites documenting clinical rationale',
+    hasFlagText(decision, 'documenting your clinical rationale') ||
+    hasFlagText(decision, 'document') && hasFlagText(decision, 'rationale'));
+  return { name: 'TC74 — denosumab soft prompt fires (no BP CI present)', passed: failures.length === 0, failures, decision };
+}
+
+// ─── TC75 ─────────────────────────────────────────────────────────────────
+// Same VHR shape but with eGFR 30 → renal CI present → soft prompt MUST NOT fire.
+// Denosumab is still recommended (the engine routes via renal CI), but the
+// prompt is suppressed because the prescribing decision is justified.
+function tc75(): TCResult {
+  const failures: string[] = [];
+  const patient = basePatient({
+    age: 71,
+    sex: 'female',
+    priorFragilityFracture: true,
+    priorVertebralFracture: true,
+    numberOfPriorFractures: 2,
+    recentVertebralFractureYears: 0.5,
+    dexaResults: { lumbarSpineTScore: -3.6, totalHipTScore: -3.0, femoralNeckTScore: -3.0, forearmTScore: null },
+    renalFunction: { egfr: 30 },
+    bloodResults: { adjustedCalciumMmol: 2.32, vitaminDNmol: 70, egfr: 30, alp: 80, tshMUL: 2.0, hbGramsPerLitre: 130, esrOrCrp: 'normal' },
+  });
+  const decision = runClinicalDecision(patient);
+  check(failures, 'denosumab recommended (renal CI to BPs)',
+    hasAgent(decision, 'denosumab'));
+  check(failures, 'soft prompt does NOT fire (renal CI present)',
+    !hasFlag(decision, 'denosumab_second_line_soft_prompt'));
+  return { name: 'TC75 — eGFR <35: soft prompt SUPPRESSED (CI justifies denosumab)', passed: failures.length === 0, failures, decision };
+}
+
 // ─── Runner ───────────────────────────────────────────────────────────────
 
 const TCs: Array<() => TCResult> = [
@@ -1991,6 +2058,8 @@ const TCs: Array<() => TCResult> = [
   // Engine-coverage extras (these were TC53–TC62 in the pre-v1.4 suite;
   // renumbered to TC64–TC73 to free TC53–TC63 for the v1.4 alignment).
   tc64, tc65, tc66, tc67, tc68, tc69, tc70, tc71, tc72, tc73,
+  // v1.30 — denosumab soft prompt
+  tc74, tc75,
 ];
 
 const results = TCs.map(fn => fn());
