@@ -22,6 +22,24 @@ export function Step6Investigations({ data, onChange }: Props) {
         <Term term="FRAX">FRAX</Term>
       </SectionHeading>
 
+      {/* Embedded FRAX calculator — opens the in-app iframe page in a new tab.
+          Sits above the auto-estimate / manual-override blocks so the clinician
+          can reach the calculator without leaving the tool. */}
+      <div className="mb-3 flex flex-wrap items-center gap-2">
+        <a
+          href="/frax-test"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="inline-flex items-center gap-1.5 rounded-md bg-indigo-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-indigo-700 active:bg-indigo-800"
+        >
+          Open FRAX calculator
+          <span aria-hidden="true">↗</span>
+        </a>
+        <span className="text-[11px] text-slate-500">
+          Embedded view of frax.shef.ac.uk — use country code 49 for Ireland.
+        </span>
+      </div>
+
       {data.bornOutsideIreland ? (
         // Non-Irish: auto-estimate suppressed (Irish baselines not appropriate)
         <div className="bg-amber-50 border-l-4 border-amber-500 rounded-r-lg px-4 py-3 mb-4">
