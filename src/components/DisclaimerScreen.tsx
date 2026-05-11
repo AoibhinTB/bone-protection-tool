@@ -41,19 +41,21 @@ export function DisclaimerScreen({ onAccept }: Props) {
           <ul className="space-y-1 text-[11px] sm:text-xs text-slate-800 leading-snug">
             <li className="flex items-start gap-1.5">
               <span className="text-slate-500 mt-0.5 shrink-0">•</span>
-              <span>For use by registered healthcare professionals only</span>
+              <span className="font-bold">
+                This tool is a prototype under active development. It is pending independent clinical review and has not been validated for clinical use.
+              </span>
             </li>
             <li className="flex items-start gap-1.5">
               <span className="text-slate-500 mt-0.5 shrink-0">•</span>
-              <span>This is a decision support aid and does not replace clinical judgement</span>
+              <span>For use by registered healthcare professionals only, as a decision support aid alongside — not as a replacement for — clinical judgement.</span>
             </li>
             <li className="flex items-start gap-1.5">
               <span className="text-slate-500 mt-0.5 shrink-0">•</span>
-              <span>All recommendations must be verified against current SmPCs and HSE reimbursement criteria before prescribing</span>
+              <span>All recommendations must be verified against current SmPCs and HSE reimbursement criteria before any prescribing decision.</span>
             </li>
             <li className="flex items-start gap-1.5">
               <span className="text-slate-500 mt-0.5 shrink-0">•</span>
-              <span>This tool is pending independent clinical review and is a prototype under active development.</span>
+              <span>The clinical content reflects a single author&apos;s synthesis of NOGG 2024 and related guidance; expected outputs have not been independently verified.</span>
             </li>
           </ul>
         </section>
