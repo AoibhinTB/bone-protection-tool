@@ -53,6 +53,7 @@ export const defaultPatient: PatientInput = {
   onThyroidReplacement: false,
   refusesInjections: false,
   bmdUnavailable: false,
+  oesophagealDiseaseHistory: false,
   bornOutsideIreland: false,
   onThiazolidinedione: false,
 };

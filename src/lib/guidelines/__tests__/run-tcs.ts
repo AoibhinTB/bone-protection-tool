@@ -60,6 +60,7 @@ function basePatient(overrides: Partial<PatientInput>): PatientInput {
     onThyroidReplacement: false,
     refusesInjections: false,
     bmdUnavailable: false,
+    oesophagealDiseaseHistory: false,
     bornOutsideIreland: false,
     onThiazolidinedione: false,
   };
@@ -1395,6 +1396,135 @@ function tc52(): TCResult {
   return { name: 'TC52 — POI: transdermal HRT preference stated', passed: failures.length === 0, failures, decision };
 }
 
+// ═══════════════════════════════════════════════════════════════════════════
+// v1.19 NEW TEST CASES (TC53–TC57) — post-hip-fx, oesophageal CI, deno cessation
+// ═══════════════════════════════════════════════════════════════════════════
+
+// ─── TC53 ─────────────────────────────────────────────────────────────────
+// Post-hip-fracture 72F, eGFR 65, recent hip fx → IV zoledronate first-line.
+function tc53(): TCResult {
+  const failures: string[] = [];
+  const patient = basePatient({
+    age: 72,
+    sex: 'female',
+    priorFragilityFracture: true,
+    priorHipFracture: true,
+    recentFractureWithin2Years: true,
+    dexaResults: { lumbarSpineTScore: -2.2, totalHipTScore: -2.2, femoralNeckTScore: -2.2, forearmTScore: null },
+    renalFunction: { egfr: 65 },
+    bloodResults: { adjustedCalciumMmol: 2.32, vitaminDNmol: 70, egfr: 65, alp: 80, tshMUL: 2.0, hbGramsPerLitre: 135, esrOrCrp: 'normal' },
+  });
+  const decision = runClinicalDecision(patient);
+  check(failures, 'post-hip-fracture zoledronate flag fires',
+    hasFlag(decision, 'post_hip_fracture_zoledronate_first_line'));
+  check(failures, 'flag references HORIZON evidence', hasFlagText(decision, 'horizon'));
+  check(failures, 'flag references mortality reduction', hasFlagText(decision, 'mortality'));
+  check(failures, 'IV zoledronate recommended', hasAgent(decision, 'zoledronate'));
+  const zoleRec = decision.treatmentRecommendations.find(r => r.agent === 'zoledronate');
+  check(failures, 'zoledronate priority = first-line', zoleRec?.priority === 'first-line',
+    `got ${zoleRec?.priority}`);
+  return { name: 'TC53 — post-hip-fracture → IV zoledronate first-line', passed: failures.length === 0, failures, decision };
+}
+
+// ─── TC54 ─────────────────────────────────────────────────────────────────
+// Oesophageal disease 68F → all oral BPs CI, IV zoledronate from outset.
+function tc54(): TCResult {
+  const failures: string[] = [];
+  const patient = basePatient({
+    age: 68,
+    sex: 'female',
+    oesophagealDiseaseHistory: true,
+    dexaResults: { lumbarSpineTScore: -2.8, totalHipTScore: -2.6, femoralNeckTScore: -2.6, forearmTScore: null },
+    renalFunction: { egfr: 60 },
+    bloodResults: { adjustedCalciumMmol: 2.32, vitaminDNmol: 70, egfr: 60, alp: 80, tshMUL: 2.0, hbGramsPerLitre: 135, esrOrCrp: 'normal' },
+  });
+  const decision = runClinicalDecision(patient);
+  check(failures, 'oesophageal disease oral-BP CI flag fires',
+    hasFlag(decision, 'oesophageal_disease_oral_bp_ci'));
+  check(failures, 'flag mentions IV zoledronate first-line', hasFlagText(decision, 'iv zoledronate'));
+  check(failures, 'IV zoledronate in recommendations', hasAgent(decision, 'zoledronate'));
+  check(failures, 'NO alendronate recommended', !hasAgent(decision, 'alendronate'));
+  check(failures, 'NO risedronate recommended', !hasAgent(decision, 'risedronate'));
+  check(failures, 'NO oral ibandronate recommended', !hasAgent(decision, 'ibandronate'));
+  return { name: 'TC54 — oesophageal disease blocks oral BPs', passed: failures.length === 0, failures, decision };
+}
+
+// ─── TC55 ─────────────────────────────────────────────────────────────────
+// Oesophageal disease 75F with eGFR 30 (severe CKD) → cannot use zoledronate,
+// route to denosumab. Flag still mentions IV zoledronate as the preferred
+// option in general; engine falls back to denosumab when eGFR <35.
+function tc55(): TCResult {
+  const failures: string[] = [];
+  const patient = basePatient({
+    age: 75,
+    sex: 'female',
+    oesophagealDiseaseHistory: true,
+    dexaResults: { lumbarSpineTScore: -2.9, totalHipTScore: -2.8, femoralNeckTScore: -2.8, forearmTScore: null },
+    renalFunction: { egfr: 30 },
+    bloodResults: { adjustedCalciumMmol: 2.32, vitaminDNmol: 70, egfr: 30, alp: 80, tshMUL: 2.0, hbGramsPerLitre: 130, esrOrCrp: 'normal' },
+  });
+  const decision = runClinicalDecision(patient);
+  check(failures, 'oesophageal disease CI flag fires',
+    hasFlag(decision, 'oesophageal_disease_oral_bp_ci'));
+  check(failures, 'denosumab recommended (eGFR <35 cannot use zoledronate)',
+    hasAgent(decision, 'denosumab'));
+  check(failures, 'NO zoledronate (eGFR 30 contraindicated)',
+    !hasAgent(decision, 'zoledronate'));
+  check(failures, 'NO oral bisphosphonate',
+    !hasAgent(decision, 'alendronate') && !hasAgent(decision, 'risedronate') && !hasAgent(decision, 'ibandronate'));
+  return { name: 'TC55 — oesophageal disease + eGFR 30 → denosumab', passed: failures.length === 0, failures, decision };
+}
+
+// ─── TC56 ─────────────────────────────────────────────────────────────────
+// Denosumab cessation timing: 5.5 months since last dose → "arrange now" flag.
+function tc56(): TCResult {
+  const failures: string[] = [];
+  const patient = basePatient({
+    age: 65,
+    sex: 'female',
+    dexaResults: { lumbarSpineTScore: -2.6, totalHipTScore: -2.5, femoralNeckTScore: -2.5, forearmTScore: null },
+    renalFunction: { egfr: 70 },
+    bloodResults: { adjustedCalciumMmol: 2.32, vitaminDNmol: 70, egfr: 70, alp: 80, tshMUL: 2.0, hbGramsPerLitre: 135, esrOrCrp: 'normal' },
+    currentTreatment: { agent: 'denosumab', durationMonths: 18, reasonStopped: null, currentlyOn: true, monthsSinceLastDose: 5.5 },
+  });
+  const decision = runClinicalDecision(patient);
+  check(failures, 'arrange-zoledronate-now flag fires at 5–6 months',
+    hasFlag(decision, 'denosumab_zoledronate_arrange_now'));
+  check(failures, 'message mentions IV zoledronate', hasFlagText(decision, 'iv zoledronate'));
+  check(failures, 'message states zoledronate NOT equivalent to alendronate',
+    hasFlagText(decision, 'not equivalent to alendronate'));
+  check(failures, 'prescribing-caution flag also present',
+    hasFlag(decision, 'denosumab_prescribing_caution'));
+  check(failures, 'caution message mentions "younger postmenopausal women"',
+    hasFlagText(decision, 'younger postmenopausal women'));
+  return { name: 'TC56 — denosumab 5.5m → arrange zoledronate now', passed: failures.length === 0, failures, decision };
+}
+
+// ─── TC57 ─────────────────────────────────────────────────────────────────
+// Denosumab cessation timing: 8 months since last dose, no sequential BP →
+// overdue urgent + refer-urgently flags.
+function tc57(): TCResult {
+  const failures: string[] = [];
+  const patient = basePatient({
+    age: 68,
+    sex: 'female',
+    dexaResults: { lumbarSpineTScore: -2.6, totalHipTScore: -2.6, femoralNeckTScore: -2.6, forearmTScore: null },
+    renalFunction: { egfr: 65 },
+    bloodResults: { adjustedCalciumMmol: 2.32, vitaminDNmol: 70, egfr: 65, alp: 80, tshMUL: 2.0, hbGramsPerLitre: 135, esrOrCrp: 'normal' },
+    currentTreatment: { agent: 'denosumab', durationMonths: 36, reasonStopped: null, currentlyOn: true, monthsSinceLastDose: 8 },
+  });
+  const decision = runClinicalDecision(patient);
+  check(failures, 'denosumab overdue urgent flag fires',
+    hasFlag(decision, 'denosumab_overdue_injection'));
+  check(failures, 'refer-urgently flag fires at >7m without sequential BP',
+    hasFlag(decision, 'denosumab_refer_urgently'));
+  check(failures, 'overdue flag mentions IV zoledronate as preferred sequential',
+    hasFlagText(decision, 'iv zoledronate'));
+  check(failures, 'alendronate framed as secondary, NOT equivalent',
+    hasFlagText(decision, 'secondary option'));
+  return { name: 'TC57 — denosumab 8m + no sequential BP → urgent + refer', passed: failures.length === 0, failures, decision };
+}
+
 // ─── Runner ───────────────────────────────────────────────────────────────
 
 const TCs: Array<() => TCResult> = [
@@ -1403,6 +1533,7 @@ const TCs: Array<() => TCResult> = [
   tc23, tc24, tc25, tc26, tc27, tc28, tc29, tc30, tc31, tc32,
   tc33, tc34, tc35, tc36, tc37, tc37b, tc38, tc39, tc40, tc41,
   tc42, tc43, tc44, tc45, tc46, tc47, tc48, tc49, tc50, tc51, tc52,
+  tc53, tc54, tc55, tc56, tc57,
 ];
 
 const results = TCs.map(fn => fn());

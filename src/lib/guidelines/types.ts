@@ -252,6 +252,14 @@ export interface PatientInput {
   // v1.19 — recentOralGlucocorticoidUse removed; replaced by glucocorticoidStatus
   // ('stopped_within_12m'). VFA indication now reads glucocorticoidStatus.
 
+  /**
+   * v1.19 — history of oesophageal disease (stricture, achalasia, dysmotility).
+   * Permanent contraindication to ALL oral bisphosphonates. Engine routes to
+   * IV zoledronate from outset (or denosumab if eGFR <35). Drives a Step-1
+   * contraindication check before any drug selection (Section 5.2).
+   */
+  oesophagealDiseaseHistory: boolean;
+
   // Born outside Ireland — FRAX must use the country-of-origin model
   // (NOGG 2024 Table 2: individuals retain risk characteristics of their country of birth).
   // The in-tool FRAX estimator uses Irish baselines (country code 49), so for non-Irish

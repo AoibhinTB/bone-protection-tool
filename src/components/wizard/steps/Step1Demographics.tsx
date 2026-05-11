@@ -47,12 +47,8 @@ export function Step1Demographics({ data, onChange }: Props) {
           />
         </Field>
       )}
-      <Field label="Paget's disease of bone" hint="Requires specialist management — out of scope">
-        <YesNo
-          value={data.pagetsDiseaseOfBone}
-          onChange={v => onChange({ pagetsDiseaseOfBone: v })}
-        />
-      </Field>
+      {/* v1.19 — Paget's disease moved out of demographics into Step 3
+          (Risk Factors / past medical history) under "Clinical history". */}
       <Field
         label="Born outside Ireland"
         hint="FRAX should use the country-of-origin model — risk persists after migration (NOGG Table 2). The in-tool estimator uses Irish baselines (country 49); for non-Irish-born patients enter FRAX manually from frax.shef.ac.uk with the correct country selected."

@@ -909,6 +909,76 @@ function initiateTherapy(
 
   // ── Previous treatment contraindication checks ──
 
+  // v1.19 Step 5 — Oesophageal disease contraindication. Step-1 check before
+  // any drug selection (Section 5.2). All oral bisphosphonates permanently
+  // contraindicated. IV zoledronate from outset; if eGFR <35, denosumab.
+  if (patient.oesophagealDiseaseHistory) {
+    flags.push({
+      id: 'oesophageal_disease_oral_bp_ci',
+      severity: 'warning',
+      message:
+        'Oral bisphosphonates contraindicated — history of oesophageal disease (stricture / achalasia / dysmotility). ' +
+        'IV zoledronate first-line. If eGFR <35: denosumab. (NOGG 2024)',
+      rationale:
+        'NOGG 2024 Section 5.2 (v1.19): oesophageal abnormalities delaying gastric emptying or causing strictures are a ' +
+        'permanent contraindication to all oral bisphosphonates (alendronate, risedronate, oral ibandronate). The risk of ' +
+        'oesophageal ulceration or stricture worsening outweighs any benefit. IV zoledronate has no GI exposure and is ' +
+        'the preferred option; denosumab when zoledronate is not feasible (eGFR <35).',
+      source: SRC_NOGG,
+    });
+    if (canUse('zoledronate', egfr)) {
+      recs.push(withBPInitiationContext(zoledronate(), patient));
+    } else {
+      addVitDBlock(patient, flags);
+      recs.push(denosumab(egfr));
+    }
+    return recs;
+  }
+
+  // v1.19 Step 4 — Post-hip-fracture: IV zoledronate first-line (NOGG 2024
+  // Strong; HORIZON-Recurrent Fractures trial — fracture AND mortality
+  // reduction). Fires regardless of FRAX category. Gated on a recent hip
+  // fracture (priorHipFracture + recentFractureWithin2Years), matching the
+  // HORIZON-RF enrolment population (hip fx within 90 days). eGFR <35
+  // contraindicates zoledronate — fall back to denosumab in that case.
+  if (
+    patient.priorHipFracture &&
+    patient.recentFractureWithin2Years &&
+    !hasPreviousGIIntoleranceToBP(patient)
+  ) {
+    flags.push({
+      id: 'post_hip_fracture_zoledronate_first_line',
+      severity: 'info',
+      message:
+        'Recent hip fracture — IV zoledronate 5 mg first-line. NOGG 2024 (Strong, HORIZON-Recurrent Fractures trial): ' +
+        'IV zoledronate after hip fracture reduces fracture incidence AND all-cause mortality. ' +
+        'Do not delay for renal function concerns unless eGFR <35.',
+      rationale:
+        'Section 5.1 (v1.19): post-hip-fracture patients receive IV zoledronate as first-line bone protection regardless of FRAX category. ' +
+        'HORIZON-Recurrent Fractures (Lyles et al. NEJM 2007) enrolled patients within 90 days post-hip-fracture and demonstrated ' +
+        '35% reduction in clinical fractures and 28% reduction in all-cause mortality vs placebo.',
+      source: SRC_NOGG,
+    });
+    // Match the alendronate-first-line renal gate (>35, strict) so the
+    // boundary eGFR=35 case routes through the standard renal cascade to
+    // denosumab rather than firing a zoledronate recommendation. Spec
+    // wording is "Do not delay for renal concerns unless eGFR <35"; the
+    // strict-greater gate is the tool's accepted reading of "<35".
+    if (canUse('zoledronate', egfr) && (egfr === null || egfr > RENAL_LIMITS.alendronate.ci)) {
+      recs.push(withBPInitiationContext({
+        ...zoledronate(),
+        priority: 'first-line',
+        rationale:
+          'Post-hip-fracture first-line (NOGG 2024 Strong; HORIZON-RF — fracture AND mortality reduction). ' +
+          'Do not delay for renal concerns unless eGFR <35.',
+      }, patient));
+      return recs;
+    }
+    // eGFR ≤35 — fall through to AFF / alendronate-first / denosumab cascade,
+    // but the post-hip-fx info flag above stays visible so the rationale is
+    // still surfaced for the clinician.
+  }
+
   // AFF history: permanent ban on ALL bisphosphonates — go directly to denosumab
   if (hasAFFHistory(patient)) {
     addVitDBlock(patient, flags);
@@ -1134,14 +1204,30 @@ function sequencing(
     (patient.recentFractureWithin2Years === true || patient.numberOfPriorFractures >= 2);
 
   if (possibleOnTxFracture && !explicitTreatmentFailure) {
+    // v1.19 — drug-specific adherence check per spec Step 7.
+    const adherenceCheck = (() => {
+      switch (current.agent) {
+        case 'alendronate':
+        case 'risedronate':
+          return `${current.agent}: confirm weekly fasting dose, full glass of water, remain upright ≥30 min, no food/drink for 30 min. <80% of doses taken correctly = poor adherence.`;
+        case 'ibandronate':
+          return 'Ibandronate: confirm monthly (oral) or quarterly (IV) doses taken / administered on schedule. <80% adherence = poor adherence.';
+        case 'zoledronate':
+          return 'Zoledronate: confirm annual infusion attended each year. A missed annual infusion = poor adherence.';
+        case 'denosumab':
+          return 'Denosumab: confirm 6-monthly injection not missed (>6 months since last dose = effectively poor adherence and rebound risk — Section 8.2).';
+        default:
+          return 'Confirm patient has taken ≥80% of prescribed doses correctly.';
+      }
+    })();
     flags.push({
       id: 'on_treatment_fracture_pathway',
       severity: 'warning',
       message:
         `Fragility fracture on ${current.agent} (${Math.round(current.durationMonths / 12)}y duration). ` +
-        'Mandatory pathway: (1) review adherence — poor adherence is <80% of prescribed treatment taken correctly; ' +
+        `Mandatory pathway: (1) review adherence — poor adherence is <80% of prescribed treatment taken correctly. ${adherenceCheck} ` +
         '(2) investigate secondary causes — repeat Tier 2 bloods minimum, consider Tier 3 if not previously done; ' +
-        '(3) only classify as treatment failure if adherence ≥80% and secondary causes excluded. ' +
+        '(3) only classify as treatment failure if adherence ≥80% AND secondary causes excluded. ' +
         'If within first 5y oral / 3y IV: this fracture is ALSO an extension indication (NOGG Section 7 Rec 1–2 Strong) — ' +
         'plan for the extended course (10y oral / 6y IV) once adherence is verified.',
       rationale:
@@ -1509,74 +1595,145 @@ function postAnabolicFlags(flags: ClinicalFlag[]): void {
   });
 }
 
-// ─── Denosumab rebound / missed injection ────────────────────────────────
-
+// ─── Denosumab rebound / cessation pathway (v1.19, Section 8) ────────────────
+//
+// Tiered timing alerts driven by monthsSinceLastDose (Section 8.2 table):
+//   approaching 6m (5–5.999):  prompt — arrange IV zoledronate now
+//   ≥6m and <7m:               IV zoledronate due. Urgent if not arranged.
+//   ≥7m:                       URGENT — elevated vertebral rebound risk.
+//                              If >7m and no sequential antiresorptive given,
+//                              also surface a refer-urgently flag.
+// Sequential agent: IV zoledronate 5 mg at 6 months is the Strong NOGG 2024
+// recommendation. Alendronate is a secondary option only; explicitly NOT
+// equivalent (less reliable, especially after >3 years denosumab).
+// Prescribing-caution flag always fires when the patient is currently on
+// denosumab (younger postmenopausal women / men).
 function denosumabReboundFlags(
   patient: PatientInput,
   flags: ClinicalFlag[],
 ): void {
-  const isOnDenosumab = patient.currentTreatment?.agent === 'denosumab' && patient.currentTreatment.currentlyOn;
+  // The cessation pathway applies whether the patient is currently on
+  // denosumab (and might miss a dose) OR has stopped denosumab (and now
+  // needs sequential cover). Either slot — currentTreatment or
+  // previousTreatments — provides the months-since-last-dose anchor.
+  const currentDeno = patient.currentTreatment?.agent === 'denosumab' ? patient.currentTreatment : null;
+  const previousDeno = patient.previousTreatments.find(t => t.agent === 'denosumab') ?? null;
+  const denoSlot = currentDeno ?? previousDeno;
+  if (!denoSlot) return;
 
-  if (isOnDenosumab) {
-    // v1.19 — months since last dose now lives on the treatment, not on the patient.
-    // Falls back from currentTreatment first, then any previous denosumab record (so a
-    // patient who has stopped denosumab but still presents with monthsSinceLastDose
-    // information on their previous-treatment row also gets the alerts).
-    const monthsSinceLastDose =
-      patient.currentTreatment?.monthsSinceLastDose ??
-      patient.previousTreatments.find(t => t.agent === 'denosumab')?.monthsSinceLastDose ??
-      null;
-    // Injection due at 6 months — warning. Bone turnover markers rise from ~3 months and
-    // exceed baseline by 6 months after a missed dose.
-    if (
-      monthsSinceLastDose !== null &&
-      monthsSinceLastDose >= 6 &&
-      monthsSinceLastDose < DENOSUMAB.reboundRiskThresholdMonths
-    ) {
-      flags.push({
-        id: 'denosumab_injection_due',
-        severity: 'warning',
-        message:
-          'Injection due — schedule immediately. Bone turnover markers begin rising 3 months after a missed dose and reach above-baseline levels by 6 months.',
-        rationale:
-          'NOGG 2024 Rec 18 / Cummings SR et al. JBMR 2018: bone resorption markers (CTX) rise progressively from 3 months after a missed dose. ' +
-          'By 6 months, levels exceed pre-treatment baseline — schedule the next dose without further delay.',
-        source: SRC_NOGG,
-      });
-    }
+  const isOnDenosumab = !!currentDeno && currentDeno.currentlyOn;
+  const monthsSinceLastDose = denoSlot.monthsSinceLastDose;
 
-    // Overdue injection ≥7 months — urgent (FREEDOM trial citation)
-    if (
-      monthsSinceLastDose !== null &&
-      monthsSinceLastDose >= DENOSUMAB.reboundRiskThresholdMonths
-    ) {
-      flags.push({
-        id: 'denosumab_overdue_injection',
-        severity: 'urgent',
-        message:
-          `Injection overdue — significant rebound vertebral fracture risk. FREEDOM trial data show fracture rate increases from 1.2 to 7.1 per 100 patient-years after discontinuation.`,
-        rationale:
-          'Cummings SR et al. Vertebral fractures after discontinuation of denosumab: a post hoc analysis of the FREEDOM trial and its extension. ' +
-          'J Bone Miner Res. 2018;33(2):190–198. https://pubmed.ncbi.nlm.nih.gov/29105841/. ' +
-          'Vertebral fracture rate rose from 1.2 per 100 patient-years (on denosumab) to 7.1 per 100 patient-years after stopping. ' +
-          'NOGG 2024 Rec 18–19: gaps ≥7 months since the last denosumab dose mark imminent vertebral fracture risk.',
-        source: SRC_NOGG,
-      });
-    }
+  // Whether a sequential antiresorptive has been arranged. We treat any
+  // bisphosphonate added AFTER the denosumab record (i.e. as the
+  // currentTreatment when currentDeno is null, or as a later previousTreatment
+  // record) as evidence of a sequential plan. eGFR <35 is acknowledged
+  // separately so the "no sequential agent" alerts stay accurate.
+  const sequentialBPArranged =
+    (patient.currentTreatment !== null && isBisphosphonate(patient.currentTreatment.agent)) ||
+    patient.previousTreatments.some(t => isBisphosphonate(t.agent) && t !== previousDeno);
 
-    // Planned cessation
+  // (A) Prescribing caution — always when denosumab is in play
+  flags.push({
+    id: 'denosumab_prescribing_caution',
+    severity: 'info',
+    message:
+      'Particularly careful consideration is needed before starting denosumab in younger postmenopausal women and men ' +
+      'given the difficulties in stopping treatment. Once started, sequential antiresorptive therapy is mandatory on cessation.',
+    rationale:
+      'NOGG 2024 (Section 8, v1.19): denosumab cessation carries rebound vertebral fracture risk that is specific to ' +
+      'the drug class. The longer the course and the younger the patient at planned cessation, the more important the ' +
+      'sequential plan. Surface this caution at every encounter where the patient is on denosumab or recently stopped.',
+    source: SRC_NOGG,
+  });
+
+  // (B) Cessation plan — surfaced whenever the patient is currently on denosumab,
+  // OR has stopped denosumab without a sequential bisphosphonate yet arranged.
+  if (isOnDenosumab || (!isOnDenosumab && !sequentialBPArranged)) {
     flags.push({
       id: 'denosumab_cessation_plan',
       severity: 'warning',
       message:
-        'Do NOT stop denosumab without sequential alendronate or single zoledronate (6 months after last dose) — rebound vertebral fractures.',
+        'Sequential antiresorptive plan required on denosumab cessation. NOGG 2024 Strong (Section 8.1): IV zoledronate 5 mg at 6 months after the last injection is the recommended sequential agent — NOT equivalent to alendronate. ' +
+        'After IV zoledronate, follow CTX at 3 and 6 months (Strong) to guide further infusions; if CTX is not available, give a second IV zoledronate 6 months after the first (Conditional). ' +
+        'Alendronate is a secondary option where IV is not feasible; it maintains BMD for ~12 months in most patients after short denosumab courses but is less reliable, particularly after >3 years denosumab.',
       rationale:
-        'NOGG 2024 Rec 18 (Strong): inform patients of rebound fracture risk before initiating denosumab. ' +
-        'Stopping is associated with rapid loss of BMD and increased risk of multiple vertebral fractures (Evidence IIa). ' +
-        'Rec 19 (Strong): sequential antiresorptive therapy is mandatory on cessation. ' +
-        'Routine cessation without a clear clinical reason is not appropriate.',
+        'NOGG 2024 Recs 18–19 (Strong): inform patients of rebound fracture risk before initiating denosumab; sequential antiresorptive therapy is mandatory on cessation. ' +
+        'Section 8.1: IV zoledronate is the preferred sequential agent (Strong). Alendronate as alternative carries Evidence IIa — significant bone loss occurs in a minority. ' +
+        'For patients on >3 years denosumab, a single zoledronate infusion may not maintain BMD beyond 12 months — plan second infusion or CTX-guided follow-up (Evidence IIb).',
       source: SRC_NOGG,
     });
+  }
+
+  // (C) Timing tiers — only relevant when we have a number
+  if (monthsSinceLastDose === null) return;
+
+  // Approaching 6 months (5 ≤ months < 6): prompt to arrange now
+  if (monthsSinceLastDose >= 5 && monthsSinceLastDose < 6) {
+    flags.push({
+      id: 'denosumab_zoledronate_arrange_now',
+      severity: 'warning',
+      message:
+        `Approaching 6 months since the last denosumab injection (${monthsSinceLastDose} months). ` +
+        'Arrange IV zoledronate 5 mg now — it must be given at 6 months after the last denosumab dose. ' +
+        'NOGG 2024 Strong (Section 8.1): IV zoledronate is the recommended sequential agent — NOT equivalent to alendronate.',
+      rationale:
+        'NOGG 2024 Section 8.2 (v1.19): the 5–6 month window is the actionable point. Delaying beyond 6 months exposes the patient to rebound vertebral fracture risk. ' +
+        'Arrange the infusion in advance so it lands at 6 months, not later.',
+      source: SRC_NOGG,
+    });
+  }
+
+  // 6 ≤ months < 7: IV zoledronate due now; urgent if not yet arranged
+  if (monthsSinceLastDose >= 6 && monthsSinceLastDose < DENOSUMAB.reboundRiskThresholdMonths) {
+    flags.push({
+      id: 'denosumab_zoledronate_due',
+      severity: sequentialBPArranged ? 'warning' : 'urgent',
+      message:
+        `IV zoledronate 5 mg is due now — ${monthsSinceLastDose} months since the last denosumab injection. ` +
+        (sequentialBPArranged
+          ? 'Confirm the infusion is administered without delay.'
+          : 'URGENT: no sequential antiresorptive arranged. Arrange IV zoledronate immediately.'),
+      rationale:
+        'NOGG 2024 Rec 18 / Cummings SR et al. JBMR 2018: bone resorption markers (CTX) rise progressively from 3 months after a missed dose; ' +
+        'by 6 months they exceed pre-treatment baseline. IV zoledronate at this point both replaces the missed denosumab and acts as the sequential antiresorptive (Section 8.1 Strong). ' +
+        'Alendronate is a secondary option only — NOT equivalent.',
+      source: SRC_NOGG,
+    });
+  }
+
+  // ≥7 months: URGENT rebound risk. Existing FREEDOM-citation flag retained
+  // for back-compatibility with TC18 (asserts on this id).
+  if (monthsSinceLastDose >= DENOSUMAB.reboundRiskThresholdMonths) {
+    flags.push({
+      id: 'denosumab_overdue_injection',
+      severity: 'urgent',
+      message:
+        `Injection overdue — ${monthsSinceLastDose} months since the last denosumab dose. URGENT: significantly elevated vertebral rebound risk. ` +
+        'FREEDOM trial data show fracture rate increases from 1.2 to 7.1 per 100 patient-years after discontinuation. ' +
+        'Arrange IV zoledronate 5 mg immediately (NOGG 2024 Strong — preferred sequential agent). Alendronate is a secondary option only.',
+      rationale:
+        'Cummings SR et al. Vertebral fractures after discontinuation of denosumab: a post hoc analysis of the FREEDOM trial and its extension. ' +
+        'J Bone Miner Res. 2018;33(2):190–198. https://pubmed.ncbi.nlm.nih.gov/29105841/. ' +
+        'Vertebral fracture rate rose from 1.2 per 100 patient-years (on denosumab) to 7.1 per 100 patient-years after stopping. ' +
+        'NOGG 2024 Recs 18–19 / Section 8.2: gaps ≥7 months since the last denosumab dose mark imminent rebound risk.',
+      source: SRC_NOGG,
+    });
+
+    // >7m AND no sequential antiresorptive arranged → refer urgently
+    if (monthsSinceLastDose > DENOSUMAB.reboundRiskThresholdMonths && !sequentialBPArranged) {
+      flags.push({
+        id: 'denosumab_refer_urgently',
+        severity: 'urgent',
+        message:
+          'URGENT REFERRAL: high rebound fracture risk with no sequential antiresorptive arranged. ' +
+          'Refer urgently if you cannot arrange IV zoledronate immediately in primary care.',
+        rationale:
+          'NOGG 2024 Section 8.2 (v1.19): >7 months without sequential antiresorptive marks imminent vertebral fracture risk. ' +
+          'Specialist referral is appropriate when zoledronate cannot be arranged promptly in primary care.',
+        source: SRC_NOGG,
+      });
+    }
   }
 }
 
@@ -2802,9 +2959,12 @@ function denosumab(egfr: number | null): TreatmentRecommendation {
     dose: '60 mg SC injection',
     frequency: 'Every 6 months (strict) — risk of rebound vertebral fractures begins if >6 months since last dose',
     rationale:
-      'POSITIONING: denosumab is FIRST-LINE only in specific populations — eGFR <35, men on ADT (HALT trial), ' +
-      'and bisphosphonate contraindication (AFF, severe renal impairment, GI intolerance where IV zoledronate is also unsuitable). ' +
-      'For all other patients denosumab is the SECOND-LINE alternative per NOGG 2024 Strong and NICE positioning — bisphosphonate is preferred first-line as the most cost-effective antiresorptive. ' +
+      'POSITIONING: denosumab is FIRST-LINE only when bisphosphonate is contraindicated or unsuitable (AFF, eGFR <35, ' +
+      'GI intolerance where IV zoledronate is also unsuitable, oesophageal disease where IV zoledronate is also unsuitable). ' +
+      'For all other patients denosumab is the alternative when bisphosphonate is contraindicated (NOGG 2024 Strong) — ' +
+      'bisphosphonate is preferred first-line as the most cost-effective antiresorptive. ' +
+      'v1.19 — "men on ADT" no longer listed as a first-line carve-out. NOGG 2024 (Conditional, Section 10.1): for ADT-associated bone loss, ' +
+      'bisphosphonate and denosumab are equivalent options and normal first-line guidelines apply. The HALT trial established efficacy vs placebo but did NOT establish superiority over bisphosphonates. ' +
       'Not renally cleared, hence the preferred antiresorptive in CKD.',
     strength: 'strong',
     contraindications: [
@@ -2820,12 +2980,12 @@ function denosumab(egfr: number | null): TreatmentRecommendation {
         : []),
       'Strict 6-monthly schedule — clinical risk begins to rise after 6 months + 2 weeks; treat >7 months as urgent',
       'DEXA at 1–2 years',
-      'CRITICAL: Plan sequential antiresorptive (alendronate or single-dose zoledronate) BEFORE stopping denosumab. Routine cessation is not supported.',
+      'CRITICAL: Plan sequential antiresorptive BEFORE stopping denosumab. NOGG 2024 Strong (Section 8.1, v1.19): IV zoledronate 5 mg at 6 months after the last denosumab dose is the recommended sequential agent — NOT equivalent to alendronate. Alendronate is a secondary option only where IV is not feasible; less reliable, especially after >3 years of denosumab. Particularly careful consideration is needed before starting denosumab in younger postmenopausal women and men given the difficulty of stopping.',
       'Dental hygiene (Strong, NOGG 2024 Rec 9): maintain good oral hygiene; attend routine dental check-ups; report dental mobility, jaw pain, swelling, or oral ulceration promptly.',
       'Dental procedures during treatment (Conditional, NOGG 2024 Rec 11): there are NO data showing that stopping denosumab reduces the risk of ONJ. Do NOT routinely stop treatment before dental procedures.',
     ],
     irishPrescribingNote:
-      'POSITIONING: first-line only in specific groups (eGFR <35, men on ADT, BP contraindications). Otherwise the alternative when bisphosphonate is contraindicated (NOGG 2024 Strong) — alendronate first-line for most patients as the most cost-effective antiresorptive. ' +
+      'POSITIONING: alternative when bisphosphonate is contraindicated (NOGG 2024 Strong) — alendronate first-line for most patients as the most cost-effective antiresorptive. v1.19: "men on ADT" no longer listed here; for ADT bone loss, BP and denosumab are equivalent per NOGG Section 10.1. ' +
       'GMS High-Tech (Prolia / biosimilar e.g. Jublia) — any doctor can prescribe. ' +
       'Dispensed via community pharmacy on the High-Tech drug scheme. ' +
       'GMS cardholders: no cost for the medication. ' +

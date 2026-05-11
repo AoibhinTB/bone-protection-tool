@@ -141,6 +141,26 @@ export function Step3RiskFactors({ data, onChange }: Props) {
         </>
       )}
 
+      {/* v1.19 — Past medical history section. Paget's lives here (moved from
+          Step 1) and oesophagealDiseaseHistory drives a Step-1 contraindication
+          check on oral bisphosphonates (Section 5.2). */}
+      <SectionHeading>Past medical history</SectionHeading>
+      <Field label="Paget's disease of bone" hint="Requires specialist management — out of scope for the standard algorithm">
+        <YesNo
+          value={data.pagetsDiseaseOfBone}
+          onChange={v => onChange({ pagetsDiseaseOfBone: v })}
+        />
+      </Field>
+      <Field
+        label="History of oesophageal disease"
+        hint="Stricture / achalasia / dysmotility — permanent contraindication to ALL oral bisphosphonates. Engine routes to IV zoledronate (or denosumab if eGFR <35)."
+      >
+        <YesNo
+          value={data.oesophagealDiseaseHistory}
+          onChange={v => onChange({ oesophagealDiseaseHistory: v })}
+        />
+      </Field>
+
       <SectionHeading>HRT safety (affects first-line recommendations)</SectionHeading>
       <Field label="Personal or family history of VTE" hint="DVT, PE — affects HRT safety assessment">
         <YesNo
