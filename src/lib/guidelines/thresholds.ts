@@ -50,6 +50,30 @@ export function gcDurationMonths(p: PatientInput): number {
   return 0;
 }
 
+// ─── GC status helpers (v1.19) ───────────────────────────────────────────
+// glucocorticoidStatus replaces the recentOralGlucocorticoidUse and
+// glucocorticoidPreviouslyUsed booleans. The four meaningful values drive
+// distinct downstream pathways. null is treated like 'never' but kept distinct
+// in the schema so the UI can show "not assessed" rather than asserting "never".
+
+/** Patient stopped GC within the last ~12 months. Drives VFA recommendation
+ *  (silent vertebral fractures may have occurred during the GC period). */
+export function gcStoppedWithin12Months(p: PatientInput): boolean {
+  return p.glucocorticoidStatus === 'stopped_within_12m';
+}
+
+/** Patient stopped GC over 12 months ago. Drives Section 9.4 GC withdrawal
+ *  bone-protection review when patient is now on a bisphosphonate. */
+export function gcStoppedOver12MonthsAgo(p: PatientInput): boolean {
+  return p.glucocorticoidStatus === 'stopped_over_12m_ago';
+}
+
+/** Patient ever had a previous course of GC (within 12 months OR over 12 months ago). */
+export function gcEverPreviouslyUsed(p: PatientInput): boolean {
+  return p.glucocorticoidStatus === 'stopped_within_12m' ||
+         p.glucocorticoidStatus === 'stopped_over_12m_ago';
+}
+
 // v1.14 — count of standard FRAX clinical risk factors a patient has, *excluding* the
 // AI-/ADT-/early-menopause condition itself (those are the primary trigger, not "additional").
 // Used by the IOF 2017 AI threshold logic.

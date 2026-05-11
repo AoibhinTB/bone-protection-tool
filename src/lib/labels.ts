@@ -35,7 +35,7 @@ export const STOP_REASON_LABELS: Record<TreatmentStopReason, string> = {
   gi_intolerance:    'GI intolerance',
   aff_confirmed:     'Atypical femoral fracture (AFF)',
   onj:               'Osteonecrosis of the jaw (ONJ)',
-  treatment_holiday: 'Planned treatment holiday',
+  treatment_holiday: 'Bisphosphonate holiday / pause / treatment holiday',
   treatment_failure: 'Treatment failure (new fracture on therapy)',
   renal_impairment:  'Renal impairment',
   completed_course:  'Completed course (e.g. teriparatide 24 months)',

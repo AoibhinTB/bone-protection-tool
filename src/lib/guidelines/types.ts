@@ -93,10 +93,50 @@ export type TreatmentStopReason =
 
 export interface TreatmentHistory {
   agent: TreatmentAgent;
+  /** Total months the patient was on this treatment (cumulative drug exposure). */
   durationMonths: number;
   reasonStopped: TreatmentStopReason | null;
+  /** True iff the patient is actively dosing right now. False = paused, stopped, or holiday. */
   currentlyOn: boolean;
+  /**
+   * Months since the last dose of THIS treatment.
+   *   - null  = not provided / not applicable
+   *   - 0     = dosed today / actively on (ignored when currentlyOn=true unless paused)
+   *   - >0    = on a pause / cessation
+   * Drives:
+   *   - Bisphosphonate holiday reassessment interval (Section 6.4) — the drug-specific
+   *     intervals (risedronate/ibandronate 18m, alendronate 2y, zoledronate 3y) count from
+   *     last dose, not from the end of the planned course.
+   *   - Denosumab rebound alerts (Section 8) — 6 m / 7 m alerts and the zoledronate
+   *     bridging recommendation must fire from the last injection date, not from
+   *     treatment duration.
+   *   - Bone turnover marker / BMD restart signal (Section 6.6) — only relevant during an
+   *     active pause period.
+   */
+  monthsSinceLastDose: number | null;
 }
+
+// v1.19 — single 4-option GC status. Replaces the previous pair of booleans
+// (recentOralGlucocorticoidUse, glucocorticoidPreviouslyUsed) which were ambiguous
+// (a 6-month-stopped patient was simultaneously "recent" and "previously used") and
+// served different downstream pathways. The dose fields (glucocorticoidUse,
+// glucocorticoidDoseMgDay) carry the current course's dose and are orthogonal —
+// they remain in PatientInput unchanged.
+//
+//   'current'              → drives Table 8 FRAX correction, GIOP immediate-start,
+//                            BP-holiday ineligibility, extension criteria.
+//   'stopped_within_12m'   → drives VFA recommendation (silent vertebral fractures
+//                            may have occurred during the GC period).
+//   'stopped_over_12m_ago' → drives Section 9.4 GC withdrawal bone-protection review
+//                            (fires when patient is currently off GC AND on a BP).
+//   'never'                → no GC-related logic fires.
+//   null                   → not assessed in this session (treated as 'never' by the
+//                            engine but distinguishable in the UI).
+export type GlucocorticoidStatus =
+  | 'current'
+  | 'stopped_within_12m'
+  | 'stopped_over_12m_ago'
+  | 'never';
 
 // ─── Patient input ─────────────────────────────────────────────────────────
 
@@ -135,8 +175,13 @@ export interface PatientInput {
   glucocorticoidUse: GlucocorticoidUse | null;
   /** Canonical GC dose input (mg/day prednisolone equivalent). v1.13. */
   glucocorticoidDoseMgDay: number | null;
-  /** Patient previously took oral GC and has now stopped. v1.13 — drives Section 9.4 withdrawal review. */
-  glucocorticoidPreviouslyUsed: boolean;
+  /**
+   * v1.19 — single 4-option GC status. Replaces the previous pair of booleans:
+   *   recentOralGlucocorticoidUse  → 'stopped_within_12m'
+   *   glucocorticoidPreviouslyUsed → 'stopped_over_12m_ago'
+   * See GlucocorticoidStatus type comment for the four downstream pathways. null = not assessed.
+   */
+  glucocorticoidStatus: GlucocorticoidStatus | null;
   /** Bone turnover markers (CTX / P1NP) rising during a bisphosphonate pause. v1.13 — drives restart consideration (NOGG Section 6.6). */
   boneTurnoverMarkersRising: boolean | null;
   /** BMD has decreased on repeat DEXA during a pause. v1.13 — drives restart consideration. */
@@ -184,8 +229,8 @@ export interface PatientInput {
   currentTreatment: TreatmentHistory | null;
   previousTreatments: TreatmentHistory[];
 
-  // Denosumab-specific (rebound / missed injection)
-  denosumabMonthsSinceLastDose: number | null; // if currently on denosumab — is injection overdue?
+  // v1.19 — patient-level denosumabMonthsSinceLastDose removed; the engine now reads
+  // the per-treatment monthsSinceLastDose on currentTreatment / previousTreatments.
 
   // Post-anabolic sequencing
   completedAnabolicCourse: boolean;   // just finished teriparatide/romosozumab/abaloparatide
@@ -204,9 +249,8 @@ export interface PatientInput {
   // Triggers NOGG 2024 Rec 6 logic in the intermediate-risk pathway.
   bmdUnavailable: boolean;
 
-  // Recent past oral glucocorticoid use — stopped within the last ~12 months.
-  // Used as a VFA indication (silent vertebral fractures may have occurred during the GC period).
-  recentOralGlucocorticoidUse: boolean;
+  // v1.19 — recentOralGlucocorticoidUse removed; replaced by glucocorticoidStatus
+  // ('stopped_within_12m'). VFA indication now reads glucocorticoidStatus.
 
   // Born outside Ireland — FRAX must use the country-of-origin model
   // (NOGG 2024 Table 2: individuals retain risk characteristics of their country of birth).

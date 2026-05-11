@@ -113,6 +113,34 @@ export function Step3RiskFactors({ data, onChange }: Props) {
         />
       </Field>
 
+      {/* v1.19 — Early menopause moved here from Step 4 (medications). It is a clinical
+          history item and drives the POI / early-menopause pathway (Section 10.3). */}
+      {data.sex === 'female' && (
+        <>
+          <SectionHeading>Reproductive history</SectionHeading>
+          <Field label="Early menopause" hint="Menopause before age 45 — drives the POI / early-menopause pathway">
+            <YesNo
+              value={data.earlyMenopause}
+              onChange={v =>
+                onChange({ earlyMenopause: v, ageAtMenopause: v ? data.ageAtMenopause : null })
+              }
+            />
+          </Field>
+          {data.earlyMenopause && (
+            <Field label="Age at menopause" indent>
+              <NumInput
+                value={data.ageAtMenopause}
+                onChange={v => onChange({ ageAtMenopause: v })}
+                min={20}
+                max={45}
+                unit="yrs"
+                width="w-20"
+              />
+            </Field>
+          )}
+        </>
+      )}
+
       <SectionHeading>HRT safety (affects first-line recommendations)</SectionHeading>
       <Field label="Personal or family history of VTE" hint="DVT, PE — affects HRT safety assessment">
         <YesNo

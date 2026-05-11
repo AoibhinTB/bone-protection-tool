@@ -3,7 +3,7 @@
 // no IOS prescribing guideline document identified; NOGG 2024 covers DEXA case-finding independently)
 
 import type { PatientInput, InvestigationRecommendation } from './types';
-import { BLOOD_RANGES, GIOP, isOnGC, gcDurationMonths } from './thresholds';
+import { BLOOD_RANGES, GIOP, isOnGC, gcDurationMonths, gcStoppedWithin12Months } from './thresholds';
 
 export function assessInvestigationsNeeded(
   patient: PatientInput,
@@ -400,7 +400,7 @@ function vfaIndicationReason(patient: PatientInput): string | null {
   const longTermCurrentGC = isOnGC(patient) && gcDurationMonths(patient) >= 3;
   if (longTermCurrentGC) {
     reasons.push(`long-term current glucocorticoid use (${gcDurationMonths(patient)} months)`);
-  } else if (patient.recentOralGlucocorticoidUse) {
+  } else if (gcStoppedWithin12Months(patient)) {
     reasons.push('recent oral glucocorticoid therapy (stopped within last 12 months)');
   }
   if (patient.dexaResults) {
@@ -425,7 +425,7 @@ function vfaIndicationReason(patient: PatientInput): string | null {
 function hasAnyOsteoporosisRiskFactor(p: PatientInput): boolean {
   if (p.priorFragilityFracture || p.priorHipFracture || p.priorVertebralFracture) return true;
   if (p.dexaResults && lowestTScore(p.dexaResults) <= -2.5) return true;
-  if (isOnGC(p) || p.recentOralGlucocorticoidUse) return true;
+  if (isOnGC(p) || gcStoppedWithin12Months(p)) return true;
   if (p.adtUse || p.aromataseInhibitorUse || p.earlyMenopause) return true;
   if (p.parentalHipFracture) return true;
   if (p.currentSmoker) return true;

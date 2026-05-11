@@ -1,6 +1,6 @@
 'use client';
 
-import type { PatientInput, GlucocorticoidDose } from '@/lib/guidelines/types';
+import type { PatientInput, GlucocorticoidDose, GlucocorticoidStatus } from '@/lib/guidelines/types';
 import { Field, NumInput, YesNo, SectionHeading, Segmented } from '../FormPrimitives';
 
 interface Props {
@@ -15,6 +15,16 @@ const GC_DOSE_OPTIONS: { value: GlucocorticoidDose; label: string }[] = [
   { value: 'high', label: '>20 mg/day' },
 ];
 
+// v1.19 — single 4-option GC status field. The dose fields below stay
+// orthogonal because they describe the *current* course (only meaningful
+// when status === 'current').
+const GC_STATUS_OPTIONS: { value: GlucocorticoidStatus; label: string }[] = [
+  { value: 'current',              label: 'Currently on' },
+  { value: 'stopped_within_12m',   label: 'Stopped <12m' },
+  { value: 'stopped_over_12m_ago', label: 'Stopped >12m' },
+  { value: 'never',                label: 'Never' },
+];
+
 // v1.13 — derive the legacy categorical bucket from the numeric mg/day so both
 // fields stay in sync. Engine prefers numeric, but categorical is kept for
 // backwards compatibility with persisted/loaded patient data.
@@ -26,36 +36,38 @@ function bucketFromMgDay(mg: number): GlucocorticoidDose {
 }
 
 export function Step4Medications({ data, onChange }: Props) {
-  const gcOn = data.glucocorticoidUse !== null;
+  const status = data.glucocorticoidStatus ?? 'never';
+  const isCurrent = status === 'current';
 
   return (
     <div>
       <SectionHeading>Glucocorticoids</SectionHeading>
-      <Field label="Current glucocorticoid use" hint="Prednisolone or equivalent">
-        <YesNo
-          value={gcOn}
-          onChange={v =>
-            onChange({
-              glucocorticoidUse: v
-                ? { current: true, durationMonths: 3, dose: 'low' }
-                : null,
-              glucocorticoidDoseMgDay: v ? 5 : null,
-              // If turning GC on, clear "previously used" since current overrides.
-              glucocorticoidPreviouslyUsed: v ? false : data.glucocorticoidPreviouslyUsed,
-            })
-          }
-        />
-      </Field>
       <Field
-        label="Recent oral glucocorticoid use (stopped within last 12 months)"
-        hint="Triggers VFA — silent vertebral fractures may have occurred during GC period"
+        label="Glucocorticoid status"
+        hint="Prednisolone or equivalent. v1.19 — replaces the previous pair of toggles. Choose 'Stopped <12m' if the GC course ended within the last year (drives VFA recommendation), or 'Stopped >12m' if it ended more than a year ago (drives GC-withdrawal bone-protection review)."
       >
-        <YesNo
-          value={data.recentOralGlucocorticoidUse}
-          onChange={v => onChange({ recentOralGlucocorticoidUse: v })}
+        <Segmented<GlucocorticoidStatus>
+          value={status}
+          onChange={v => {
+            // Toggling away from 'current' clears the current-course dose state;
+            // toggling INTO 'current' seeds a default low dose so downstream logic
+            // has a numeric value to work with until the clinician overwrites it.
+            const becomingCurrent = v === 'current';
+            const wasCurrent = isCurrent;
+            onChange({
+              glucocorticoidStatus: v,
+              glucocorticoidUse: becomingCurrent
+                ? (data.glucocorticoidUse ?? { current: true, durationMonths: 3, dose: 'low' })
+                : null,
+              glucocorticoidDoseMgDay: becomingCurrent
+                ? (data.glucocorticoidDoseMgDay ?? 5)
+                : (wasCurrent ? null : data.glucocorticoidDoseMgDay),
+            });
+          }}
+          options={GC_STATUS_OPTIONS}
         />
       </Field>
-      {gcOn && data.glucocorticoidUse && (
+      {isCurrent && data.glucocorticoidUse && (
         <>
           <Field label="Currently taking" indent>
             <YesNo
@@ -111,21 +123,10 @@ export function Step4Medications({ data, onChange }: Props) {
           </Field>
         </>
       )}
-      {!gcOn && (
-        <Field
-          label="Previously on long-term oral glucocorticoid (now stopped)"
-          hint="Drives the GC-withdrawal bone-protection review (Section 9.4) — fires when patient is currently off GC and on a bisphosphonate"
-        >
-          <YesNo
-            value={data.glucocorticoidPreviouslyUsed}
-            onChange={v => onChange({ glucocorticoidPreviouslyUsed: v })}
-          />
-        </Field>
-      )}
 
       <SectionHeading>Other medications</SectionHeading>
       <Field
-        label="On levothyroxine"
+        label="Levothyroxine"
         hint="Affects TSH interpretation — under/over-replacement contributes to bone loss"
       >
         <YesNo
@@ -163,28 +164,10 @@ export function Step4Medications({ data, onChange }: Props) {
               />
             </Field>
           )}
-          <Field label="Early menopause" hint="Menopause before age 45">
-            <YesNo
-              value={data.earlyMenopause}
-              onChange={v =>
-                onChange({ earlyMenopause: v, ageAtMenopause: v ? data.ageAtMenopause : null })
-              }
-            />
-          </Field>
-          {data.earlyMenopause && (
-            <Field label="Age at menopause" indent>
-              <NumInput
-                value={data.ageAtMenopause}
-                onChange={v => onChange({ ageAtMenopause: v })}
-                min={20}
-                max={45}
-                unit="yrs"
-                width="w-20"
-              />
-            </Field>
-          )}
         </>
       )}
+      {/* v1.19 — Early menopause moved out of medications. It is a clinical
+          condition, not a medication, and now lives on Step 3 (Risk Factors). */}
     </div>
   );
 }

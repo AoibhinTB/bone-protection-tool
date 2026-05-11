@@ -4,6 +4,7 @@
 
 import type {
   PatientInput,
+  TreatmentHistory,
   TreatmentRecommendation,
   TreatmentAgent,
   RiskCategory,
@@ -28,6 +29,7 @@ import {
   PAUSE_REASSESSMENT_INTERVAL_MONTHS,
   BP_INDIVIDUAL_BASIS_AFTER_YEARS,
   aiAdditionalRiskFactorCount,
+  gcStoppedOver12MonthsAgo,
 } from './thresholds';
 import type { RiskStratification } from './types';
 
@@ -306,14 +308,26 @@ export function generateTreatmentOutput(
   }
 
   // ── BTM / BMD restart signal during a bisphosphonate pause (v1.13 Step 9; NOGG Section 6.6, Conditional) ──
-  // Patient is currently NOT on a BP, but had a previous BP stopped for treatment_holiday.
-  // Surface a restart-consideration flag if BTM is rising OR BMD has decreased on repeat DEXA.
+  // v1.19 — onPause now spans three patient shapes the wizard can produce:
+  //   1. currentTreatment is a BP marked currentlyOn=false with reasonStopped='treatment_holiday'
+  //      (the "currently on alendronate but currently paused" mental model)
+  //   2. currentTreatment is null AND a previous BP has reasonStopped='treatment_holiday'
+  //      (the previous mental model — patient stopped some time ago)
+  //   3. EITHER slot has a BP whose monthsSinceLastDose > 0 (interrupted course; v1.19 input)
+  // Pre-v1.19 the engine only saw shape 2, which created a UX trap: the wizard's "Currently on
+  // bone protection treatment" YesNo with hard-coded currentlyOn=true sat the patient in shape 1
+  // territory, but the engine couldn't see that as paused, so the BTM toggle never appeared and
+  // the restart signal could never fire from a UI-realistic input. TC37b locks in shape 1.
   {
+    const isPausedBP = (t: TreatmentHistory | null | undefined): boolean => {
+      if (!t || !isBisphosphonate(t.agent)) return false;
+      if (t.reasonStopped === 'treatment_holiday') return true;
+      if (t.currentlyOn === false && (t.monthsSinceLastDose ?? 0) > 0) return true;
+      return false;
+    };
     const onPause =
-      !patient.currentTreatment &&
-      patient.previousTreatments.some(
-        t => isBisphosphonate(t.agent) && t.reasonStopped === 'treatment_holiday',
-      );
+      isPausedBP(patient.currentTreatment) ||
+      patient.previousTreatments.some(isPausedBP);
     if (onPause && (patient.boneTurnoverMarkersRising === true || patient.bmdDecreasedDuringPause === true)) {
       const triggers: string[] = [];
       if (patient.boneTurnoverMarkersRising === true) triggers.push('rising bone turnover markers (CTX / P1NP)');
@@ -359,7 +373,7 @@ export function generateTreatmentOutput(
   //   - gc_withdrawal_continue_treatment (continue) — at least one axis above IT
   // If FRAX not provided, emit the umbrella gc_withdrawal_bp_review with a recalc prompt.
   if (
-    patient.glucocorticoidPreviouslyUsed &&
+    gcStoppedOver12MonthsAgo(patient) &&
     !isOnGC(patient) &&
     patient.currentTreatment?.currentlyOn === true &&
     isBisphosphonate(patient.currentTreatment.agent)
@@ -1504,12 +1518,20 @@ function denosumabReboundFlags(
   const isOnDenosumab = patient.currentTreatment?.agent === 'denosumab' && patient.currentTreatment.currentlyOn;
 
   if (isOnDenosumab) {
+    // v1.19 — months since last dose now lives on the treatment, not on the patient.
+    // Falls back from currentTreatment first, then any previous denosumab record (so a
+    // patient who has stopped denosumab but still presents with monthsSinceLastDose
+    // information on their previous-treatment row also gets the alerts).
+    const monthsSinceLastDose =
+      patient.currentTreatment?.monthsSinceLastDose ??
+      patient.previousTreatments.find(t => t.agent === 'denosumab')?.monthsSinceLastDose ??
+      null;
     // Injection due at 6 months — warning. Bone turnover markers rise from ~3 months and
     // exceed baseline by 6 months after a missed dose.
     if (
-      patient.denosumabMonthsSinceLastDose !== null &&
-      patient.denosumabMonthsSinceLastDose >= 6 &&
-      patient.denosumabMonthsSinceLastDose < DENOSUMAB.reboundRiskThresholdMonths
+      monthsSinceLastDose !== null &&
+      monthsSinceLastDose >= 6 &&
+      monthsSinceLastDose < DENOSUMAB.reboundRiskThresholdMonths
     ) {
       flags.push({
         id: 'denosumab_injection_due',
@@ -1525,8 +1547,8 @@ function denosumabReboundFlags(
 
     // Overdue injection ≥7 months — urgent (FREEDOM trial citation)
     if (
-      patient.denosumabMonthsSinceLastDose !== null &&
-      patient.denosumabMonthsSinceLastDose >= DENOSUMAB.reboundRiskThresholdMonths
+      monthsSinceLastDose !== null &&
+      monthsSinceLastDose >= DENOSUMAB.reboundRiskThresholdMonths
     ) {
       flags.push({
         id: 'denosumab_overdue_injection',

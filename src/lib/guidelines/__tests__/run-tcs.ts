@@ -31,7 +31,7 @@ function basePatient(overrides: Partial<PatientInput>): PatientInput {
     learningDisabilities: false,
     glucocorticoidUse: null,
     glucocorticoidDoseMgDay: null,
-    glucocorticoidPreviouslyUsed: false,
+    glucocorticoidStatus: null,
     boneTurnoverMarkersRising: null,
     bmdDecreasedDuringPause: null,
     adtUse: false,
@@ -55,13 +55,11 @@ function basePatient(overrides: Partial<PatientInput>): PatientInput {
     fraxCalculatedWithBMD: false,
     currentTreatment: null,
     previousTreatments: [],
-    denosumabMonthsSinceLastDose: null,
     completedAnabolicCourse: false,
     thighOrGroinPain: false,
     onThyroidReplacement: false,
     refusesInjections: false,
     bmdUnavailable: false,
-    recentOralGlucocorticoidUse: false,
     bornOutsideIreland: false,
     onThiazolidinedione: false,
   };
@@ -141,7 +139,7 @@ function tc2(): TCResult {
     sex: 'female',
     dexaResults: { lumbarSpineTScore: null, totalHipTScore: -3.1, femoralNeckTScore: -3.1, forearmTScore: null },
     renalFunction: { egfr: 55 },
-    previousTreatments: [{ agent: 'alendronate', durationMonths: 36, reasonStopped: 'aff_confirmed', currentlyOn: false }],
+    previousTreatments: [{ agent: 'alendronate', durationMonths: 36, reasonStopped: 'aff_confirmed', currentlyOn: false, monthsSinceLastDose: null }],
   });
   const decision = runClinicalDecision(patient);
   check(failures, 'risk = high (not VHR — T-score -3.1 > -3.5)', decision.riskStratification.category === 'high', `got ${decision.riskStratification.category}`);
@@ -188,7 +186,7 @@ function tc4(): TCResult {
     dexaResults: { lumbarSpineTScore: -2.9, totalHipTScore: -2.9, femoralNeckTScore: -2.9, forearmTScore: null },
     renalFunction: { egfr: 62 },
     bloodResults: { adjustedCalciumMmol: 2.3, vitaminDNmol: 80, egfr: 62, alp: 80, tshMUL: 2.0, hbGramsPerLitre: 140, esrOrCrp: 'normal' },
-    previousTreatments: [{ agent: 'alendronate', durationMonths: 6, reasonStopped: 'gi_intolerance', currentlyOn: false }],
+    previousTreatments: [{ agent: 'alendronate', durationMonths: 6, reasonStopped: 'gi_intolerance', currentlyOn: false, monthsSinceLastDose: null }],
   });
   const decision = runClinicalDecision(patient);
   check(failures, 'risk = high', decision.riskStratification.category === 'high', `got ${decision.riskStratification.category}`);
@@ -237,8 +235,8 @@ function tc6(): TCResult {
     dexaResults: { lumbarSpineTScore: -2.6, totalHipTScore: -2.4, femoralNeckTScore: -2.4, forearmTScore: null },
     renalFunction: { egfr: 75 },
     bloodResults: { adjustedCalciumMmol: 2.3, vitaminDNmol: 45, egfr: 75, alp: 80, tshMUL: 2.0, hbGramsPerLitre: 140, esrOrCrp: 'normal' },
-    currentTreatment: { agent: 'denosumab', durationMonths: 36, reasonStopped: null, currentlyOn: true },
-    denosumabMonthsSinceLastDose: 5,
+    // v1.19 — months-since-last-dose now lives on the treatment record itself.
+    currentTreatment: { agent: 'denosumab', durationMonths: 36, reasonStopped: null, currentlyOn: true, monthsSinceLastDose: 5 },
   });
   const decision = runClinicalDecision(patient);
   check(failures, 'recommends denosumab continuation', hasAgent(decision, 'denosumab'));
@@ -285,8 +283,8 @@ function tc8(): TCResult {
     dexaResults: { lumbarSpineTScore: -2.8, totalHipTScore: -2.6, femoralNeckTScore: -2.6, forearmTScore: null },
     renalFunction: { egfr: 60 },
     previousTreatments: [
-      { agent: 'alendronate', durationMonths: 24, reasonStopped: 'onj', currentlyOn: false },
-      { agent: 'denosumab', durationMonths: 12, reasonStopped: 'onj', currentlyOn: false },
+      { agent: 'alendronate', durationMonths: 24, reasonStopped: 'onj', currentlyOn: false, monthsSinceLastDose: null },
+      { agent: 'denosumab', durationMonths: 12, reasonStopped: 'onj', currentlyOn: false, monthsSinceLastDose: null },
     ],
   });
   const decision = runClinicalDecision(patient);
@@ -375,7 +373,7 @@ function tc11(): TCResult {
     dexaResults: { lumbarSpineTScore: -2.1, totalHipTScore: -2.0, femoralNeckTScore: -2.1, forearmTScore: null },
     renalFunction: { egfr: 55 },
     bloodResults: { adjustedCalciumMmol: 2.3, vitaminDNmol: 50, egfr: 55, alp: 80, tshMUL: 2.0, hbGramsPerLitre: 140, esrOrCrp: 'normal' },
-    previousTreatments: [{ agent: 'alendronate', durationMonths: 6, reasonStopped: 'gi_intolerance', currentlyOn: false }],
+    previousTreatments: [{ agent: 'alendronate', durationMonths: 6, reasonStopped: 'gi_intolerance', currentlyOn: false, monthsSinceLastDose: null }],
   });
   const decision = runClinicalDecision(patient);
   check(failures, 'GIOP pathway flag fired', hasFlag(decision, 'giop'));
@@ -444,7 +442,7 @@ function tc14(): TCResult {
     dexaResults: { lumbarSpineTScore: -2.8, totalHipTScore: -2.6, femoralNeckTScore: -2.6, forearmTScore: null },
     renalFunction: { egfr: 72 },
     bloodResults: { adjustedCalciumMmol: 2.32, vitaminDNmol: 70, egfr: 72, alp: 80, tshMUL: 2.0, hbGramsPerLitre: 140, esrOrCrp: 'normal' },
-    currentTreatment: { agent: 'hrt', durationMonths: 48, reasonStopped: null, currentlyOn: true },
+    currentTreatment: { agent: 'hrt', durationMonths: 48, reasonStopped: null, currentlyOn: true, monthsSinceLastDose: null },
   });
   const decision = runClinicalDecision(patient);
   check(failures, 'risk = high (T ≤ -2.5 despite HRT)', decision.riskStratification.category === 'high', `got ${decision.riskStratification.category}`);
@@ -524,7 +522,7 @@ function tc17(): TCResult {
     dexaResults: { lumbarSpineTScore: -2.3, totalHipTScore: -2.3, femoralNeckTScore: -2.3, forearmTScore: null },
     renalFunction: { egfr: 62 },
     bloodResults: { adjustedCalciumMmol: 2.32, vitaminDNmol: 72, egfr: 62, alp: 80, tshMUL: 2.0, hbGramsPerLitre: 140, esrOrCrp: 'normal' },
-    previousTreatments: [{ agent: 'alendronate', durationMonths: 60, reasonStopped: 'treatment_holiday', currentlyOn: false }],
+    previousTreatments: [{ agent: 'alendronate', durationMonths: 60, reasonStopped: 'treatment_holiday', currentlyOn: false, monthsSinceLastDose: null }],
   });
   const decision = runClinicalDecision(patient);
   check(failures, 'risk = high (recent fragility fracture)', decision.riskStratification.category === 'high', `got ${decision.riskStratification.category}`);
@@ -543,8 +541,7 @@ function tc18(): TCResult {
     dexaResults: { lumbarSpineTScore: -2.9, totalHipTScore: -2.8, femoralNeckTScore: -2.8, forearmTScore: null },
     renalFunction: { egfr: 65 },
     bloodResults: { adjustedCalciumMmol: 2.32, vitaminDNmol: 60, egfr: 65, alp: 80, tshMUL: 2.0, hbGramsPerLitre: 140, esrOrCrp: 'normal' },
-    currentTreatment: { agent: 'denosumab', durationMonths: 24, reasonStopped: null, currentlyOn: true },
-    denosumabMonthsSinceLastDose: 8,
+    currentTreatment: { agent: 'denosumab', durationMonths: 24, reasonStopped: null, currentlyOn: true, monthsSinceLastDose: 8 },
   });
   const decision = runClinicalDecision(patient);
   check(failures, 'urgent overdue injection flag', hasFlag(decision, 'denosumab_overdue_injection'));
@@ -725,14 +722,14 @@ function tc26(): TCResult {
   const patient = basePatient({
     age: 64,
     sex: 'female',
-    glucocorticoidPreviouslyUsed: true,
+    glucocorticoidStatus: 'stopped_over_12m_ago',
     glucocorticoidDoseMgDay: null,
     fraxMOFPercent: 10.5,
     fraxHipPercent: 2.1,
     dexaResults: { lumbarSpineTScore: -1.9, totalHipTScore: -1.9, femoralNeckTScore: -1.9, forearmTScore: null },
     renalFunction: { egfr: 68 },
     bloodResults: { adjustedCalciumMmol: 2.32, vitaminDNmol: 70, egfr: 68, alp: 80, tshMUL: 2.0, hbGramsPerLitre: 140, esrOrCrp: 'normal' },
-    currentTreatment: { agent: 'alendronate', durationMonths: 24, reasonStopped: null, currentlyOn: true },
+    currentTreatment: { agent: 'alendronate', durationMonths: 24, reasonStopped: null, currentlyOn: true, monthsSinceLastDose: null },
   });
   const decision = runClinicalDecision(patient);
   check(failures, 'GC withdrawal review flag fires (eligible)', hasFlag(decision, 'gc_withdrawal_bp_review'));
@@ -748,14 +745,14 @@ function tc27(): TCResult {
   const patient = basePatient({
     age: 71,
     sex: 'female',
-    glucocorticoidPreviouslyUsed: true,
+    glucocorticoidStatus: 'stopped_over_12m_ago',
     glucocorticoidDoseMgDay: null,
     fraxMOFPercent: 19.0,
     fraxHipPercent: 5.6,
     dexaResults: { lumbarSpineTScore: -2.0, totalHipTScore: -2.0, femoralNeckTScore: -2.0, forearmTScore: null },
     renalFunction: { egfr: 62 },
     bloodResults: { adjustedCalciumMmol: 2.32, vitaminDNmol: 70, egfr: 62, alp: 80, tshMUL: 2.0, hbGramsPerLitre: 140, esrOrCrp: 'normal' },
-    currentTreatment: { agent: 'alendronate', durationMonths: 24, reasonStopped: null, currentlyOn: true },
+    currentTreatment: { agent: 'alendronate', durationMonths: 24, reasonStopped: null, currentlyOn: true, monthsSinceLastDose: null },
   });
   const decision = runClinicalDecision(patient);
   check(failures, 'GC withdrawal CONTINUE-TREATMENT flag fires', hasFlag(decision, 'gc_withdrawal_continue_treatment'));
@@ -799,7 +796,7 @@ function tc29(): TCResult {
     dexaResults: { lumbarSpineTScore: -1.9, totalHipTScore: -1.9, femoralNeckTScore: -1.9, forearmTScore: null },
     renalFunction: { egfr: 70 },
     bloodResults: { adjustedCalciumMmol: 2.32, vitaminDNmol: 70, egfr: 70, alp: 80, tshMUL: 2.0, hbGramsPerLitre: 140, esrOrCrp: 'normal' },
-    currentTreatment: { agent: 'alendronate', durationMonths: 60, reasonStopped: null, currentlyOn: true },
+    currentTreatment: { agent: 'alendronate', durationMonths: 60, reasonStopped: null, currentlyOn: true, monthsSinceLastDose: null },
   });
   const decision = runClinicalDecision(patient);
   check(failures, 'pause flag fires', hasFlag(decision, 'bp_holiday_appropriate'));
@@ -820,7 +817,7 @@ function tc30(): TCResult {
     dexaResults: { lumbarSpineTScore: -1.9, totalHipTScore: -1.9, femoralNeckTScore: -1.9, forearmTScore: null },
     renalFunction: { egfr: 70 },
     bloodResults: { adjustedCalciumMmol: 2.32, vitaminDNmol: 70, egfr: 70, alp: 80, tshMUL: 2.0, hbGramsPerLitre: 140, esrOrCrp: 'normal' },
-    currentTreatment: { agent: 'risedronate', durationMonths: 60, reasonStopped: null, currentlyOn: true },
+    currentTreatment: { agent: 'risedronate', durationMonths: 60, reasonStopped: null, currentlyOn: true, monthsSinceLastDose: null },
   });
   const decision = runClinicalDecision(patient);
   check(failures, 'pause flag fires', hasFlag(decision, 'bp_holiday_appropriate'));
@@ -840,7 +837,7 @@ function tc31(): TCResult {
     dexaResults: { lumbarSpineTScore: -1.9, totalHipTScore: -1.9, femoralNeckTScore: -1.9, forearmTScore: null },
     renalFunction: { egfr: 72 },
     bloodResults: { adjustedCalciumMmol: 2.32, vitaminDNmol: 70, egfr: 72, alp: 80, tshMUL: 2.0, hbGramsPerLitre: 140, esrOrCrp: 'normal' },
-    currentTreatment: { agent: 'ibandronate', durationMonths: 60, reasonStopped: null, currentlyOn: true },
+    currentTreatment: { agent: 'ibandronate', durationMonths: 60, reasonStopped: null, currentlyOn: true, monthsSinceLastDose: null },
   });
   const decision = runClinicalDecision(patient);
   check(failures, 'pause flag fires', hasFlag(decision, 'bp_holiday_appropriate'));
@@ -860,7 +857,7 @@ function tc32(): TCResult {
     dexaResults: { lumbarSpineTScore: -1.8, totalHipTScore: -1.8, femoralNeckTScore: -1.8, forearmTScore: null },
     renalFunction: { egfr: 70 },
     bloodResults: { adjustedCalciumMmol: 2.32, vitaminDNmol: 70, egfr: 70, alp: 80, tshMUL: 2.0, hbGramsPerLitre: 140, esrOrCrp: 'normal' },
-    currentTreatment: { agent: 'zoledronate', durationMonths: 36, reasonStopped: null, currentlyOn: true },
+    currentTreatment: { agent: 'zoledronate', durationMonths: 36, reasonStopped: null, currentlyOn: true, monthsSinceLastDose: null },
   });
   const decision = runClinicalDecision(patient);
   check(failures, 'pause flag fires', hasFlag(decision, 'bp_holiday_appropriate'));
@@ -881,7 +878,7 @@ function tc33(): TCResult {
     dexaResults: { lumbarSpineTScore: -2.2, totalHipTScore: -2.2, femoralNeckTScore: -2.2, forearmTScore: null },
     renalFunction: { egfr: 65 },
     bloodResults: { adjustedCalciumMmol: 2.32, vitaminDNmol: 68, egfr: 65, alp: 80, tshMUL: 2.0, hbGramsPerLitre: 140, esrOrCrp: 'normal' },
-    previousTreatments: [{ agent: 'alendronate', durationMonths: 60, reasonStopped: 'treatment_holiday', currentlyOn: false }],
+    previousTreatments: [{ agent: 'alendronate', durationMonths: 60, reasonStopped: 'treatment_holiday', currentlyOn: false, monthsSinceLastDose: null }],
   });
   const decision = runClinicalDecision(patient);
   check(failures, 'fracture-during-pause restart flag fires', hasFlag(decision, 'bp_pause_fracture_restart'));
@@ -905,7 +902,7 @@ function tc34(): TCResult {
     dexaResults: { lumbarSpineTScore: -2.4, totalHipTScore: -2.4, femoralNeckTScore: -2.4, forearmTScore: null },
     renalFunction: { egfr: 60 },
     bloodResults: { adjustedCalciumMmol: 2.32, vitaminDNmol: 55, egfr: 60, alp: 80, tshMUL: 2.0, hbGramsPerLitre: 140, esrOrCrp: 'normal' },
-    currentTreatment: { agent: 'alendronate', durationMonths: 36, reasonStopped: null, currentlyOn: true },
+    currentTreatment: { agent: 'alendronate', durationMonths: 36, reasonStopped: null, currentlyOn: true, monthsSinceLastDose: null },
   });
   const decision = runClinicalDecision(patient);
   check(failures, 'on-treatment fracture pathway flag fires', hasFlag(decision, 'on_treatment_fracture_pathway'));
@@ -931,7 +928,7 @@ function tc35(): TCResult {
     dexaResults: { lumbarSpineTScore: -2.0, totalHipTScore: -2.0, femoralNeckTScore: -2.0, forearmTScore: null },
     renalFunction: { egfr: 65 },
     bloodResults: { adjustedCalciumMmol: 2.32, vitaminDNmol: 65, egfr: 65, alp: 80, tshMUL: 2.0, hbGramsPerLitre: 140, esrOrCrp: 'normal' },
-    currentTreatment: { agent: 'alendronate', durationMonths: 126, reasonStopped: null, currentlyOn: true },
+    currentTreatment: { agent: 'alendronate', durationMonths: 126, reasonStopped: null, currentlyOn: true, monthsSinceLastDose: null },
   });
   const decision = runClinicalDecision(patient);
   check(failures, 'after-10-years individual basis flag fires', hasFlag(decision, 'bp_individual_basis_after_long_course'));
@@ -951,7 +948,7 @@ function tc36(): TCResult {
     dexaResults: { lumbarSpineTScore: -2.1, totalHipTScore: -2.1, femoralNeckTScore: -2.1, forearmTScore: null },
     renalFunction: { egfr: 58 },
     bloodResults: { adjustedCalciumMmol: 2.32, vitaminDNmol: 65, egfr: 58, alp: 80, tshMUL: 2.0, hbGramsPerLitre: 140, esrOrCrp: 'normal' },
-    currentTreatment: { agent: 'zoledronate', durationMonths: 78, reasonStopped: null, currentlyOn: true },
+    currentTreatment: { agent: 'zoledronate', durationMonths: 78, reasonStopped: null, currentlyOn: true, monthsSinceLastDose: null },
   });
   const decision = runClinicalDecision(patient);
   check(failures, 'after-6-years IV individual basis flag fires', hasFlag(decision, 'bp_individual_basis_after_long_course'));
@@ -972,7 +969,7 @@ function tc37(): TCResult {
     dexaResults: { lumbarSpineTScore: -2.0, totalHipTScore: -2.0, femoralNeckTScore: -2.0, forearmTScore: null },
     renalFunction: { egfr: 70 },
     bloodResults: { adjustedCalciumMmol: 2.32, vitaminDNmol: 65, egfr: 70, alp: 145, tshMUL: 2.0, hbGramsPerLitre: 140, esrOrCrp: 'normal' },
-    previousTreatments: [{ agent: 'alendronate', durationMonths: 60, reasonStopped: 'treatment_holiday', currentlyOn: false }],
+    previousTreatments: [{ agent: 'alendronate', durationMonths: 60, reasonStopped: 'treatment_holiday', currentlyOn: false, monthsSinceLastDose: null }],
   });
   const decision = runClinicalDecision(patient);
   check(failures, 'BP pause restart-signal flag fires', hasFlag(decision, 'bp_pause_restart_signal'));
@@ -980,6 +977,35 @@ function tc37(): TCResult {
   check(failures, 'flag mentions LFTs/GGT caveat for ALP elevation', hasFlagText(decision, 'lfts'));
   // Conditional: must be flagged but no auto-restart treatment recommendation forced.
   return { name: 'TC37 — BTM rising during pause: restart signal', passed: failures.length === 0, failures, decision };
+}
+
+// ─── TC37b ─────────────────────────────────────────────────────────────────
+// v1.19 — UI-realistic shape for "patient currently on alendronate, currently paused".
+// Same clinical state as TC37 but expressed via currentTreatment={alendronate,
+// currentlyOn:false, reasonStopped:'treatment_holiday', monthsSinceLastDose:18}.
+// Pre-v1.19 the engine's onPause check required currentTreatment===null and so
+// could not fire the restart signal for this shape; the wizard's "Currently on
+// bone protection treatment" YesNo produces exactly this shape, which was the
+// manual-testing failure mode. This test locks in the v1.19 fix.
+function tc37b(): TCResult {
+  const failures: string[] = [];
+  const patient = basePatient({
+    age: 66,
+    sex: 'female',
+    boneTurnoverMarkersRising: true,
+    fraxMOFPercent: 16.0,
+    fraxHipPercent: 3.0,
+    dexaResults: { lumbarSpineTScore: -2.0, totalHipTScore: -2.0, femoralNeckTScore: -2.0, forearmTScore: null },
+    renalFunction: { egfr: 70 },
+    bloodResults: { adjustedCalciumMmol: 2.32, vitaminDNmol: 65, egfr: 70, alp: 145, tshMUL: 2.0, hbGramsPerLitre: 140, esrOrCrp: 'normal' },
+    currentTreatment: { agent: 'alendronate', durationMonths: 60, reasonStopped: 'treatment_holiday', currentlyOn: false, monthsSinceLastDose: 18 },
+    previousTreatments: [],
+  });
+  const decision = runClinicalDecision(patient);
+  check(failures, 'BP pause restart-signal flag fires (UI-realistic shape)', hasFlag(decision, 'bp_pause_restart_signal'));
+  check(failures, 'flag references rising bone turnover', hasFlagText(decision, 'rising bone turnover markers'));
+  check(failures, 'flag mentions LFTs/GGT caveat for ALP elevation', hasFlagText(decision, 'lfts'));
+  return { name: 'TC37b — paused current BP shape (UI-realistic)', passed: failures.length === 0, failures, decision };
 }
 
 // ─── TC38 ─────────────────────────────────────────────────────────────────
@@ -1375,7 +1401,7 @@ const TCs: Array<() => TCResult> = [
   tc1, tc2, tc3, tc4, tc5, tc6, tc7, tc8, tc9, tc10,
   tc11, tc12, tc13, tc14, tc15, tc16, tc17, tc18, tc19, tc20, tc21, tc22,
   tc23, tc24, tc25, tc26, tc27, tc28, tc29, tc30, tc31, tc32,
-  tc33, tc34, tc35, tc36, tc37, tc38, tc39, tc40, tc41,
+  tc33, tc34, tc35, tc36, tc37, tc37b, tc38, tc39, tc40, tc41,
   tc42, tc43, tc44, tc45, tc46, tc47, tc48, tc49, tc50, tc51, tc52,
 ];
 

@@ -21,11 +21,25 @@ const STOP_REASON_OPTIONS = (Object.keys(STOP_REASON_LABELS) as TreatmentStopRea
 
 const BISPHOSPHONATES: TreatmentAgent[] = ['alendronate', 'risedronate', 'ibandronate', 'zoledronate'];
 
+// v1.19 — onPause matches the engine's new rule (treatment.ts):
+//   1. currentTreatment is a paused BP (currentlyOn=false with reasonStopped='treatment_holiday')
+//   2. currentTreatment is null AND a previous BP has reasonStopped='treatment_holiday'
+//   3. EITHER slot has a BP with monthsSinceLastDose > 0 and currentlyOn=false
+function isPausedBP(t: TreatmentHistory | null | undefined): boolean {
+  if (!t || !BISPHOSPHONATES.includes(t.agent)) return false;
+  if (t.reasonStopped === 'treatment_holiday') return true;
+  if (!t.currentlyOn && (t.monthsSinceLastDose ?? 0) > 0) return true;
+  return false;
+}
+
 export function Step7TreatmentHistory({ data, onChange }: Props) {
   const onTreatment = data.currentTreatment !== null;
   const currentAgent = data.currentTreatment?.agent;
   const isOnDenosumab = currentAgent === 'denosumab';
   const isOnBP = currentAgent !== undefined && BISPHOSPHONATES.includes(currentAgent);
+  const onPause =
+    isPausedBP(data.currentTreatment) ||
+    data.previousTreatments.some(isPausedBP);
 
   function updateCurrent(patch: Partial<TreatmentHistory>) {
     if (!data.currentTreatment) return;
@@ -36,7 +50,7 @@ export function Step7TreatmentHistory({ data, onChange }: Props) {
     onChange({
       previousTreatments: [
         ...data.previousTreatments,
-        { agent: 'alendronate', durationMonths: 12, reasonStopped: null, currentlyOn: false },
+        { agent: 'alendronate', durationMonths: 12, reasonStopped: null, currentlyOn: false, monthsSinceLastDose: null },
       ],
     });
   }
@@ -56,15 +70,14 @@ export function Step7TreatmentHistory({ data, onChange }: Props) {
   return (
     <div>
       <SectionHeading>Current treatment</SectionHeading>
-      <Field label="Currently on bone protection treatment">
+      <Field label="Currently on bone protection treatment" hint="Includes patients currently on a planned bisphosphonate holiday/pause — toggle 'Currently dosing' off below to mark them as paused.">
         <YesNo
           value={onTreatment}
           onChange={v =>
             onChange({
               currentTreatment: v
-                ? { agent: 'alendronate', durationMonths: 12, reasonStopped: null, currentlyOn: true }
+                ? { agent: 'alendronate', durationMonths: 12, reasonStopped: null, currentlyOn: true, monthsSinceLastDose: null }
                 : null,
-              denosumabMonthsSinceLastDose: null,
             })
           }
         />
@@ -90,22 +103,48 @@ export function Step7TreatmentHistory({ data, onChange }: Props) {
               width="w-20"
             />
           </Field>
-          {isOnDenosumab && (
-            <Field
-              label="Months since last injection"
-              hint=">7 months = missed dose → rebound risk"
-              indent
-            >
-              <NumInput
-                value={data.denosumabMonthsSinceLastDose}
-                onChange={v => onChange({ denosumabMonthsSinceLastDose: v })}
-                min={0}
-                max={36}
-                unit="months"
-                width="w-20"
+          {/* v1.19 — currentlyOn + reasonStopped now exposed for the current
+              treatment so the user can mark "on alendronate but currently paused"
+              without having to bounce the agent into previousTreatments. */}
+          <Field
+            label="Currently dosing"
+            hint="Off = on a planned holiday/pause, or otherwise temporarily off the active drug"
+            indent
+          >
+            <YesNo
+              value={data.currentTreatment.currentlyOn}
+              onChange={v => updateCurrent({ currentlyOn: v })}
+            />
+          </Field>
+          {!data.currentTreatment.currentlyOn && (
+            <Field label="Reason paused / stopped" indent>
+              <Select<TreatmentStopReason>
+                value={data.currentTreatment.reasonStopped ?? ''}
+                onChange={v => updateCurrent({ reasonStopped: v })}
+                options={STOP_REASON_OPTIONS}
+                placeholder="Not specified"
               />
             </Field>
           )}
+          <Field
+            label="Months since last dose"
+            hint={
+              isOnDenosumab
+                ? '>7 months = missed dose → rebound risk. v1.19: drives the denosumab rebound alerts.'
+                : 'Months since the last actual dose. For BPs this counts from the last administration regardless of where the patient sits in the planned course; drives drug-specific holiday reassessment intervals.'
+            }
+            indent
+          >
+            <NumInput
+              value={data.currentTreatment.monthsSinceLastDose}
+              onChange={v => updateCurrent({ monthsSinceLastDose: v })}
+              min={0}
+              max={120}
+              step={0.5}
+              unit="months"
+              width="w-24"
+            />
+          </Field>
           {isOnBP && (
             <Field
               label="Unexplained mid-thigh or groin pain"
@@ -121,40 +160,32 @@ export function Step7TreatmentHistory({ data, onChange }: Props) {
         </>
       )}
 
-      {/* v1.13 Step 9 — BP pause monitoring signals (NOGG 2024 Section 6.6 Rec 7 Conditional).
-          Visible only when patient has a previously-paused bisphosphonate AND is not currently
-          on treatment — these inputs drive the bp_pause_restart_signal flag. */}
-      {(() => {
-        const onPause =
-          !data.currentTreatment &&
-          data.previousTreatments.some(
-            t => BISPHOSPHONATES.includes(t.agent) && t.reasonStopped === 'treatment_holiday',
-          );
-        if (!onPause) return null;
-        return (
-          <>
-            <SectionHeading>Bisphosphonate pause — monitoring signals</SectionHeading>
-            <Field
-              label="Bone turnover markers rising during pause"
-              hint="CTX or P1NP trending upward — Conditional restart signal (NOGG 2024 Rec 7). Exclude liver source if ALP-driven."
-            >
-              <YesNo
-                value={data.boneTurnoverMarkersRising === true}
-                onChange={v => onChange({ boneTurnoverMarkersRising: v })}
-              />
-            </Field>
-            <Field
-              label="BMD decreased on repeat DEXA during pause"
-              hint="Conditional restart signal (NOGG 2024 Rec 7). No definitive thresholds — clinical judgement."
-            >
-              <YesNo
-                value={data.bmdDecreasedDuringPause === true}
-                onChange={v => onChange({ bmdDecreasedDuringPause: v })}
-              />
-            </Field>
-          </>
-        );
-      })()}
+      {/* v1.13 / v1.19 — BP pause monitoring signals (NOGG 2024 Section 6.6 Rec 7 Conditional).
+          Now visible whenever ANY bisphosphonate slot looks paused — current OR previous —
+          rather than only the previous-treatment shape. */}
+      {onPause && (
+        <>
+          <SectionHeading>Bisphosphonate pause — monitoring signals</SectionHeading>
+          <Field
+            label="Bone turnover markers rising during pause"
+            hint="CTX or P1NP trending upward — Conditional restart signal (NOGG 2024 Rec 7). Exclude liver source if ALP-driven."
+          >
+            <YesNo
+              value={data.boneTurnoverMarkersRising === true}
+              onChange={v => onChange({ boneTurnoverMarkersRising: v })}
+            />
+          </Field>
+          <Field
+            label="BMD decreased on repeat DEXA during pause"
+            hint="Conditional restart signal (NOGG 2024 Rec 7). No definitive thresholds — clinical judgement."
+          >
+            <YesNo
+              value={data.bmdDecreasedDuringPause === true}
+              onChange={v => onChange({ bmdDecreasedDuringPause: v })}
+            />
+          </Field>
+        </>
+      )}
 
       <SectionHeading>Patient preference</SectionHeading>
       <Field
@@ -201,7 +232,7 @@ export function Step7TreatmentHistory({ data, onChange }: Props) {
               options={AGENT_OPTIONS}
             />
           </Field>
-          <Field label="Duration">
+          <Field label="Total duration">
             <NumInput
               value={t.durationMonths}
               onChange={v => updatePrevious(i, { durationMonths: v ?? 1 })}
@@ -218,6 +249,20 @@ export function Step7TreatmentHistory({ data, onChange }: Props) {
               onChange={v => updatePrevious(i, { reasonStopped: v })}
               options={STOP_REASON_OPTIONS}
               placeholder="Not specified"
+            />
+          </Field>
+          <Field
+            label="Months since last dose"
+            hint="Counts from the last administered dose. For a holiday/pause, this is the months elapsed since stopping."
+          >
+            <NumInput
+              value={t.monthsSinceLastDose}
+              onChange={v => updatePrevious(i, { monthsSinceLastDose: v })}
+              min={0}
+              max={240}
+              step={0.5}
+              unit="months"
+              width="w-24"
             />
           </Field>
         </div>
