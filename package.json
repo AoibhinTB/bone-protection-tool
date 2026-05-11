@@ -6,7 +6,8 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint"
+    "lint": "next lint",
+    "test": "ts-node --transpile-only --compiler-options '{\"module\":\"commonjs\",\"moduleResolution\":\"node\",\"jsx\":\"react\"}' src/lib/guidelines/__tests__/run-tcs.ts"
   },
   "dependencies": {
     "next": "14.2.35",
