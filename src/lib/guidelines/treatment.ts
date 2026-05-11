@@ -810,6 +810,32 @@ export function generateTreatmentOutput(
         : 'Very high fracture risk — assessment and consideration of parenteral treatment per NOGG 2024 (some may need first-line anabolic, especially with multiple vertebral fractures).',
       urgency: gcDrivesVHR ? 'urgent' : 'soon',
     });
+
+    // ── v1.20 Step 8 — Anabolic option for men ≥50 at VHR with vertebral fractures ──
+    // Teriparatide is the only anabolic licensed for men. Surface it explicitly
+    // as a first-line option in this population; the referral pathway above
+    // already triggers — this flag adds the male-specific clinical content.
+    if (
+      patient.sex === 'male' &&
+      patient.age >= 50 &&
+      (patient.priorVertebralFracture || (patient.recentVertebralFractureYears !== null && patient.recentVertebralFractureYears <= 2))
+    ) {
+      const teriparatideUsed = hasCompletedTeriparatideCourse(patient);
+      flags.push({
+        id: 'male_vhr_anabolic_teriparatide',
+        severity: 'warning',
+        message: teriparatideUsed
+          ? 'Male ≥50 at very high risk with vertebral fracture(s). NOTE: teriparatide has already been used (lifetime maximum reached) — specialist input required for alternative parenteral strategy. ' +
+            'Romosozumab is NOT licensed for men. Discuss zoledronate or denosumab continuation under specialist guidance.'
+          : 'Male ≥50 at very high risk with vertebral fracture(s) — teriparatide should be considered as a first-line option per NOGG 2024 (v1.20). ' +
+            'Teriparatide is the only anabolic drug licensed for use in men in Ireland. GP cannot initiate — specialist (consultant) referral required under the HSE High-Tech scheme.',
+        rationale:
+          'NOGG 2024 Section 5.5 / Section 7.1 (v1.20 addition): men ≥50 at VHR with vertebral fractures benefit from anabolic-first treatment. ' +
+          'Teriparatide is the licensed anabolic for men in Ireland; romosozumab and abaloparatide are not. ' +
+          'A specialist initiates teriparatide under the HSE High-Tech scheme; the GP may continue under shared care after initiation.',
+        source: SRC_NOGG,
+      });
+    }
   }
 
   // ── Active adverse event pathways (override sequencing) ──
@@ -837,6 +863,109 @@ export function generateTreatmentOutput(
     });
   }
 
+  // v1.23 — re-extract currentTreatment as a fresh local so the flag blocks
+  // below aren't blocked by TypeScript's narrowing (the ONJ / AFF / sequencing
+  // branches above each contain returns that narrow patient.currentTreatment
+  // to null for the rest of this function).
+  const current: TreatmentHistory | null = patient.currentTreatment as TreatmentHistory | null;
+
+  // ── v1.23 Step 2 — Teriparatide lifetime restriction ──
+  // Fires regardless of new-initiation vs continuation path so the flag
+  // surfaces for established patients reviewed in primary care.
+  if (hasCompletedTeriparatideCourse(patient)) {
+    flags.push({
+      id: 'teriparatide_lifetime_used',
+      severity: 'warning',
+      message:
+        'Teriparatide cannot be used — lifetime maximum of one 24-month course already completed. ' +
+        'Romosozumab remains an option (no lifetime restriction; women only). ' +
+        'Sequential antiresorptive therapy and specialist follow-up are required for ongoing bone protection.',
+      rationale:
+        'NOGG 2024 / HSE BVM teriparatide policy (v1.23): a single 24-month course is the lifetime maximum. ' +
+        'Romosozumab and abaloparatide have no equivalent restriction. The patient must continue with an antiresorptive ' +
+        'after the teriparatide course; failure to follow on with an antiresorptive negates the BMD gain.',
+      source: SRC_NOGG,
+    });
+  }
+
+  // ── v1.22 Step 3 — Specialist initiation vs GP continuation flag ──
+  // For teriparatide / romosozumab specifically. Don't emit a referral
+  // instruction for someone already established on the drug.
+  if (current?.currentlyOn === true && (current.agent === 'teriparatide' || current.agent === 'romosozumab')) {
+    flags.push({
+      id: 'anabolic_gp_shared_care_continue',
+      severity: 'info',
+      message:
+        `Patient established on ${current.agent} (High-Tech drug, specialist-initiated). ` +
+        'GP can continue prescribing under shared care — ensure monitoring is up to date (DEXA at 1–2 years; sequential antiresorptive plan in place).',
+      rationale:
+        'NOGG 2024 / HSE shared-care policy (v1.22 correction): initiation requires consultant under the HSE High-Tech scheme, ' +
+        'but GPs may continue once the specialist has initiated. Do not refer back to specialist for routine continuation.',
+      source: SRC_NOGG,
+    });
+  }
+
+  // ── v1.21 Step 4 — Abaloparatide reimbursement note ──
+  if (current?.agent === 'abaloparatide' ||
+      patient.previousTreatments.some(t => t.agent === 'abaloparatide')) {
+    flags.push({
+      id: 'abaloparatide_not_reimbursed_ireland',
+      severity: 'info',
+      message:
+        'Abaloparatide (Eladynos) is NOT currently reimbursed in Ireland — no HSE High-Tech listing. ' +
+        'NICE-approved (England/Wales/NI Aug 2024) and SMC-approved (Scotland Jul 2025) but these do not apply in Ireland. ' +
+        'Continue under private prescription only, or switch to a reimbursed anabolic alternative (teriparatide via specialist).',
+      rationale:
+        'HSE PCRS High-Tech scheme listings as of May 2026: abaloparatide is not present (v1.21 correction). ' +
+        'The previous spec incorrectly listed it as an active Irish treatment option.',
+      source: SRC_NOGG,
+    });
+  }
+
+  // ── v1.23 Step 9 (partial) — Sequential therapy planning flag for already-on ──
+  // Fires for anyone established on denosumab / teriparatide / romosozumab.
+  // (The initiation-time variant downstream also covers new denosumab recs.)
+  if (current?.currentlyOn === true &&
+      (current.agent === 'denosumab' ||
+       current.agent === 'teriparatide' ||
+       current.agent === 'romosozumab')) {
+    flags.push({
+      id: 'sequential_therapy_plan_required',
+      severity: 'info',
+      message:
+        'Plan the sequential therapy strategy at the time of initiation — not retrospectively. ' +
+        'For denosumab: IV zoledronate 5 mg at 6 months after the final injection is the NOGG 2024 Strong sequential agent (alendronate is a secondary option only). ' +
+        'For teriparatide / romosozumab: an antiresorptive must follow the course (prescribed 1 month before the final dose) — failure to follow on negates the BMD gain.',
+      rationale:
+        'NOGG 2024 Recs 14, 18–19 (Strong, v1.23): sequential therapy after denosumab is mandatory and specific to denosumab (rebound vertebral fracture risk). ' +
+        'Sequential therapy after teriparatide / romosozumab is mandatory because BMD declines rapidly post-cessation without an antiresorptive. ' +
+        'Document the sequential plan at initiation so it is not missed at cessation.',
+      source: SRC_NOGG,
+    });
+  }
+
+  // ── v1.23 Step 10 (partial) — Hip / non-vertebral efficacy note for already-on ──
+  // Patient established on ibandronate or raloxifene → flag the lack of hip-fx RCT evidence.
+  if (current?.currentlyOn === true && (current.agent === 'ibandronate' || current.agent === 'raloxifene')) {
+    const hipPrimaryConcern = patient.age >= 75 ||
+      patient.priorHipFracture ||
+      (patient.dexaResults?.totalHipTScore !== undefined && patient.dexaResults?.totalHipTScore !== null && patient.dexaResults.totalHipTScore <= -2.5) ||
+      (patient.dexaResults?.femoralNeckTScore !== undefined && patient.dexaResults?.femoralNeckTScore !== null && patient.dexaResults.femoralNeckTScore <= -2.5);
+    flags.push({
+      id: 'low_hip_efficacy_note',
+      severity: hipPrimaryConcern ? 'warning' : 'info',
+      message:
+        `${current.agent} has NOT been shown to reduce hip fracture risk in RCTs. ` +
+        (hipPrimaryConcern
+          ? 'Hip fracture is a primary concern for this patient (age ≥75 OR prior hip fracture OR severe hip osteoporosis) — prefer alendronate, risedronate, zoledronate, or denosumab where possible.'
+          : 'Consider alendronate, risedronate, zoledronate, or denosumab when hip-fracture reduction is the primary goal.'),
+      rationale:
+        'NOGG 2024 (v1.23) Section 5 evidence summary: ibandronate, raloxifene, and calcitriol have proven vertebral-fracture reduction only. ' +
+        'Hip-fracture RCT evidence supports alendronate, risedronate, zoledronate, and denosumab.',
+      source: SRC_NOGG,
+    });
+  }
+
   // ── Existing treatment — sequencing logic ──
   if (patient.currentTreatment) {
     const seq = sequencing(patient, riskCategory, riskStratification, flags, referrals);
@@ -856,6 +985,111 @@ export function generateTreatmentOutput(
         specialty: 'metabolic_bone',
         reason: 'Patient refuses injections and no oral antiresorptive available — specialist input required to negotiate options.',
         urgency: 'soon',
+      });
+    }
+  }
+
+  // ── v1.23 Step 1 — Male patient drug licensing filter ──
+  // Romosozumab, ibandronate (oral & IV), HRT, raloxifene, and abaloparatide are
+  // not licensed for use in men. Filter post-recommendation as defence-in-depth:
+  // no current pathway pushes these for males, but a regression in any upstream
+  // branch must not slip through. Teriparatide is the only anabolic licensed
+  // for men — referral pathway must remain available for male VHR patients.
+  if (patient.sex === 'male') {
+    const stripped: TreatmentAgent[] = [];
+    const survivors = recommendations.filter(r => {
+      if (MALE_NOT_LICENSED.has(r.agent)) {
+        stripped.push(r.agent);
+        return false;
+      }
+      return true;
+    });
+    if (stripped.length > 0) {
+      recommendations = survivors;
+      flags.push({
+        id: 'male_drug_licensing_filter',
+        severity: 'warning',
+        message:
+          `The following drug(s) were filtered from the recommendation list because they are not licensed for use in men: ${stripped.join(', ')}. ` +
+          'Romosozumab, ibandronate (oral and IV), HRT, raloxifene, and abaloparatide are not licensed for men in Ireland. ' +
+          'Teriparatide is the only anabolic drug licensed for use in men — refer to secondary care if anabolic therapy is indicated.',
+        rationale:
+          'NOGG 2024 / SmPC / HSE BVM policy (v1.23): the listed drugs have no male indication. Alendronate, risedronate, zoledronate, ' +
+          'and denosumab are licensed for male osteoporosis. Teriparatide is the only anabolic available for men — specialist initiation required.',
+        source: SRC_NOGG,
+      });
+    }
+    // Surface a clarification flag if male patient is recorded as currently on any of these drugs.
+    // Note: patient.currentTreatment may have been narrowed to null by an earlier
+    // early-return path; cast via a fresh local to defeat narrowing.
+    const currentForMaleCheck = patient.currentTreatment as TreatmentHistory | null;
+    const onUnlicensed: TreatmentAgent[] = [];
+    if (currentForMaleCheck && MALE_NOT_LICENSED.has(currentForMaleCheck.agent)) {
+      onUnlicensed.push(currentForMaleCheck.agent);
+    }
+    for (const t of patient.previousTreatments) {
+      if (t.currentlyOn && MALE_NOT_LICENSED.has(t.agent)) onUnlicensed.push(t.agent);
+    }
+    if (onUnlicensed.length > 0) {
+      flags.push({
+        id: 'male_on_unlicensed_drug',
+        severity: 'warning',
+        message:
+          `Male patient recorded as currently on ${onUnlicensed.join(', ')} — this drug is not licensed for use in men in Ireland. ` +
+          'Review the prescribing decision; switch to a licensed agent (alendronate, risedronate, zoledronate, denosumab, or teriparatide via specialist).',
+        rationale:
+          'Drug licensing by sex (v1.23): SmPC / HSE BVM. Off-label prescribing in men carries higher medico-legal and adherence risk; ' +
+          'a licensed alternative is available in every category.',
+        source: SRC_NOGG,
+      });
+    }
+  }
+
+  // ── v1.23 Step 9 (initiation-time) — Sequential therapy planning flag ──
+  // When a NEW denosumab recommendation is being pushed (i.e. via initiateTherapy),
+  // surface the sequential planning note immediately. Established-on-drug
+  // patients already had this flag pushed upstream of the sequencing branch.
+  if (recommendations.some(r => r.agent === 'denosumab') &&
+      !flags.some(f => f.id === 'sequential_therapy_plan_required')) {
+    flags.push({
+      id: 'sequential_therapy_plan_required',
+      severity: 'info',
+      message:
+        'Plan the sequential therapy strategy at the time of initiation — not retrospectively. ' +
+        'For denosumab: IV zoledronate 5 mg at 6 months after the final injection is the NOGG 2024 Strong sequential agent (alendronate is a secondary option only). ' +
+        'For teriparatide / romosozumab: an antiresorptive must follow the course (prescribed 1 month before the final dose) — failure to follow on negates the BMD gain.',
+      rationale:
+        'NOGG 2024 Recs 14, 18–19 (Strong, v1.23): sequential therapy after denosumab is mandatory and specific to denosumab (rebound vertebral fracture risk). ' +
+        'Document the sequential plan at initiation so it is not missed at cessation.',
+      source: SRC_NOGG,
+    });
+  }
+
+  // ── v1.23 Step 10 (initiation-time) — Hip / non-vertebral efficacy note ──
+  // Fires when a NEW ibandronate or raloxifene recommendation is being pushed.
+  // The established-on variant was already pushed upstream.
+  {
+    const hipPrimaryConcern = patient.age >= 75 ||
+      patient.priorHipFracture ||
+      (patient.dexaResults?.totalHipTScore !== undefined && patient.dexaResults?.totalHipTScore !== null && patient.dexaResults.totalHipTScore <= -2.5) ||
+      (patient.dexaResults?.femoralNeckTScore !== undefined && patient.dexaResults?.femoralNeckTScore !== null && patient.dexaResults.femoralNeckTScore <= -2.5);
+    const lowHipEfficacyAgents: TreatmentAgent[] = ['ibandronate', 'raloxifene'];
+    const flaggedFromRecs = recommendations
+      .filter(r => lowHipEfficacyAgents.includes(r.agent))
+      .map(r => r.agent);
+    if (flaggedFromRecs.length > 0 && !flags.some(f => f.id === 'low_hip_efficacy_note')) {
+      flags.push({
+        id: 'low_hip_efficacy_note',
+        severity: hipPrimaryConcern ? 'warning' : 'info',
+        message:
+          `${Array.from(new Set(flaggedFromRecs)).join(', ')} has/have NOT been shown to reduce hip fracture risk in RCTs. ` +
+          (hipPrimaryConcern
+            ? 'Hip fracture is a primary concern for this patient (age ≥75 OR prior hip fracture OR severe hip osteoporosis) — prefer alendronate, risedronate, zoledronate, or denosumab where possible.'
+            : 'Consider alendronate, risedronate, zoledronate, or denosumab when hip-fracture reduction is the primary goal.'),
+        rationale:
+          'NOGG 2024 (v1.23) Section 5 evidence summary: ibandronate, raloxifene, and calcitriol have proven vertebral-fracture reduction only. ' +
+          'Hip-fracture RCT evidence supports alendronate, risedronate, zoledronate, and denosumab.',
+        source: SRC_NOGG,
       });
     }
   }
@@ -2661,8 +2895,11 @@ function alendronate(): TreatmentRecommendation {
       whatItDoes:
         'Alendronate is a weekly tablet that strengthens bones by slowing the cells that break down bone tissue. It significantly reduces the risk of hip and spine fractures.',
       howToTake:
-        'Take ONE tablet once a week, on the SAME day each week. Take it first thing in the morning, on an empty stomach, with a full glass of plain water (not tea or juice). ' +
-        'Stay sitting or standing upright for at least 30 minutes afterwards — do not lie down. Wait 30 minutes before eating, drinking anything other than water, or taking other medicines.',
+        // v1.25 Step 6 — explicit overnight-fast and calcium-supplement timing.
+        'Take ONE tablet once a week, on the SAME day each week. Take it first thing in the morning after an overnight fast, at least 30 minutes BEFORE any food, any drink other than plain water, or any other oral medication INCLUDING calcium supplements. ' +
+        'Use a full glass (~200 ml) of plain tap water (not tea, juice, mineral water, or coffee). ' +
+        'Stay sitting or standing upright for at least 30 minutes afterwards — do not lie down. ' +
+        'Common side effects: heartburn, indigestion, mild abdominal discomfort. If swallowing pain develops, stop and contact your GP.',
       sideEffects: [
         'Heartburn, indigestion, or stomach discomfort (most common)',
         'Difficulty swallowing or chest pain (rare — stop and contact your GP if this happens)',
@@ -2701,10 +2938,11 @@ function risedronate(): TreatmentRecommendation {
     source: SRC_HSE,
     patientEducation: {
       whatItDoes:
-        'Risedronate is a weekly tablet that strengthens bones by reducing bone breakdown. It is an alternative to alendronate with slightly less stomach upset.',
+        // v1.25 Step 6 — licensed for men explicitly noted.
+        'Risedronate is a weekly tablet that strengthens bones by reducing bone breakdown. Licensed for postmenopausal women AND men. An alternative to alendronate with slightly less upper-GI side effect.',
       howToTake:
-        'Take ONE tablet once a week, on the SAME day each week. Take on an empty stomach first thing in the morning with a full glass of water. ' +
-        'Stay upright for at least 30 minutes and do not eat, drink (other than water), or take other medicines for 30 minutes.',
+        'Take ONE tablet once a week, on the SAME day each week. Take it first thing in the morning after an overnight fast, at least 30 minutes BEFORE any food, any drink other than plain water, or any other oral medication INCLUDING calcium supplements. ' +
+        'Full glass (~200 ml) of plain tap water. Stay upright (sitting or standing) for at least 30 minutes afterwards — do not lie down.',
       sideEffects: [
         'Mild stomach upset, heartburn (less common than with alendronate)',
         'Headache',
@@ -2743,17 +2981,21 @@ function ibandronate(): TreatmentRecommendation {
     source: SRC_HSE,
     patientEducation: {
       whatItDoes:
-        'Ibandronate is a monthly tablet that strengthens bones by slowing bone breakdown. It is taken once a month, which some patients find easier than weekly tablets.',
+        // v1.25 Step 6 — non-vertebral data at T < −3.0 added.
+        'Ibandronate is a monthly tablet that strengthens bones by slowing bone breakdown. Once-monthly dosing improves adherence vs weekly tablets. Note: non-vertebral fracture reduction has only been shown at T-score <−3.0 in subgroup analysis (NOGG 2024); hip fracture reduction has NOT been demonstrated in RCTs. NOT licensed for use in men.',
       howToTake:
-        'Take ONE tablet on the SAME date each month, first thing in the morning on an empty stomach with a full glass of water. ' +
-        'Stay upright for at least 60 minutes after taking and do not eat or drink (other than water) for 60 minutes.',
+        // v1.25 Step 6 — 60-minute fasting and explicit flag that this is longer than alendronate/risedronate.
+        'Take ONE tablet on the SAME date each month, first thing in the morning after an overnight fast, at least 1 HOUR (60 minutes) BEFORE any food, any drink other than plain water, or any other oral medication INCLUDING calcium supplements. ' +
+        'This is LONGER than the 30-minute requirement for alendronate or risedronate — if you are switching from a weekly tablet, note the change. ' +
+        'Full glass (~200 ml) plain tap water. Stay upright for the full 1 hour after taking — do not lie down.',
       sideEffects: [
         'Stomach upset, heartburn',
         'Difficulty swallowing (rare)',
       ],
       warnings: [
-        'Must remain upright for a full 60 minutes after taking (longer than weekly bisphosphonates).',
+        'Must remain upright for the full 1 hour after taking — this is longer than alendronate/risedronate.',
         'Tell your dentist you are on ibandronate before invasive dental work.',
+        'Ibandronate has NOT been shown to reduce hip fracture risk — if hip fracture is your main concern, ask your GP about alendronate, risedronate, zoledronate, or denosumab.',
       ],
     },
   };
@@ -2762,12 +3004,15 @@ function ibandronate(): TreatmentRecommendation {
 export function ibandronateIV(): TreatmentRecommendation {
   return {
     agent: 'ibandronate',
-    dose: '3 mg IV bolus',
+    // v1.25 Step 6 — bolus push via butterfly cannula, not a slow infusion.
+    dose: '3 mg IV — given as a 15–30 second bolus push via a butterfly cannula (NOT a slow infusion like zoledronate)',
     frequency: 'Every 3 months',
     rationale:
       'IV ibandronate — option when oral bisphosphonate is not tolerated and annual zoledronate attendance is not feasible. ' +
       'Quarterly visits provide adherence safety net between annual reviews. ' +
-      'Insufficient evidence for hip fracture reduction (same caveat as oral ibandronate).',
+      'NOT licensed for use in men. Insufficient evidence for hip fracture reduction (same caveat as oral ibandronate). ' +
+      'Formulation equivalence: 3 mg IV every 3 months ≈ 150 mg PO once monthly. ' +
+      'Acute phase reaction may occur (flu-like symptoms), usually first injection only.',
     strength: 'conditional',
     contraindications: [
       'eGFR <30 ml/min',
@@ -2804,11 +3049,14 @@ export function ibandronateIV(): TreatmentRecommendation {
 function zoledronate(): TreatmentRecommendation {
   return {
     agent: 'zoledronate',
-    dose: '5 mg IV infusion over ≥15 minutes',
-    frequency: 'Once yearly',
+    // v1.24 Step 7 — minimum 15-minute infusion via IV cannula; bolus push is NOT acceptable.
+    dose: '5 mg IV infusion over a MINIMUM of 15 minutes via a standard IV cannula (not a bolus push)',
+    frequency: 'Once yearly — or every 18 months in postmenopausal women with osteopenia (HORIZON extension, Evidence Ib)',
     rationale:
       'IV bisphosphonate — first choice if oral not tolerated. Single annual infusion maximises adherence. ' +
-      '70% hip fracture reduction (HORIZON-PFT, Black et al. NEJM 2007). Pre-hydrate (500ml water) before infusion.',
+      '70% hip fracture reduction (HORIZON-PFT, Black et al. NEJM 2007). Pre-hydrate (500 ml water) before infusion. ' +
+      'Licensed indications (v1.24): postmenopausal osteoporosis, male osteoporosis, glucocorticoid-induced osteoporosis (men and women). ' +
+      'Alternative dosing: 5 mg every 18 months in postmenopausal women with osteopenia maintains BMD benefit (HORIZON extension trial; NOGG 2024 Evidence Ib).',
     strength: 'strong',
     contraindications: [
       'eGFR <35 ml/min',
@@ -2819,7 +3067,13 @@ function zoledronate(): TreatmentRecommendation {
     monitoring: [
       'CHECK adjusted calcium IMMEDIATELY before each infusion — withhold if <2.10 mmol/L until corrected',
       'Vitamin D adequacy and eGFR before each annual infusion',
+      // v1.24 — MHRA recommends creatinine clearance (not eGFR) for >75, BMI <18 or >40.
+      'MHRA recommendation: use CREATININE CLEARANCE (not eGFR) in patients aged >75 OR BMI <18 OR BMI >40 — eGFR formulae overestimate renal function in these groups',
+      // v1.24 — post-infusion creatinine/eGFR monitoring.
+      'CHECK creatinine / eGFR after the infusion (typically at the annual review) — transient creatinine rise can occur post-zoledronate',
       'Premedication: paracetamol 1g 1 hour BEFORE infusion, then again 6 hours AFTER — reduces flu-like acute-phase reaction',
+      // v1.24 — rare symptomatic AF.
+      'Rare adverse event: symptomatic atrial fibrillation (HORIZON trial, Evidence Ib) — uncommon but serious; warn the patient and review cardiac history before infusion',
       'DEXA at 1–2 years; bisphosphonate reassessment at 3 years',
       'Dental review before starting if invasive dental work anticipated — ONJ risk (very low at osteoporosis doses)',
     ],
@@ -3048,6 +3302,29 @@ const BISPHOSPHONATE_AGENTS: TreatmentAgent[] = ['alendronate', 'risedronate', '
 
 function isBisphosphonate(agent: TreatmentAgent): boolean {
   return BISPHOSPHONATE_AGENTS.includes(agent);
+}
+
+// v1.23 — drugs NOT licensed for use in men.
+// Romosozumab, ibandronate (oral & IV), HRT, raloxifene, abaloparatide.
+// Teriparatide IS licensed for men — not in this set.
+export const MALE_NOT_LICENSED: Set<TreatmentAgent> = new Set<TreatmentAgent>([
+  'romosozumab',
+  'ibandronate',
+  'hrt',
+  'raloxifene',
+  'abaloparatide',
+]);
+
+// v1.23 — teriparatide lifetime limit. One 24-month course only.
+// Romosozumab and abaloparatide are NOT subject to this restriction.
+function hasCompletedTeriparatideCourse(patient: PatientInput): boolean {
+  for (const t of patient.previousTreatments) {
+    if (t.agent !== 'teriparatide') continue;
+    if (t.currentlyOn) continue;
+    if (t.reasonStopped === 'completed_course') return true;
+    if (t.durationMonths >= 24) return true;
+  }
+  return false;
 }
 
 function isCurrentlyOnBisphosphonate(patient: PatientInput): boolean {
