@@ -39,6 +39,7 @@ export const defaultPatient: PatientInput = {
   vteHistory: false,
   breastCancerHistory: false,
   priorMIOrStrokeWithin12Months: false,
+  strokeHistory: false,
   recentFractureWithin2Years: false,
   renalFunction: null,
   dexaResults: null,

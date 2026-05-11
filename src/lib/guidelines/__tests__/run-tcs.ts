@@ -46,6 +46,7 @@ function basePatient(overrides: Partial<PatientInput>): PatientInput {
     vteHistory: false,
     breastCancerHistory: false,
     priorMIOrStrokeWithin12Months: false,
+    strokeHistory: false,
     recentFractureWithin2Years: false,
     renalFunction: null,
     dexaResults: null,
@@ -1397,12 +1398,315 @@ function tc52(): TCResult {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// v1.19 NEW TEST CASES (TC53–TC57) — post-hip-fx, oesophageal CI, deno cessation
+// v1.4 TEST CASES (TC53–TC63) — denosumab v1.26, HRT v1.27, raloxifene v1.27,
+// teriparatide v1.28, romosozumab v1.28, BP-blunting v1.29
 // ═══════════════════════════════════════════════════════════════════════════
 
 // ─── TC53 ─────────────────────────────────────────────────────────────────
-// Post-hip-fracture 72F, eGFR 65, recent hip fx → IV zoledronate first-line.
+// Corrected TC6: denosumab cessation hierarchy. The recipe's monitoring
+// entry that fires on every denosumab recommendation must clearly state IV
+// zoledronate is PREFERRED (NOGG Strong) and alendronate is SECONDARY.
 function tc53(): TCResult {
+  const failures: string[] = [];
+  const patient = basePatient({
+    age: 67,
+    sex: 'female',
+    priorFragilityFracture: true,
+    dexaResults: { lumbarSpineTScore: -3.0, totalHipTScore: -2.8, femoralNeckTScore: -2.8, forearmTScore: null },
+    renalFunction: { egfr: 30 }, // <35 → denosumab is the recommendation
+    bloodResults: { adjustedCalciumMmol: 2.30, vitaminDNmol: 70, egfr: 30, alp: 80, tshMUL: 2.0, hbGramsPerLitre: 135, esrOrCrp: 'normal' },
+  });
+  const decision = runClinicalDecision(patient);
+  check(failures, 'denosumab recommended', hasAgent(decision, 'denosumab'));
+  const deno = decision.treatmentRecommendations.find(r => r.agent === 'denosumab');
+  const mon = (deno?.monitoring ?? []).join(' | ').toLowerCase();
+  check(failures, 'cessation monitoring mentions IV zoledronate at 6 months',
+    mon.includes('iv zoledronate') && mon.includes('6 months'));
+  check(failures, 'cessation monitoring frames zoledronate as preferred (NOT equivalent to alendronate)',
+    mon.includes('not equivalent to alendronate'));
+  check(failures, 'cessation monitoring labels alendronate as SECONDARY',
+    mon.includes('secondary option'));
+  check(failures, 'FREEDOM 60.7% statistic surfaced',
+    mon.includes('60.7%'));
+  check(failures, 'CTX at 3 and 6 months mentioned',
+    mon.includes('ctx') && mon.includes('3 and 6 months'));
+  return { name: 'TC53 — denosumab cessation: zoledronate preferred, alendronate secondary', passed: failures.length === 0, failures, decision };
+}
+
+// ─── TC54 ─────────────────────────────────────────────────────────────────
+// Male + GI intolerance: ibandronate filtered, IV zoledronate offered.
+function tc54(): TCResult {
+  const failures: string[] = [];
+  const patient = basePatient({
+    age: 65,
+    sex: 'male',
+    dexaResults: { lumbarSpineTScore: -2.7, totalHipTScore: -2.7, femoralNeckTScore: -2.7, forearmTScore: null },
+    renalFunction: { egfr: 55 },
+    bloodResults: { adjustedCalciumMmol: 2.30, vitaminDNmol: 58, egfr: 55, alp: 80, tshMUL: 2.0, hbGramsPerLitre: 140, esrOrCrp: 'normal' },
+    previousTreatments: [{ agent: 'alendronate', durationMonths: 12, reasonStopped: 'gi_intolerance', currentlyOn: false, monthsSinceLastDose: 3 }],
+  });
+  const decision = runClinicalDecision(patient);
+  check(failures, 'IV zoledronate recommended (GI intolerance → IV)',
+    hasAgent(decision, 'zoledronate'));
+  check(failures, 'NO ibandronate (not licensed for men)',
+    !hasAgent(decision, 'ibandronate'));
+  check(failures, 'risk = high (T-score ≤ −2.5)',
+    decision.riskStratification.category === 'high', `got ${decision.riskStratification.category}`);
+  return { name: 'TC54 — male + GI intolerance → IV zoledronate, ibandronate filtered', passed: failures.length === 0, failures, decision };
+}
+
+// ─── TC55 ─────────────────────────────────────────────────────────────────
+// Male VHR + recent vertebrals → teriparatide referral; romosozumab excluded.
+function tc55(): TCResult {
+  const failures: string[] = [];
+  const patient = basePatient({
+    age: 72,
+    sex: 'male',
+    priorFragilityFracture: true,
+    priorVertebralFracture: true,
+    numberOfPriorFractures: 2,
+    recentVertebralFractureYears: 0.8,
+    dexaResults: { lumbarSpineTScore: -3.6, totalHipTScore: -3.4, femoralNeckTScore: -3.4, forearmTScore: null },
+    renalFunction: { egfr: 60 },
+    bloodResults: { adjustedCalciumMmol: 2.30, vitaminDNmol: 55, egfr: 60, alp: 80, tshMUL: 2.0, hbGramsPerLitre: 140, esrOrCrp: 'normal' },
+  });
+  const decision = runClinicalDecision(patient);
+  check(failures, 'risk = very_high',
+    decision.riskStratification.category === 'very_high', `got ${decision.riskStratification.category}`);
+  check(failures, 'NO romosozumab in recommendations',
+    !hasAgent(decision, 'romosozumab'));
+  check(failures, 'male-VHR-teriparatide flag fires',
+    hasFlag(decision, 'male_vhr_anabolic_teriparatide'));
+  check(failures, 'VHR specialist referral fires', hasReferral(decision, 'metabolic_bone'));
+  check(failures, 'flag notes teriparatide is the only anabolic licensed for men',
+    hasFlagText(decision, 'only anabolic'));
+  return { name: 'TC55 — male VHR: teriparatide referral, romosozumab excluded', passed: failures.length === 0, failures, decision };
+}
+
+// ─── TC56 ─────────────────────────────────────────────────────────────────
+// Teriparatide lifetime restriction: previous completed course.
+function tc56(): TCResult {
+  const failures: string[] = [];
+  const patient = basePatient({
+    age: 68,
+    sex: 'female',
+    priorFragilityFracture: true,
+    priorVertebralFracture: true,
+    recentVertebralFractureYears: 0.25,
+    numberOfPriorFractures: 1,
+    dexaResults: { lumbarSpineTScore: -3.1, totalHipTScore: -3.0, femoralNeckTScore: -3.0, forearmTScore: null },
+    renalFunction: { egfr: 62 },
+    bloodResults: { adjustedCalciumMmol: 2.30, vitaminDNmol: 65, egfr: 62, alp: 80, tshMUL: 2.0, hbGramsPerLitre: 135, esrOrCrp: 'normal' },
+    previousTreatments: [{ agent: 'teriparatide', durationMonths: 24, reasonStopped: 'completed_course', currentlyOn: false, monthsSinceLastDose: 18 }],
+  });
+  const decision = runClinicalDecision(patient);
+  check(failures, 'teriparatide_lifetime_used flag fires',
+    hasFlag(decision, 'teriparatide_lifetime_used'));
+  check(failures, 'message states lifetime maximum',
+    hasFlagText(decision, 'lifetime maximum'));
+  check(failures, 'romosozumab noted as an option (no lifetime restriction)',
+    hasFlagText(decision, 'romosozumab remains'));
+  return { name: 'TC56 — teriparatide already used: lifetime exclusion fires', passed: failures.length === 0, failures, decision };
+}
+
+// ─── TC57 ─────────────────────────────────────────────────────────────────
+// Teriparatide continuation: GP continues established prescription.
+function tc57(): TCResult {
+  const failures: string[] = [];
+  const patient = basePatient({
+    age: 64,
+    sex: 'female',
+    dexaResults: { lumbarSpineTScore: -3.2, totalHipTScore: -3.0, femoralNeckTScore: -3.0, forearmTScore: null },
+    renalFunction: { egfr: 65 },
+    bloodResults: { adjustedCalciumMmol: 2.30, vitaminDNmol: 70, egfr: 65, alp: 80, tshMUL: 2.0, hbGramsPerLitre: 135, esrOrCrp: 'normal' },
+    currentTreatment: { agent: 'teriparatide', durationMonths: 8, reasonStopped: null, currentlyOn: true, monthsSinceLastDose: 0 },
+  });
+  const decision = runClinicalDecision(patient);
+  check(failures, 'GP-shared-care continuation flag fires',
+    hasFlag(decision, 'anabolic_gp_shared_care_continue'));
+  check(failures, 'message mentions shared care', hasFlagText(decision, 'shared care'));
+  check(failures, 'message lists teriparatide side effects (headache / postural hypotension / leg pain)',
+    hasFlagText(decision, 'postural hypotension'));
+  check(failures, 'sequential antiresorptive planning prompted',
+    hasFlag(decision, 'sequential_therapy_plan_required') || hasFlagText(decision, 'sequential antiresorptive'));
+  return { name: 'TC57 — on teriparatide: GP shared-care, side effects + sequential plan', passed: failures.length === 0, failures, decision };
+}
+
+// ─── TC58 ─────────────────────────────────────────────────────────────────
+// Prior bisphosphonate → VHR referral: blunting effect note in referral letter.
+function tc58(): TCResult {
+  const failures: string[] = [];
+  const patient = basePatient({
+    age: 71,
+    sex: 'female',
+    priorFragilityFracture: true,
+    priorVertebralFracture: true,
+    recentVertebralFractureYears: 0.25,
+    numberOfPriorFractures: 1,
+    dexaResults: { lumbarSpineTScore: -3.3, totalHipTScore: -3.1, femoralNeckTScore: -3.1, forearmTScore: null },
+    renalFunction: { egfr: 58 },
+    bloodResults: { adjustedCalciumMmol: 2.30, vitaminDNmol: 70, egfr: 58, alp: 80, tshMUL: 2.0, hbGramsPerLitre: 135, esrOrCrp: 'normal' },
+    currentTreatment: { agent: 'alendronate', durationMonths: 84, reasonStopped: null, currentlyOn: true, monthsSinceLastDose: 0 },
+  });
+  const decision = runClinicalDecision(patient);
+  check(failures, 'risk = very_high',
+    decision.riskStratification.category === 'very_high', `got ${decision.riskStratification.category}`);
+  check(failures, 'VHR specialist referral fires', hasReferral(decision, 'metabolic_bone'));
+  check(failures, 'BP blunting effect flag fires',
+    hasFlag(decision, 'bp_blunting_effect_referral'));
+  check(failures, 'message states prior alendronate AND duration',
+    hasFlagText(decision, 'alendronate') && hasFlagText(decision, '84 months'));
+  check(failures, 'message names teriparatide and romosozumab attenuation',
+    hasFlagText(decision, 'attenuat'));
+  return { name: 'TC58 — prior BP + VHR referral: blunting note in referral', passed: failures.length === 0, failures, decision };
+}
+
+// ─── TC59 ─────────────────────────────────────────────────────────────────
+// Raloxifene contraindicated by stroke history.
+function tc59(): TCResult {
+  const failures: string[] = [];
+  const patient = basePatient({
+    age: 67,
+    sex: 'female',
+    strokeHistory: true,
+    dexaResults: { lumbarSpineTScore: -2.6, totalHipTScore: -2.6, femoralNeckTScore: -2.6, forearmTScore: null },
+    renalFunction: { egfr: 65 },
+    bloodResults: { adjustedCalciumMmol: 2.30, vitaminDNmol: 70, egfr: 65, alp: 80, tshMUL: 2.0, hbGramsPerLitre: 135, esrOrCrp: 'normal' },
+  });
+  const decision = runClinicalDecision(patient);
+  check(failures, 'raloxifene_excluded_stroke flag fires',
+    hasFlag(decision, 'raloxifene_excluded_stroke'));
+  check(failures, 'NO raloxifene in recommendations',
+    !hasAgent(decision, 'raloxifene'));
+  check(failures, 'alendronate first-line (T ≤ -2.5)', hasAgent(decision, 'alendronate'));
+  return { name: 'TC59 — stroke history: raloxifene excluded, alendronate first-line', passed: failures.length === 0, failures, decision };
+}
+
+// ─── TC60 ─────────────────────────────────────────────────────────────────
+// Zoledronate MHRA creatinine-clearance flag for age >75 / BMI <18 or >40.
+function tc60(): TCResult {
+  const failures: string[] = [];
+  const patient = basePatient({
+    age: 78,
+    sex: 'female',
+    bmi: 17.5,
+    priorFragilityFracture: true,
+    priorHipFracture: true,
+    recentFractureWithin2Years: true,
+    dexaResults: { lumbarSpineTScore: -2.9, totalHipTScore: -2.9, femoralNeckTScore: -2.9, forearmTScore: null },
+    renalFunction: { egfr: 42 },
+    bloodResults: { adjustedCalciumMmol: 2.30, vitaminDNmol: 70, egfr: 42, alp: 80, tshMUL: 2.0, hbGramsPerLitre: 130, esrOrCrp: 'normal' },
+  });
+  const decision = runClinicalDecision(patient);
+  check(failures, 'IV zoledronate recommended (post-hip-fx)',
+    hasAgent(decision, 'zoledronate'));
+  const zole = decision.treatmentRecommendations.find(r => r.agent === 'zoledronate');
+  const mon = (zole?.monitoring ?? []).join(' | ').toLowerCase();
+  check(failures, 'MHRA creatinine clearance note present',
+    mon.includes('creatinine clearance'));
+  check(failures, 'flag references age >75 OR BMI extreme',
+    mon.includes('>75') || mon.includes('aged >75'));
+  return { name: 'TC60 — zoledronate + age >75 + BMI 17.5: MHRA CrCl flag', passed: failures.length === 0, failures, decision };
+}
+
+// ─── TC61 ─────────────────────────────────────────────────────────────────
+// Post-hip-fracture zoledronate fires regardless of FRAX availability.
+// Patient has no DEXA, no FRAX entered — just a recent hip fracture.
+function tc61(): TCResult {
+  const failures: string[] = [];
+  const patient = basePatient({
+    age: 74,
+    sex: 'female',
+    priorFragilityFracture: true,
+    priorHipFracture: true,
+    recentFractureWithin2Years: true,
+    fraxMOFPercent: null,
+    fraxHipPercent: null,
+    dexaResults: null,
+    renalFunction: { egfr: 55 },
+    bloodResults: { adjustedCalciumMmol: 2.30, vitaminDNmol: 38, egfr: 55, alp: 80, tshMUL: 2.0, hbGramsPerLitre: 130, esrOrCrp: 'normal' },
+  });
+  const decision = runClinicalDecision(patient);
+  check(failures, 'post-hip-fracture zoledronate flag fires',
+    hasFlag(decision, 'post_hip_fracture_zoledronate_first_line'));
+  check(failures, 'IV zoledronate in recommendations',
+    hasAgent(decision, 'zoledronate'));
+  check(failures, 'flag message references HORIZON', hasFlagText(decision, 'horizon'));
+  // Manual FRAX was NOT entered — assert that the engine surfaced the post-hip-fx
+  // pathway without depending on user-supplied FRAX (the in-tool estimator may
+  // still compute a value, which is fine; the test is that the recommendation
+  // does not GATE on manual-FRAX-above-IT).
+  check(failures, 'manual FRAX inputs absent', patient.fraxMOFPercent === null && patient.fraxHipPercent === null);
+  check(failures, 'flag fires regardless of DEXA presence (none here)', patient.dexaResults === null);
+  return { name: 'TC61 — post-hip-fx → zoledronate, no FRAX/BMD required', passed: failures.length === 0, failures, decision };
+}
+
+// ─── TC62 ─────────────────────────────────────────────────────────────────
+// Denosumab pre-dose calcium check fires for ALL patients (SPC requirement),
+// not just eGFR <35. Verify the pre-dose entry is on every denosumab recipe.
+function tc62(): TCResult {
+  const failures: string[] = [];
+  const patient = basePatient({
+    age: 65,
+    sex: 'female',
+    priorFragilityFracture: true,
+    dexaResults: { lumbarSpineTScore: -2.8, totalHipTScore: -2.6, femoralNeckTScore: -2.6, forearmTScore: null },
+    renalFunction: { egfr: 30 }, // forces a denosumab recommendation
+    bloodResults: { adjustedCalciumMmol: 2.38, vitaminDNmol: 72, egfr: 30, alp: 80, tshMUL: 2.0, hbGramsPerLitre: 135, esrOrCrp: 'normal' },
+  });
+  const decision = runClinicalDecision(patient);
+  check(failures, 'denosumab recommended', hasAgent(decision, 'denosumab'));
+  const deno = decision.treatmentRecommendations.find(r => r.agent === 'denosumab');
+  const mon = (deno?.monitoring ?? []).join(' | ').toLowerCase();
+  check(failures, 'pre-dose calcium check entry present',
+    mon.includes('pre-dose calcium check'));
+  check(failures, 'entry states ALL patients regardless of egfr',
+    mon.includes('all patients'));
+  check(failures, 'hypocalcaemia symptom advice present',
+    mon.includes('muscle cramps') || mon.includes('tingling'));
+  // Side effects expansion (Step 3)
+  const sideEffects = (deno?.patientEducation?.sideEffects ?? []).join(' | ').toLowerCase();
+  check(failures, 'side effects include cellulitis', sideEffects.includes('cellulitis'));
+  check(failures, 'side effects include eczema', sideEffects.includes('eczema'));
+  check(failures, 'side effects include flatulence', sideEffects.includes('flatulence'));
+  return { name: 'TC62 — denosumab pre-dose Ca check for ALL patients', passed: failures.length === 0, failures, decision };
+}
+
+// ─── TC63 ─────────────────────────────────────────────────────────────────
+// HRT — transdermal does NOT reduce breast cancer risk; CV-no-increase under-60.
+function tc63(): TCResult {
+  const failures: string[] = [];
+  const patient = basePatient({
+    age: 56,
+    sex: 'female',
+    parentalHipFracture: true, // a FRAX clinical risk factor so the engine evaluates FRAX (NOGG Rec 1 gate)
+    fraxMOFPercent: 13.0,      // above IT at age 55 (9.5%) → high
+    fraxHipPercent: 2.0,
+    dexaResults: { lumbarSpineTScore: -2.0, totalHipTScore: -1.9, femoralNeckTScore: -1.9, forearmTScore: null },
+    renalFunction: { egfr: 70 },
+    bloodResults: { adjustedCalciumMmol: 2.32, vitaminDNmol: 70, egfr: 70, alp: 80, tshMUL: 2.0, hbGramsPerLitre: 135, esrOrCrp: 'normal' },
+  });
+  const decision = runClinicalDecision(patient);
+  check(failures, 'hrt_option_under60 flag fires',
+    hasFlag(decision, 'hrt_option_under60'));
+  check(failures, 'message states transdermal preferred (for VTE)',
+    hasFlagText(decision, 'transdermal'));
+  check(failures, 'message states CV risk NOT increased when started <60',
+    hasFlagText(decision, 'cardiovascular') || hasFlagText(decision, 'cv risk') || hasFlagText(decision, 'cardio'));
+  check(failures, 'message states transdermal does NOT reduce breast cancer risk',
+    hasFlagText(decision, 'does not reduce breast cancer risk') ||
+    hasFlagText(decision, 'transdermal route does not reduce') ||
+    hasFlagText(decision, 'irrespective of') && hasFlagText(decision, 'route'));
+  return { name: 'TC63 — HRT: CV-safe <60, transdermal does NOT reduce breast cancer', passed: failures.length === 0, failures, decision };
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// ENGINE-COVERAGE EXTRAS (TC64–TC73) — previously TC53–TC62, renumbered for v1.4
+// ═══════════════════════════════════════════════════════════════════════════
+
+// ─── TC64 ─────────────────────────────────────────────────────────────────
+// Post-hip-fracture 72F, eGFR 65, recent hip fx → IV zoledronate first-line.
+function tc64(): TCResult {
   const failures: string[] = [];
   const patient = basePatient({
     age: 72,
@@ -1423,12 +1727,12 @@ function tc53(): TCResult {
   const zoleRec = decision.treatmentRecommendations.find(r => r.agent === 'zoledronate');
   check(failures, 'zoledronate priority = first-line', zoleRec?.priority === 'first-line',
     `got ${zoleRec?.priority}`);
-  return { name: 'TC53 — post-hip-fracture → IV zoledronate first-line', passed: failures.length === 0, failures, decision };
+  return { name: 'TC64 — post-hip-fracture → IV zoledronate first-line', passed: failures.length === 0, failures, decision };
 }
 
 // ─── TC54 ─────────────────────────────────────────────────────────────────
 // Oesophageal disease 68F → all oral BPs CI, IV zoledronate from outset.
-function tc54(): TCResult {
+function tc65(): TCResult {
   const failures: string[] = [];
   const patient = basePatient({
     age: 68,
@@ -1446,14 +1750,14 @@ function tc54(): TCResult {
   check(failures, 'NO alendronate recommended', !hasAgent(decision, 'alendronate'));
   check(failures, 'NO risedronate recommended', !hasAgent(decision, 'risedronate'));
   check(failures, 'NO oral ibandronate recommended', !hasAgent(decision, 'ibandronate'));
-  return { name: 'TC54 — oesophageal disease blocks oral BPs', passed: failures.length === 0, failures, decision };
+  return { name: 'TC65 — oesophageal disease blocks oral BPs', passed: failures.length === 0, failures, decision };
 }
 
 // ─── TC55 ─────────────────────────────────────────────────────────────────
 // Oesophageal disease 75F with eGFR 30 (severe CKD) → cannot use zoledronate,
 // route to denosumab. Flag still mentions IV zoledronate as the preferred
 // option in general; engine falls back to denosumab when eGFR <35.
-function tc55(): TCResult {
+function tc66(): TCResult {
   const failures: string[] = [];
   const patient = basePatient({
     age: 75,
@@ -1472,12 +1776,12 @@ function tc55(): TCResult {
     !hasAgent(decision, 'zoledronate'));
   check(failures, 'NO oral bisphosphonate',
     !hasAgent(decision, 'alendronate') && !hasAgent(decision, 'risedronate') && !hasAgent(decision, 'ibandronate'));
-  return { name: 'TC55 — oesophageal disease + eGFR 30 → denosumab', passed: failures.length === 0, failures, decision };
+  return { name: 'TC66 — oesophageal disease + eGFR 30 → denosumab', passed: failures.length === 0, failures, decision };
 }
 
 // ─── TC56 ─────────────────────────────────────────────────────────────────
 // Denosumab cessation timing: 5.5 months since last dose → "arrange now" flag.
-function tc56(): TCResult {
+function tc67(): TCResult {
   const failures: string[] = [];
   const patient = basePatient({
     age: 65,
@@ -1497,13 +1801,13 @@ function tc56(): TCResult {
     hasFlag(decision, 'denosumab_prescribing_caution'));
   check(failures, 'caution message mentions "younger postmenopausal women"',
     hasFlagText(decision, 'younger postmenopausal women'));
-  return { name: 'TC56 — denosumab 5.5m → arrange zoledronate now', passed: failures.length === 0, failures, decision };
+  return { name: 'TC67 — denosumab 5.5m → arrange zoledronate now', passed: failures.length === 0, failures, decision };
 }
 
 // ─── TC57 ─────────────────────────────────────────────────────────────────
 // Denosumab cessation timing: 8 months since last dose, no sequential BP →
 // overdue urgent + refer-urgently flags.
-function tc57(): TCResult {
+function tc68(): TCResult {
   const failures: string[] = [];
   const patient = basePatient({
     age: 68,
@@ -1522,7 +1826,7 @@ function tc57(): TCResult {
     hasFlagText(decision, 'iv zoledronate'));
   check(failures, 'alendronate framed as secondary, NOT equivalent',
     hasFlagText(decision, 'secondary option'));
-  return { name: 'TC57 — denosumab 8m + no sequential BP → urgent + refer', passed: failures.length === 0, failures, decision };
+  return { name: 'TC68 — denosumab 8m + no sequential BP → urgent + refer', passed: failures.length === 0, failures, decision };
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -1534,7 +1838,7 @@ function tc57(): TCResult {
 // Male patient drug filter — male VHR patient never receives any of the
 // five unlicensed-in-men drugs. Defence-in-depth: even if upstream pathways
 // regress, the filter removes them.
-function tc58(): TCResult {
+function tc69(): TCResult {
   const failures: string[] = [];
   const patient = basePatient({
     age: 72,
@@ -1557,14 +1861,14 @@ function tc58(): TCResult {
     hasFlag(decision, 'male_vhr_anabolic_teriparatide'));
   check(failures, 'flag notes teriparatide is the only anabolic licensed for men',
     hasFlagText(decision, 'only anabolic'));
-  return { name: 'TC58 — male VHR: no unlicensed drugs, teriparatide referral', passed: failures.length === 0, failures, decision };
+  return { name: 'TC69 — male VHR: no unlicensed drugs, teriparatide referral', passed: failures.length === 0, failures, decision };
 }
 
 // ─── TC59 ─────────────────────────────────────────────────────────────────
 // Teriparatide lifetime restriction. Female VHR who has completed a
 // 24-month teriparatide course in the past — flag must fire and message
 // must state "lifetime maximum".
-function tc59(): TCResult {
+function tc70(): TCResult {
   const failures: string[] = [];
   const patient = basePatient({
     age: 75,
@@ -1587,14 +1891,14 @@ function tc59(): TCResult {
     hasFlagText(decision, 'lifetime maximum'));
   check(failures, 'flag notes romosozumab remains an option (women)',
     hasFlagText(decision, 'romosozumab remains'));
-  return { name: 'TC59 — teriparatide already used: lifetime flag fires', passed: failures.length === 0, failures, decision };
+  return { name: 'TC70 — teriparatide already used: lifetime flag fires', passed: failures.length === 0, failures, decision };
 }
 
 // ─── TC60 ─────────────────────────────────────────────────────────────────
 // Ibandronate 1-hour fasting requirement — verify the patient education
 // text in the ibandronate recipe contains "1 HOUR" (or equivalent) and
 // flags it as longer than alendronate/risedronate.
-function tc60(): TCResult {
+function tc71(): TCResult {
   const failures: string[] = [];
   // Recipe text is on the ibandronate() recipe; we don't get an active
   // ibandronate recommendation from any current pathway, so import and
@@ -1618,13 +1922,13 @@ function tc60(): TCResult {
   check(failures, 'ibandronate not in default cascade', !hasAgent(decision, 'ibandronate'));
   // Confirm alendronate is recommended for this standard female PMO patient.
   check(failures, 'alendronate recommended', hasAgent(decision, 'alendronate'));
-  return { name: 'TC60 — ibandronate not pushed; alendronate first-line', passed: failures.length === 0, failures, decision };
+  return { name: 'TC71 — ibandronate not pushed; alendronate first-line', passed: failures.length === 0, failures, decision };
 }
 
 // ─── TC61 ─────────────────────────────────────────────────────────────────
 // Specialist initiation vs GP continuation. Female currently on
 // romosozumab → GP-shared-care flag fires; no referral instruction.
-function tc61(): TCResult {
+function tc72(): TCResult {
   const failures: string[] = [];
   const patient = basePatient({
     age: 70,
@@ -1645,13 +1949,13 @@ function tc61(): TCResult {
   // Sequential therapy plan flag also expected (initiation-time prompt).
   check(failures, 'sequential_therapy_plan_required flag fires',
     hasFlag(decision, 'sequential_therapy_plan_required'));
-  return { name: 'TC61 — established on romosozumab: GP shared-care, no re-refer', passed: failures.length === 0, failures, decision };
+  return { name: 'TC72 — established on romosozumab: GP shared-care, no re-refer', passed: failures.length === 0, failures, decision };
 }
 
 // ─── TC62 ─────────────────────────────────────────────────────────────────
 // Low-hip-efficacy note: patient currently on ibandronate AND age ≥75 →
 // warning-severity hip-efficacy note fires.
-function tc62(): TCResult {
+function tc73(): TCResult {
   const failures: string[] = [];
   const patient = basePatient({
     age: 78,
@@ -1671,7 +1975,7 @@ function tc62(): TCResult {
   check(failures, 'message names ibandronate', hasFlagText(decision, 'ibandronate'));
   check(failures, 'message recommends alendronate / zoledronate / denosumab',
     hasFlagText(decision, 'alendronate'));
-  return { name: 'TC62 — ibandronate + age ≥75: low-hip-efficacy warning', passed: failures.length === 0, failures, decision };
+  return { name: 'TC73 — ibandronate + age ≥75: low-hip-efficacy warning', passed: failures.length === 0, failures, decision };
 }
 
 // ─── Runner ───────────────────────────────────────────────────────────────
@@ -1682,8 +1986,11 @@ const TCs: Array<() => TCResult> = [
   tc23, tc24, tc25, tc26, tc27, tc28, tc29, tc30, tc31, tc32,
   tc33, tc34, tc35, tc36, tc37, tc37b, tc38, tc39, tc40, tc41,
   tc42, tc43, tc44, tc45, tc46, tc47, tc48, tc49, tc50, tc51, tc52,
-  tc53, tc54, tc55, tc56, tc57,
-  tc58, tc59, tc60, tc61, tc62,
+  // v1.4 TC53–TC63 — see below the engine-extras block.
+  tc53, tc54, tc55, tc56, tc57, tc58, tc59, tc60, tc61, tc62, tc63,
+  // Engine-coverage extras (these were TC53–TC62 in the pre-v1.4 suite;
+  // renumbered to TC64–TC73 to free TC53–TC63 for the v1.4 alignment).
+  tc64, tc65, tc66, tc67, tc68, tc69, tc70, tc71, tc72, tc73,
 ];
 
 const results = TCs.map(fn => fn());

@@ -210,6 +210,15 @@ export interface PatientInput {
   // Cardiovascular history (romosozumab contraindication)
   priorMIOrStrokeWithin12Months: boolean;
 
+  /**
+   * v1.27 — any history of stroke (ischaemic OR haemorrhagic), regardless of timing.
+   * Drives raloxifene exclusion: NOGG 2024 (Evidence IIa) notes a small increase in
+   * fatal-stroke risk on raloxifene. Use with caution in patients with prior stroke
+   * or risk factors for stroke disease. Distinct from priorMIOrStrokeWithin12Months
+   * (which is the romosozumab 12-month CI gate).
+   */
+  strokeHistory: boolean;
+
   // Imminent fracture risk
   recentFractureWithin2Years: boolean; // any fragility fracture within last 24 months → treat immediately
 

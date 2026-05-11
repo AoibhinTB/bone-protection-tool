@@ -811,6 +811,76 @@ export function generateTreatmentOutput(
       urgency: gcDrivesVHR ? 'urgent' : 'soon',
     });
 
+    // ── v1.28 Step 10 — Romosozumab cardiovascular risk framing for VHR referral ──
+    // For appropriate female VHR candidates (i.e. romosozumab eligible: postmenopausal,
+    // no recent MI/stroke), surface a referral-context flag covering CV risk assessment,
+    // renal cautions, and the dosing detail the specialist will need.
+    if (patient.sex === 'female') {
+      flags.push({
+        id: 'romosozumab_cv_risk_framing',
+        severity: 'info',
+        message:
+          'If romosozumab is being considered at specialist review: both 1-year fracture risk AND 1-year cardiovascular risk must be assessed. ' +
+          'Flag explicit CV risk factors in the referral letter (prior MI / stroke / unstable angina / heart failure / uncontrolled hypertension / CV risk score) — the specialist needs this to decide whether romosozumab is appropriate. ' +
+          'Romosozumab dosing: TWO SC injections of 105 mg each (total 210 mg) given monthly for 12 months. ' +
+          'Severe renal impairment or dialysis → increased hypocalcaemia risk with romosozumab — flag renal status in the referral.',
+        rationale:
+          'NOGG 2024 (v1.28): romosozumab carries a small but real CV signal from ARCH-trial subgroup analysis. ' +
+          'The CV risk assessment is part of the prescribing decision and must accompany the referral; specialists need the full CV picture to decide between romosozumab and an alternative.',
+        source: SRC_ROMO_MAP,
+      });
+    }
+
+    // ── v1.29 Step 11 — Bisphosphonate blunting effect in anabolic-referral letter ──
+    // When a VHR patient is currently on (or has been on long-term) a bisphosphonate
+    // and is being referred for anabolic consideration, surface the referral-letter
+    // wording about attenuated BMD response.
+    {
+      const bpCurrent = patient.currentTreatment?.currentlyOn === true && isBisphosphonate(patient.currentTreatment.agent);
+      const bpPriorLong = patient.previousTreatments.some(t => isBisphosphonate(t.agent) && t.durationMonths >= 12);
+      if (bpCurrent || bpPriorLong) {
+        const dur = bpCurrent
+          ? `${patient.currentTreatment!.durationMonths} months on ${patient.currentTreatment!.agent}`
+          : (() => {
+              const t = patient.previousTreatments.find(p => isBisphosphonate(p.agent) && p.durationMonths >= 12)!;
+              return `previous ${t.agent} (${t.durationMonths} months)`;
+            })();
+        flags.push({
+          id: 'bp_blunting_effect_referral',
+          severity: 'info',
+          message:
+            `REFERRAL LETTER NOTE: ${dur}. Prior bisphosphonate treatment ATTENUATES BMD response to teriparatide and romosozumab — ` +
+            'attenuation is greater for teriparatide, especially at the hip. ' +
+            'Romosozumab is less affected than teriparatide but still attenuated relative to treatment-naïve patients. ' +
+            'State the prior bisphosphonate use and duration explicitly in the referral letter so the specialist can factor this into drug selection.',
+          rationale:
+            'NOGG 2024 (Evidence IIb, v1.29): the BMD-gain response to anabolic therapy is reduced in patients previously exposed to ' +
+            'bisphosphonates, particularly long courses. The specialist may opt for romosozumab over teriparatide on this basis. ' +
+            'This information must be supplied with the referral.',
+          source: SRC_NOGG,
+        });
+      }
+    }
+
+    // ── v1.29 Step 12 — Denosumab → romosozumab attenuation note (referral context) ──
+    {
+      const denoCurrent = patient.currentTreatment?.currentlyOn === true && patient.currentTreatment.agent === 'denosumab';
+      const denoPrior = patient.previousTreatments.some(t => t.agent === 'denosumab');
+      if (denoCurrent || denoPrior) {
+        flags.push({
+          id: 'denosumab_to_romosozumab_attenuation',
+          severity: 'info',
+          message:
+            'REFERRAL CONTEXT (v1.29): when romosozumab is given following denosumab therapy, there is ATTENUATION of the BMD increase at spine and hip ' +
+            'compared to treatment-naïve patients. The specialist should be aware of the patient\'s denosumab history when considering romosozumab.',
+          rationale:
+            'NOGG 2024 (v1.29): the post-denosumab attenuation of the romosozumab BMD response is distinct from the rebound-fracture risk after denosumab cessation. ' +
+            'Both considerations affect drug sequencing; the specialist needs to know the denosumab history.',
+          source: SRC_NOGG,
+        });
+      }
+    }
+
     // ── v1.20 Step 8 — Anabolic option for men ≥50 at VHR with vertebral fractures ──
     // Teriparatide is the only anabolic licensed for men. Surface it explicitly
     // as a first-line option in this population; the referral pathway above
@@ -828,11 +898,14 @@ export function generateTreatmentOutput(
           ? 'Male ≥50 at very high risk with vertebral fracture(s). NOTE: teriparatide has already been used (lifetime maximum reached) — specialist input required for alternative parenteral strategy. ' +
             'Romosozumab is NOT licensed for men. Discuss zoledronate or denosumab continuation under specialist guidance.'
           : 'Male ≥50 at very high risk with vertebral fracture(s) — teriparatide should be considered as a first-line option per NOGG 2024 (v1.20). ' +
-            'Teriparatide is the only anabolic drug licensed for use in men in Ireland. GP cannot initiate — specialist (consultant) referral required under the HSE High-Tech scheme.',
+            'Teriparatide is the only anabolic drug licensed for use in men in Ireland. GP cannot initiate — specialist (consultant) referral required under the HSE High-Tech scheme. ' +
+            // v1.28 Step 8 — corrected hip-fracture evidence.
+            'Hip fracture evidence (v1.28): no primary RCT hip-fracture endpoint, but meta-analysis evidence suggests a reduction (OR 0.44, 95% CI 0.22–0.87; Evidence Ia).',
         rationale:
           'NOGG 2024 Section 5.5 / Section 7.1 (v1.20 addition): men ≥50 at VHR with vertebral fractures benefit from anabolic-first treatment. ' +
           'Teriparatide is the licensed anabolic for men in Ireland; romosozumab and abaloparatide are not. ' +
-          'A specialist initiates teriparatide under the HSE High-Tech scheme; the GP may continue under shared care after initiation.',
+          'A specialist initiates teriparatide under the HSE High-Tech scheme; the GP may continue under shared care after initiation. ' +
+          'v1.28: the previous spec stated "teriparatide has not been shown to reduce hip fracture" — this is outdated. The current best estimate is a meta-analytic OR of 0.44 (95% CI 0.22–0.87, Evidence Ia).',
         source: SRC_NOGG,
       });
     }
@@ -892,17 +965,49 @@ export function generateTreatmentOutput(
   // For teriparatide / romosozumab specifically. Don't emit a referral
   // instruction for someone already established on the drug.
   if (current?.currentlyOn === true && (current.agent === 'teriparatide' || current.agent === 'romosozumab')) {
+    // v1.28 Step 9 — drug-specific side-effect + monitoring text for shared-care continuation.
+    const sharedCareDetail = current.agent === 'teriparatide'
+      ? 'Side effects to monitor (v1.28): headache, nausea, dizziness, postural hypotension, leg pain, transient serum calcium elevation post-injection (expected). ' +
+        'Caution with moderate renal impairment — monitor eGFR during GP continuation (not just severe impairment as a CI). ' +
+        'Begin planning sequential antiresorptive NOW — prescribe 1 month before final dose so there is zero gap. Failure to follow on negates the BMD gain.'
+      : 'Romosozumab (v1.28): two SC injections of 105 mg each (total 210 mg) monthly for 12 months total. ' +
+        'Monitor for hypocalcaemia, especially in renal impairment. Plan sequential antiresorptive before the 12-month course ends. ' +
+        'Flag any new CV symptoms — small CV signal in ARCH trial subgroup analysis.';
     flags.push({
       id: 'anabolic_gp_shared_care_continue',
       severity: 'info',
       message:
         `Patient established on ${current.agent} (High-Tech drug, specialist-initiated). ` +
-        'GP can continue prescribing under shared care — ensure monitoring is up to date (DEXA at 1–2 years; sequential antiresorptive plan in place).',
+        'GP can continue prescribing under shared care — ensure monitoring is up to date (DEXA at 1–2 years; sequential antiresorptive plan in place). ' +
+        sharedCareDetail,
       rationale:
         'NOGG 2024 / HSE shared-care policy (v1.22 correction): initiation requires consultant under the HSE High-Tech scheme, ' +
-        'but GPs may continue once the specialist has initiated. Do not refer back to specialist for routine continuation.',
+        'but GPs may continue once the specialist has initiated. Do not refer back to specialist for routine continuation. ' +
+        'v1.28 additions: teriparatide and romosozumab specific monitoring text for GPs continuing under shared care.',
       source: SRC_NOGG,
     });
+  }
+
+  // ── v1.27 Step 7 — Raloxifene stroke-history exclusion ──
+  // Surface even when raloxifene is not in the current recommendation list —
+  // the flag tells the clinician (and any downstream UI) that raloxifene is
+  // off the table for this patient and why.
+  if (patient.strokeHistory) {
+    flags.push({
+      id: 'raloxifene_excluded_stroke',
+      severity: 'warning',
+      message:
+        'RALOXIFENE EXCLUDED — history of stroke. NOGG 2024 (Evidence IIa): raloxifene is associated with a small increase in fatal-stroke risk; ' +
+        'avoid in patients with prior stroke or significant stroke risk factors. ' +
+        'Prefer alendronate / risedronate / zoledronate / denosumab.',
+      rationale:
+        'NOGG 2024 / SmPC raloxifene: raloxifene increases the risk of fatal stroke (Evidence IIa). ' +
+        'The MORE trial extension and RUTH study identified an increased stroke mortality signal; raloxifene should not be initiated in patients with prior stroke or risk factors for stroke disease.',
+      source: SRC_NOGG,
+    });
+    // Defence-in-depth filter runs at the bottom of generateTreatmentOutput
+    // (where the male-licensing filter also runs) — keeps the recommendation
+    // list clean even if a future branch starts pushing raloxifene.
   }
 
   // ── v1.21 Step 4 — Abaloparatide reimbursement note ──
@@ -987,6 +1092,13 @@ export function generateTreatmentOutput(
         urgency: 'soon',
       });
     }
+  }
+
+  // ── v1.27 Step 7 — raloxifene stroke-history filter (defence-in-depth) ──
+  // Strips any active raloxifene recommendation when the patient has a stroke
+  // history. The exclusion flag was already pushed upstream.
+  if (patient.strokeHistory) {
+    recommendations = recommendations.filter(r => r.agent !== 'raloxifene');
   }
 
   // ── v1.23 Step 1 — Male patient drug licensing filter ──
@@ -1132,10 +1244,17 @@ function initiateTherapy(
         id: 'hrt_option_under60',
         severity: 'info',
         message:
-          'HRT first-line option (postmenopausal ≤60, high risk, no VTE/breast Ca). Transdermal preferred.',
+          'HRT first-line option (postmenopausal ≤60, high risk, no VTE/breast Ca). ' +
+          // v1.27 Step 6 — transdermal preferred for VTE only; explicit breast-cancer-route clarification.
+          'Transdermal preferred — LOWER VTE risk than oral oestrogen. ' +
+          'Cardiovascular: HRT does NOT increase cardiovascular disease risk when started in women aged <60 years (NOGG 2024). ' +
+          'Breast cancer counselling (NOGG 2024): systemic HRT is associated with increased breast cancer risk irrespective of oestrogen type, ' +
+          'progestogen type, or route of delivery. Transdermal route does NOT reduce breast cancer risk compared to oral — discuss this with the patient.',
         rationale:
           'NOGG 2024 Section 5.2 update: HRT elevated to first-line in women ≤60 alongside bisphosphonates. ' +
-          'HRT also addresses menopausal symptoms. Review at 5 years.',
+          'HRT also addresses menopausal symptoms. Review at 5 years. ' +
+          'v1.27 corrections: the transdermal preference is for VTE risk only — breast cancer risk is increased with systemic HRT ' +
+          'regardless of route. Do not imply transdermal is safer for breast cancer.',
         source: SRC_NOGG,
       });
     }
@@ -3110,22 +3229,32 @@ export function raloxifene(): TreatmentRecommendation {
   return {
     agent: 'raloxifene',
     dose: '60 mg oral',
-    frequency: 'Once daily, with or without food',
+    frequency: 'Once daily, with or without food — positive adherence note (no fasting requirement)',
     rationale:
       'SERM — vertebral fracture protection only (no robust evidence for hip or non-vertebral fracture reduction). ' +
       'Option for postmenopausal women where bisphosphonates / denosumab are contraindicated or not tolerated. ' +
-      'NOT suitable in symptomatic menopausal women — raloxifene can worsen hot flushes; consider bazedoxifene instead.',
+      'NOT suitable in symptomatic menopausal women — raloxifene can worsen hot flushes; consider bazedoxifene instead. ' +
+      'NOT licensed for use in men. ' +
+      // v1.27 — added phase III breast cancer signal.
+      'Phase III evidence showed reduced breast cancer risk; may be clinically relevant in women with both fracture risk and elevated breast cancer risk factors.',
     strength: 'conditional',
     contraindications: [
-      'Personal or family history of VTE (DVT/PE)',
+      // v1.27 Step 7 — full contraindications list per spec.
+      'Personal or family history of VTE (DVT/PE) — VTE risk increase is mostly in the FIRST FEW MONTHS of treatment',
       'Active or recent thromboembolic event',
+      // v1.27 — stroke history / risk factors for stroke disease (Evidence IIa).
+      'History of stroke or risk factors for stroke disease (NOGG 2024 Evidence IIa — small increase in fatal-stroke risk)',
+      'Child-bearing potential',
       'Premenopausal women',
+      'Unexplained uterine bleeding',
       'Severe hepatic impairment',
+      'Severe renal impairment',
       'Pregnancy',
     ],
     monitoring: [
       'Vertebral protection only — insufficient evidence for hip / non-vertebral fracture',
-      'VTE risk: counsel about leg swelling / chest pain symptoms',
+      'VTE risk: counsel about leg swelling / chest pain symptoms; risk is greatest in the first few months',
+      'Stroke risk: small increase in fatal stroke — counsel and avoid in patients with stroke history or significant stroke risk factors',
       'May worsen hot flushes — switch to bazedoxifene if vasomotor symptoms develop',
       'DEXA at 1–2 years',
     ],
@@ -3137,9 +3266,11 @@ export function raloxifene(): TreatmentRecommendation {
       howToTake:
         'One 60 mg tablet daily, swallowed whole with water. Can be taken at any time, with or without food.',
       sideEffects: [
-        'Hot flushes — raloxifene can MAKE vasomotor symptoms WORSE; tell your doctor if these become a problem',
+        // v1.27 Step 7 — added leg cramps, oedema, vasomotor symptoms.
+        'Hot flushes / vasomotor symptoms — raloxifene can MAKE these WORSE; tell your doctor if vasomotor symptoms become troublesome',
         'Leg cramps',
-        'Increased risk of blood clots (DVT / PE) — tell your doctor immediately if you develop calf swelling, chest pain, or breathlessness',
+        'Oedema (mild leg / ankle swelling)',
+        'Increased risk of blood clots (DVT / PE) — tell your doctor immediately if you develop calf swelling, chest pain, or breathlessness. Risk is highest in the first few months.',
       ],
       warnings: [
         'Stop and contact a doctor if you develop calf pain or swelling, chest pain, or sudden breathlessness — possible blood clot.',
@@ -3219,7 +3350,10 @@ function denosumab(egfr: number | null): TreatmentRecommendation {
       'bisphosphonate is preferred first-line as the most cost-effective antiresorptive. ' +
       'v1.19 — "men on ADT" no longer listed as a first-line carve-out. NOGG 2024 (Conditional, Section 10.1): for ADT-associated bone loss, ' +
       'bisphosphonate and denosumab are equivalent options and normal first-line guidelines apply. The HALT trial established efficacy vs placebo but did NOT establish superiority over bisphosphonates. ' +
-      'Not renally cleared, hence the preferred antiresorptive in CKD.',
+      'Not renally cleared, hence the preferred antiresorptive in CKD. ' +
+      // v1.26 Step 5 — licensing statement.
+      'LICENSING (v1.26): approved for postmenopausal osteoporosis, male osteoporosis, bone loss with hormone ablation in men (ADT / prostate cancer) at increased fracture risk, and glucocorticoid-induced osteoporosis in men and women. ' +
+      'Safety and efficacy maintained over 10 years of continuous use (Evidence Ib).',
     strength: 'strong',
     contraindications: [
       'Uncorrected hypocalcaemia (MUST correct before each injection)',
@@ -3227,14 +3361,27 @@ function denosumab(egfr: number | null): TreatmentRecommendation {
       ...ckdCaution,
     ],
     monitoring: [
-      'Adjusted calcium before each injection',
+      // v1.26 Step 1 — pre-dose calcium check for ALL patients, not just CKD.
+      'PRE-DOSE CALCIUM CHECK (SPC requirement, ALL patients): corrected serum calcium must be checked before EVERY denosumab injection regardless of eGFR.',
       'Vitamin D ≥50 nmol/L before each injection (do not administer if <50 nmol/L)',
+      // v1.26 — post-injection check remains specific to CKD <35.
       ...(egfr !== null && egfr < RENAL_LIMITS.denosumab.hypocalcaemiaWatch
-        ? ['eGFR <35: corrected calcium MANDATORY at 2 weeks post-injection (every dose)']
+        ? ['POST-INJECTION: eGFR <35 — corrected calcium MANDATORY at 2 weeks after EVERY injection (severe asymptomatic hypocalcaemia risk).']
         : []),
+      // v1.26 Step 2 — hypocalcaemia symptom advice for ALL patients.
+      'Hypocalcaemia symptom advice (ALL patients): advise the patient to report symptoms promptly — muscle cramps, spasms, tingling in fingers/toes or around the mouth, seizures. Do NOT wait for routine review.',
       'Strict 6-monthly schedule — clinical risk begins to rise after 6 months + 2 weeks; treat >7 months as urgent',
       'DEXA at 1–2 years',
-      'CRITICAL: Plan sequential antiresorptive BEFORE stopping denosumab. NOGG 2024 Strong (Section 8.1, v1.19): IV zoledronate 5 mg at 6 months after the last denosumab dose is the recommended sequential agent — NOT equivalent to alendronate. Alendronate is a secondary option only where IV is not feasible; less reliable, especially after >3 years of denosumab. Particularly careful consideration is needed before starting denosumab in younger postmenopausal women and men given the difficulty of stopping.',
+      // v1.26 Step 4 — cessation hierarchy with FREEDOM statistic.
+      'CRITICAL: Plan sequential antiresorptive BEFORE stopping denosumab. NOGG 2024 Strong (Section 8.1, v1.19/v1.26): ' +
+        '(1) IV zoledronate 5 mg given 6 months after the last denosumab injection — recommended (Strong). NOT equivalent to alendronate. ' +
+        '(2) CTX monitoring at 3 and 6 months post-zoledronate to guide further infusions (Strong). ' +
+        '(3) If CTX not available: second IV zoledronate 6 months after the first (Conditional). ' +
+        '(4) Alendronate is a SECONDARY option only where IV is not feasible — less reliable, especially after >3 years of denosumab. ' +
+        'FREEDOM study evidence: 60.7% of patients who fractured after denosumab cessation sustained MULTIPLE vertebral fractures (vs 38.7% on placebo discontinuation). ' +
+        'Particularly careful consideration is needed before starting denosumab in younger postmenopausal women and men given the difficulty of stopping.',
+      // v1.29 Step 12 — denosumab → romosozumab attenuation note.
+      'If switching denosumab → romosozumab (specialist initiation): expect ATTENUATION of the BMD increase at spine and hip compared to treatment-naïve patients (v1.29). The specialist should be aware of denosumab history when considering romosozumab.',
       'Dental hygiene (Strong, NOGG 2024 Rec 9): maintain good oral hygiene; attend routine dental check-ups; report dental mobility, jaw pain, swelling, or oral ulceration promptly.',
       'Dental procedures during treatment (Conditional, NOGG 2024 Rec 11): there are NO data showing that stopping denosumab reduces the risk of ONJ. Do NOT routinely stop treatment before dental procedures.',
     ],
@@ -3252,17 +3399,22 @@ function denosumab(egfr: number | null): TreatmentRecommendation {
       howToTake:
         'One injection under the skin (usually upper arm, thigh, or abdomen) every 6 months — given by your GP, nurse, or at a clinic. ' +
         'The 6-month schedule is critical — do not miss or delay your injection.',
+      // v1.26 Step 3 — recognised side effects expanded; ONJ / AFF flagged as rare.
       sideEffects: [
         'Mild pain or redness at the injection site',
-        'Skin infections (cellulitis) — seek medical attention for any spreading redness',
+        'Skin infections (predominantly cellulitis) — seek medical attention for any spreading redness, warmth, or fever',
+        'Eczema',
+        'Low blood calcium (hypocalcaemia) — your calcium will be checked BEFORE every injection',
+        'Flatulence',
         'Aching in joints or muscles',
-        'Low blood calcium (more common with kidney problems — your calcium will be checked beforehand)',
+        'Rare: osteonecrosis of the jaw (ONJ); atypical femoral fracture (AFF) — see warnings below',
       ],
       warnings: [
-        'CRITICAL: Never stop denosumab without talking to your doctor first. Stopping can cause several broken bones at once (rebound fractures) — a different bone-protecting tablet must be started before or at the same time as stopping.',
+        'CRITICAL: Never stop denosumab without talking to your doctor first. Stopping can cause several broken bones at once (rebound fractures) — a different bone-protecting drug must be started before or at the same time as stopping.',
         'You cannot donate blood after receiving denosumab.',
         'Your injection must not be delayed — fracture risk rises if more than 6 months pass since the last injection. Contact your doctor immediately if your appointment is delayed.',
         'Tell your dentist you are receiving denosumab before any tooth extraction or invasive dental work — there is a very small risk of jaw problems (osteonecrosis of the jaw).',
+        'Report symptoms of low calcium promptly — muscle cramps, spasms, tingling in fingers/toes or around the mouth, seizures. Do not wait for your routine appointment.',
         'Ensure your vitamin D and calcium are adequate — you will have a blood test before each injection.',
       ],
     },
