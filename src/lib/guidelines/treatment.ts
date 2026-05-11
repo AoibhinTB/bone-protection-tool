@@ -3470,16 +3470,22 @@ function denosumab(egfr: number | null): TreatmentRecommendation {
 // ─── Helpers ──────────────────────────────────────────────────────────────
 
 function addVitDBlock(patient: PatientInput, flags: ClinicalFlag[]): void {
+  // v1.30 follow-up — the Vit D threshold below which denosumab is held is the
+  // same "insufficient" boundary used by the supplement output (Step 9) and the
+  // tiered safety logic. Read it from BLOOD_RANGES so the three Vit D steps
+  // (Step 2 safety block, Step 5 drug-selection filter, Step 9 patient
+  // education) stay in sync if the threshold is ever revised.
   const vitD = patient.bloodResults?.vitaminDNmol;
-  if (vitD !== undefined && vitD !== null && vitD < 50) {
+  const threshold = BLOOD_RANGES.vitaminD.insufficient;
+  if (vitD !== undefined && vitD !== null && vitD < threshold) {
     flags.push({
       id: 'denosumab_vitd_block',
       severity: 'urgent',
       message:
-        `HOLD denosumab — Vit D ${vitD} nmol/L (<50). Correct first; do not administer until ≥50 nmol/L. Bisphosphonate (oral or IV zoledronate) is NOT held by Vit D — only denosumab.`,
+        `HOLD denosumab — Vit D ${vitD} nmol/L (<${threshold}). Correct first; do not administer until ≥${threshold} nmol/L. Bisphosphonate (oral or IV zoledronate) is NOT held by Vit D — only denosumab.`,
       rationale:
         'Denosumab reduces bone resorption acutely; if vitamin D and calcium are not replete, ' +
-        'severe hypocalcaemia can occur. Mandatory to correct Vit D to ≥50 nmol/L before each dose.',
+        `severe hypocalcaemia can occur. Mandatory to correct Vit D to ≥${threshold} nmol/L before each dose.`,
       source: SRC_NOGG,
     });
   }

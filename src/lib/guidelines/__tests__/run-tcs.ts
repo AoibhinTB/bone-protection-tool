@@ -2045,6 +2045,50 @@ function tc75(): TCResult {
   return { name: 'TC75 — eGFR <35: soft prompt SUPPRESSED (CI justifies denosumab)', passed: failures.length === 0, failures, decision };
 }
 
+// ─── TC76 ─────────────────────────────────────────────────────────────────
+// Step 5 in isolation — denosumab Vit D block (Vit D < insufficient threshold).
+// Pre-condition: Vit D is in the 25–50 window so Step 2 (severe Vit D + hypoCa
+// dual blocker) doesn't ALSO fire. Calcium is in the normal range.
+// Patient is on a denosumab pathway (eGFR <35) so the engine pushes denosumab
+// and addVitDBlock runs.
+// This is the dedicated "Step 5 in isolation" test referenced in the architecture
+// audit — covers the third Vit D step independently so future regressions are
+// localisable to the right step.
+function tc76(): TCResult {
+  const failures: string[] = [];
+  const patient = basePatient({
+    age: 72,
+    sex: 'female',
+    priorFragilityFracture: true,
+    dexaResults: { lumbarSpineTScore: -2.8, totalHipTScore: -2.6, femoralNeckTScore: -2.6, forearmTScore: null },
+    renalFunction: { egfr: 30 }, // forces denosumab onto the recommendation list
+    bloodResults: {
+      adjustedCalciumMmol: 2.35, // normal — Step 2 (dual blocker) must NOT fire
+      vitaminDNmol: 40,           // 25 < 40 < 50: insufficient, not severe
+      egfr: 30,
+      alp: 80,
+      tshMUL: 2.0,
+      hbGramsPerLitre: 135,
+      esrOrCrp: 'normal',
+    },
+  });
+  const decision = runClinicalDecision(patient);
+  check(failures, 'denosumab recommended (renal CI to BPs)', hasAgent(decision, 'denosumab'));
+  check(failures, 'Step 5 denosumab_vitd_block flag fires',
+    hasFlag(decision, 'denosumab_vitd_block'));
+  // Step 2 (dual safety blocker) must NOT fire — Vit D is above the deficient
+  // threshold AND calcium is normal. This isolates Step 5.
+  check(failures, 'Step 2 (two_safety_blockers) does NOT fire',
+    !hasFlag(decision, 'two_safety_blockers'));
+  // The message must mention the threshold and the patient's value so the GP
+  // sees exactly why denosumab is being held.
+  const block = decision.flags.find(f => f.id === 'denosumab_vitd_block');
+  const msg = (block?.message ?? '').toLowerCase();
+  check(failures, 'message names patient value (40 nmol/L)', msg.includes('40 nmol/l'));
+  check(failures, 'message references the 50 nmol/L threshold', msg.includes('50'));
+  return { name: 'TC76 — Step 5 denosumab Vit D block, isolated from Step 2', passed: failures.length === 0, failures, decision };
+}
+
 // ─── Runner ───────────────────────────────────────────────────────────────
 
 const TCs: Array<() => TCResult> = [
@@ -2060,6 +2104,8 @@ const TCs: Array<() => TCResult> = [
   tc64, tc65, tc66, tc67, tc68, tc69, tc70, tc71, tc72, tc73,
   // v1.30 — denosumab soft prompt
   tc74, tc75,
+  // v1.30 follow-up — Vit D step-isolation test
+  tc76,
 ];
 
 const results = TCs.map(fn => fn());
