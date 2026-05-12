@@ -10,6 +10,12 @@ Clinical decision support reference for osteoporosis in postmenopausal women and
 
 ---
 
+## Live demo
+
+**[bone-protection-tool.vercel.app](https://bone-protection-tool.vercel.app/)**
+
+Prototype only; see the in-app disclaimer for scope, and note that the tool has not been validated for clinical use.
+
 ## What this is
 
 A reference implementation of risk classification and pharmacological recommendation for osteoporosis in postmenopausal women and men aged ≥50, written against NOGG 2024 and localised for Ireland. The engine takes patient clinical information (medical history, risk factors, FRAX, DEXA where available, treatment history, baseline bloods), produces a NOGG risk category with rationale, and emits drug recommendations.
