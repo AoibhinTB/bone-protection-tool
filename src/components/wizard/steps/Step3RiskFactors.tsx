@@ -9,18 +9,58 @@ interface Props {
   onChange: (patch: Partial<PatientInput>) => void;
 }
 
-const SECONDARY_OPTIONS = (
-  Object.keys(SECONDARY_CAUSE_LABELS) as SecondaryOsteoporosisCause[]
-).map(k => ({ value: k, label: SECONDARY_CAUSE_LABELS[k] }));
+// Secondary causes reordered by organ system for display only. The schema
+// labels (SECONDARY_CAUSE_LABELS) stay alphabetical so other consumers and
+// engine output text are unchanged. This array is purely a UI display order:
+// endocrine → GI/hepatic → renal/pulmonary → constitutional/bone →
+// medications. No sub-headings are rendered between clusters; the ordering
+// alone gives the grid visual rhythm without the heading clutter.
+const SECONDARY_OPTIONS_BY_SYSTEM: { value: SecondaryOsteoporosisCause; label: string }[] = [
+  // Endocrine
+  { value: 'type1_diabetes',            label: SECONDARY_CAUSE_LABELS.type1_diabetes },
+  { value: 'untreated_hyperthyroidism', label: SECONDARY_CAUSE_LABELS.untreated_hyperthyroidism },
+  { value: 'hypogonadism',              label: SECONDARY_CAUSE_LABELS.hypogonadism },
+  { value: 'cushing_syndrome',          label: SECONDARY_CAUSE_LABELS.cushing_syndrome },
+  { value: 'hyperparathyroidism',       label: SECONDARY_CAUSE_LABELS.hyperparathyroidism },
+  // GI / hepatic
+  { value: 'celiac_disease',            label: SECONDARY_CAUSE_LABELS.celiac_disease },
+  { value: 'inflammatory_bowel_disease',label: SECONDARY_CAUSE_LABELS.inflammatory_bowel_disease },
+  { value: 'malabsorption',             label: SECONDARY_CAUSE_LABELS.malabsorption },
+  { value: 'chronic_liver_disease',     label: SECONDARY_CAUSE_LABELS.chronic_liver_disease },
+  // Renal / pulmonary
+  { value: 'chronic_kidney_disease',    label: SECONDARY_CAUSE_LABELS.chronic_kidney_disease },
+  { value: 'copd',                      label: SECONDARY_CAUSE_LABELS.copd },
+  // Constitutional / bone
+  { value: 'osteogenesis_imperfecta',   label: SECONDARY_CAUSE_LABELS.osteogenesis_imperfecta },
+  { value: 'chronic_malnutrition',      label: SECONDARY_CAUSE_LABELS.chronic_malnutrition },
+  // Medications
+  { value: 'antiepileptic_use',         label: SECONDARY_CAUSE_LABELS.antiepileptic_use },
+];
+
+// Sub-heading inside Medical history. Smaller and lighter than SectionHeading
+// so the hierarchy reads: Section (h2) → Sub-section (this) → Field.
+function SubHeading({ children }: { children: React.ReactNode }) {
+  return (
+    <h3 className="text-sm font-semibold text-slate-700 mt-3 mb-1 first:mt-0">
+      {children}
+    </h3>
+  );
+}
 
 export function Step3RiskFactors({ data, onChange }: Props) {
   return (
     <div>
-      <SectionHeading>FRAX clinical risk factors</SectionHeading>
-      <Field label="Parental hip fracture">
-        <YesNo
-          value={data.parentalHipFracture}
-          onChange={v => onChange({ parentalHipFracture: v })}
+      {/* ── Lifestyle ──────────────────────────────────────────────────── */}
+      <SectionHeading>Lifestyle</SectionHeading>
+      <Field label="BMI" hint="kg/m²">
+        <NumInput
+          value={data.bmi}
+          onChange={v => onChange({ bmi: v })}
+          min={10}
+          max={70}
+          step={0.1}
+          unit="kg/m²"
+          width="w-20"
         />
       </Field>
       <Field label="Current smoker">
@@ -43,25 +83,29 @@ export function Step3RiskFactors({ data, onChange }: Props) {
           width="w-20"
         />
       </Field>
-      <Field label="BMI" hint="kg/m²">
+      <Field label="Falls in the last 12 months" hint="≥2 falls → hip risk ×1.3">
         <NumInput
-          value={data.bmi}
-          onChange={v => onChange({ bmi: v })}
-          min={10}
-          max={70}
-          step={0.1}
-          unit="kg/m²"
+          value={data.fallsInLastYear}
+          onChange={v => onChange({ fallsInLastYear: v ?? 0 })}
+          min={0}
+          max={20}
           width="w-20"
         />
       </Field>
-      <Field label="Rheumatoid arthritis" hint="FRAX risk factor — do NOT also tick 'secondary osteoporosis' in FRAX (double counts risk)">
+
+      {/* ── Family history ─────────────────────────────────────────────── */}
+      <SectionHeading>Family history</SectionHeading>
+      <Field label="Parental hip fracture">
         <YesNo
-          value={data.rheumatoidArthritis}
-          onChange={v => onChange({ rheumatoidArthritis: v })}
+          value={data.parentalHipFracture}
+          onChange={v => onChange({ parentalHipFracture: v })}
         />
       </Field>
 
-      <SectionHeading>FRAX arithmetic adjustment factors</SectionHeading>
+      {/* ── Medical history ────────────────────────────────────────────── */}
+      <SectionHeading>Medical history</SectionHeading>
+
+      <SubHeading>Endocrine</SubHeading>
       <Field label="Type 2 diabetes" hint="FRAX underestimates — MOF ×1.2 applied">
         <YesNo
           value={data.type2Diabetes}
@@ -85,13 +129,26 @@ export function Step3RiskFactors({ data, onChange }: Props) {
           />
         </Field>
       )}
-      <Field label="Falls in the last 12 months" hint="≥2 falls → hip risk ×1.3">
-        <NumInput
-          value={data.fallsInLastYear}
-          onChange={v => onChange({ fallsInLastYear: v ?? 0 })}
-          min={0}
-          max={20}
-          width="w-20"
+
+      <SubHeading>Gastrointestinal</SubHeading>
+      <Field
+        label="History of oesophageal disease"
+        hint="Stricture / achalasia / dysmotility — permanent contraindication to ALL oral bisphosphonates"
+      >
+        <YesNo
+          value={data.oesophagealDiseaseHistory}
+          onChange={v => onChange({ oesophagealDiseaseHistory: v })}
+        />
+      </Field>
+
+      <SubHeading>Musculoskeletal / neurological</SubHeading>
+      <Field
+        label="Rheumatoid arthritis"
+        hint="FRAX risk factor — do NOT also tick 'rheumatoid arthritis' under secondary causes below (double counts risk)"
+      >
+        <YesNo
+          value={data.rheumatoidArthritis}
+          onChange={v => onChange({ rheumatoidArthritis: v })}
         />
       </Field>
       <Field label="Parkinson's disease" hint="Hip fracture risk ×1.5">
@@ -113,8 +170,42 @@ export function Step3RiskFactors({ data, onChange }: Props) {
         />
       </Field>
 
-      {/* v1.19 — Early menopause moved here from Step 4 (medications). It is a clinical
-          history item and drives the POI / early-menopause pathway (Section 10.3). */}
+      <SubHeading>Cardiovascular</SubHeading>
+      <Field
+        label="MI or stroke within the last 12 months"
+        hint="Cardiovascular contraindication to romosozumab (specialist-initiated anabolic)"
+      >
+        <YesNo
+          value={data.priorMIOrStrokeWithin12Months}
+          onChange={v => onChange({ priorMIOrStrokeWithin12Months: v })}
+        />
+      </Field>
+
+      <SubHeading>Bone</SubHeading>
+      <Field
+        label="Paget's disease of bone"
+        hint="Requires specialist management — out of scope for the standard algorithm"
+      >
+        <YesNo
+          value={data.pagetsDiseaseOfBone}
+          onChange={v => onChange({ pagetsDiseaseOfBone: v })}
+        />
+      </Field>
+
+      <SubHeading>Other secondary causes of osteoporosis</SubHeading>
+      <p className="text-sm text-slate-500 mb-3">
+        Select all that apply. Listed in approximate order of organ system
+        (endocrine, gastrointestinal, renal/pulmonary, constitutional,
+        medications).
+      </p>
+      <CheckboxGroup<SecondaryOsteoporosisCause>
+        options={SECONDARY_OPTIONS_BY_SYSTEM}
+        selected={data.secondaryOsteoporosis}
+        onChange={v => onChange({ secondaryOsteoporosis: v })}
+        columns={2}
+      />
+
+      {/* ── Reproductive history (female only) ────────────────────────── */}
       {data.sex === 'female' && (
         <>
           <SectionHeading>Reproductive history</SectionHeading>
@@ -141,37 +232,7 @@ export function Step3RiskFactors({ data, onChange }: Props) {
         </>
       )}
 
-      {/* v1.19 — Past medical history section. Paget's lives here (moved from
-          Step 1) and oesophagealDiseaseHistory drives a Step-1 contraindication
-          check on oral bisphosphonates (Section 5.2). */}
-      <SectionHeading>Past medical history</SectionHeading>
-      <Field label="Paget's disease of bone" hint="Requires specialist management — out of scope for the standard algorithm">
-        <YesNo
-          value={data.pagetsDiseaseOfBone}
-          onChange={v => onChange({ pagetsDiseaseOfBone: v })}
-        />
-      </Field>
-      <Field
-        label="History of oesophageal disease"
-        hint="Stricture / achalasia / dysmotility — permanent contraindication to ALL oral bisphosphonates. Engine routes to IV zoledronate (or denosumab if eGFR <35)."
-      >
-        <YesNo
-          value={data.oesophagealDiseaseHistory}
-          onChange={v => onChange({ oesophagealDiseaseHistory: v })}
-        />
-      </Field>
-      {/* v1.31 follow-up: MI / stroke <12mo moved here from Step 5 Physical
-          findings. Drives the romosozumab cardiovascular contraindication. */}
-      <Field
-        label="MI or stroke within the last 12 months"
-        hint="Cardiovascular contraindication to romosozumab (specialist-initiated anabolic)."
-      >
-        <YesNo
-          value={data.priorMIOrStrokeWithin12Months}
-          onChange={v => onChange({ priorMIOrStrokeWithin12Months: v })}
-        />
-      </Field>
-
+      {/* ── HRT safety (affects first-line recommendations) ───────────── */}
       <SectionHeading>HRT safety (affects first-line recommendations)</SectionHeading>
       <Field label="Personal or family history of VTE" hint="DVT, PE — affects HRT safety assessment">
         <YesNo
@@ -185,15 +246,6 @@ export function Step3RiskFactors({ data, onChange }: Props) {
           onChange={v => onChange({ breastCancerHistory: v })}
         />
       </Field>
-
-      <SectionHeading>Secondary osteoporosis causes</SectionHeading>
-      <p className="text-sm text-slate-500 mb-3">Select all that apply</p>
-      <CheckboxGroup<SecondaryOsteoporosisCause>
-        options={SECONDARY_OPTIONS}
-        selected={data.secondaryOsteoporosis}
-        onChange={v => onChange({ secondaryOsteoporosis: v })}
-        columns={2}
-      />
     </div>
   );
 }
