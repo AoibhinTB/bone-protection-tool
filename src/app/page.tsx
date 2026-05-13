@@ -110,6 +110,11 @@ export default function Home() {
               patient={patient}
               onReset={handleReset}
               onBack={() => { setResult(null); setStep(STEP_TITLES.length - 1); }}
+              onRevealNoRfFrax={() => {
+                const next = { ...patient, noRiskFactorOverride: true };
+                setPatient(next);
+                setResult(runClinicalDecision(next));
+              }}
             />
           </div>
         </main>

@@ -56,4 +56,5 @@ export const defaultPatient: PatientInput = {
   oesophagealDiseaseHistory: false,
   bornOutsideIreland: false,
   onThiazolidinedione: false,
+  noRiskFactorOverride: false,
 };

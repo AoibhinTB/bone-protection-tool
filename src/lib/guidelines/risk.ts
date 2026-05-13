@@ -23,7 +23,10 @@ export function stratifyRisk(patient: PatientInput): RiskStratification {
   // No clinical risk factors at all → FRAX not indicated (NOGG 2024 Rec 1).
   // Skip FRAX calculation; surface a specific rationale; downstream paths produce no
   // pharmacological treatment, only lifestyle / Ca / Vit D advice.
-  if (!hasAnyClinicalRiskFactor(patient)) {
+  // v1.34 — clinician override path: when noRiskFactorOverride is set, run the full
+  // FRAX/assessment pathway despite no risk factors, with an additive documentation flag
+  // pushed by the index pipeline so the NOGG Rec 1 context remains visible.
+  if (!hasAnyClinicalRiskFactor(patient) && !patient.noRiskFactorOverride) {
     return result(
       'low', 'green', null, null, null, null, null, null, [],
       'No clinical risk factors identified. FRAX assessment is not indicated at this time per NOGG 2024 Rec 1. ' +
@@ -386,8 +389,9 @@ function countFraxClinicalRiskFactors(p: PatientInput): number {
 }
 
 // True if the patient has any FRAX-relevant clinical risk factor across all inputs.
-// Used to gate FRAX calculation per NOGG 2024 Rec 1.
-function hasAnyClinicalRiskFactor(p: PatientInput): boolean {
+// Used to gate FRAX calculation per NOGG 2024 Rec 1. Exported so the index pipeline
+// can detect the "override active despite no risk factors" case for the documentation flag.
+export function hasAnyClinicalRiskFactor(p: PatientInput): boolean {
   if (
     p.priorFragilityFracture ||
     p.priorHipFracture ||

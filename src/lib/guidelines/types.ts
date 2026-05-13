@@ -279,6 +279,13 @@ export interface PatientInput {
   // On a thiazolidinedione (pioglitazone) — adds to T2DM-related fracture risk.
   // Surfaced as a clinical flag; not numerically adjusted in FRAX (no NOGG multiplier).
   onThiazolidinedione: boolean;
+
+  // v1.34 — clinician override of the NOGG 2024 Rec 1 no-risk-factor gate.
+  // When true AND hasAnyClinicalRiskFactor() returns false, the engine still runs FRAX
+  // and surfaces an info flag with the documentation prompt. Default false — the gate
+  // behaves as before. Intended for cases where the clinician identifies an additional
+  // risk factor outside the tool's explicit input fields.
+  noRiskFactorOverride: boolean;
 }
 
 // ─── Risk factor summary ──────────────────────────────────────────────────

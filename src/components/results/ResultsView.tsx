@@ -18,6 +18,10 @@ interface Props {
   patient: PatientInput;
   onReset: () => void;
   onBack: () => void;
+  /** v1.34 — reveals the calculated FRAX when the no-RF gate has suppressed it.
+   *  Called when the user toggles the "Show calculated FRAX anyway" control on the
+   *  no-risk-factor gate result page. Re-runs the engine with noRiskFactorOverride=true. */
+  onRevealNoRfFrax?: () => void;
 }
 
 const TL_CONFIG: Record<TrafficLight, { bg: string; border: string; text: string; label: string }> = {
@@ -594,7 +598,7 @@ function PatientEducationPanel({ edu }: { edu: PatientEducation }) {
   );
 }
 
-export function ResultsView({ result, patient, onReset, onBack }: Props) {
+export function ResultsView({ result, patient, onReset, onBack, onRevealNoRfFrax }: Props) {
   const bloodEntries = buildBloodEntries(patient);
   const rs = result.riskStratification;
   const tl = TL_CONFIG[rs.trafficLight];
@@ -617,6 +621,14 @@ export function ResultsView({ result, patient, onReset, onBack }: Props) {
     rs.adjustedFraxHipPercent !== null &&
     rs.fraxHipPercent !== null &&
     rs.adjustedFraxHipPercent !== rs.fraxHipPercent;
+
+  // v1.34 — the NOGG Rec 1 no-risk-factor gate is detectable by the rationale prefix
+  // (the only path that emits this string). When in this state and a reveal callback
+  // is provided, render the "Show calculated FRAX anyway" toggle.
+  const noRfGateActive =
+    typeof onRevealNoRfFrax === 'function' &&
+    !patient.noRiskFactorOverride &&
+    rs.rationale.startsWith('No clinical risk factors identified.');
 
   return (
     <div className="space-y-5 sm:space-y-6">
@@ -667,6 +679,16 @@ export function ResultsView({ result, patient, onReset, onBack }: Props) {
             Adjustments:{' '}
             {rs.fraxAdjustments.map((a) => `${a.factor} ×${a.multiplier} (${a.appliedTo})`).join(' · ')}
           </p>
+        )}
+
+        {noRfGateActive && (
+          <button
+            type="button"
+            onClick={onRevealNoRfFrax}
+            className={`mt-3 text-xs font-medium ${tl.text} opacity-80 hover:opacity-100 underline underline-offset-2`}
+          >
+            Show calculated FRAX anyway →
+          </button>
         )}
       </div>
 

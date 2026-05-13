@@ -134,6 +134,22 @@ export function generateRiskFactorsIdentified(
     // already added above as part of "secondary cause"; skip duplicate
   }
 
+  // Lower limb amputation — NOGG 2024 Table 4 case-finder (no FRAX multiplier).
+  if (patient.lowerLimbAmputation) {
+    items.push({
+      factor: 'Lower limb amputation',
+      effect: 'NOGG 2024 Table 4 case-finder for fracture risk assessment — included in identified risk factors (qualitative; no FRAX numeric adjustment).',
+    });
+  }
+
+  // Adult learning disability — NOGG 2024 Table 4 case-finder (no FRAX multiplier).
+  if (patient.learningDisabilities) {
+    items.push({
+      factor: 'Adult learning disability (e.g. Down syndrome)',
+      effect: 'NOGG 2024 Table 4 case-finder for fracture risk assessment — included in identified risk factors (qualitative; no FRAX numeric adjustment).',
+    });
+  }
+
   // Thiazolidinedione (TZD) — additional T2DM fracture risk
   if (patient.onThiazolidinedione) {
     items.push({

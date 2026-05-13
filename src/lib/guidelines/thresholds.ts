@@ -220,6 +220,27 @@ export function applyFraxAdjustments(
     adjustments.push({ factor: "Parkinson's disease", multiplier: 1.50, appliedTo: 'hip' });
   }
 
+  // Lumbar spine vs femoral neck T-score discordance — NOGG 2024 Rec 3 (Conditional) / Table 2.
+  // +10% MOF per rounded T-score SD difference when LS is LOWER than FN. Auto-applied.
+  // When LS is HIGHER than FN, the symmetrical downward adjustment is NOT auto-applied
+  // because degenerative artefact (sclerotic lesions, vertebral compression, OA) can
+  // inflate LS BMD; the downward case is surfaced as a clinical-judgement flag in
+  // index.ts so the clinician decides whether the LS reading is reliable.
+  const ls = patient.dexaResults?.lumbarSpineTScore ?? null;
+  const fn = patient.dexaResults?.femoralNeckTScore ?? null;
+  if (ls !== null && fn !== null) {
+    const diff = Math.round(Math.abs(ls - fn));
+    if (diff >= 1 && ls < fn) {
+      const mult = 1 + 0.10 * diff;
+      mof = mof * mult;
+      adjustments.push({
+        factor: `Lumbar spine T-score ${ls} discordant with femoral neck ${fn} (LS lower by ${diff} SD)`,
+        multiplier: Math.round(mult * 100) / 100,
+        appliedTo: 'MOF',
+      });
+    }
+  }
+
   return {
     adjustedMOF: Math.min(Math.round(mof * 10) / 10, 100),
     adjustedHip: Math.min(Math.round(hip * 10) / 10, 100),

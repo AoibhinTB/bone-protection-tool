@@ -4,7 +4,7 @@
 
 import type { PatientInput, ClinicalDecision, RiskCategory, ReferralRecommendation, ClinicalFlag } from './types';
 import { assessInvestigationsNeeded } from './assessment';
-import { stratifyRisk } from './risk';
+import { stratifyRisk, hasAnyClinicalRiskFactor } from './risk';
 import { generateTreatmentOutput } from './treatment';
 import { generateBloodFlags } from './bloodFlags';
 import { generateRiskFactorsIdentified } from './riskFactorsSummary';
@@ -42,6 +42,50 @@ export function runClinicalDecision(patient: PatientInput): ClinicalDecision {
 
   // Append biochemistry-driven flags (ALP, TSH, calcium)
   flags.push(...generateBloodFlags(patient));
+
+  // v1.34 — LS vs FN downward MOF adjustment is NOT auto-applied. Surface as a
+  // clinical-judgement prompt so the clinician decides if the LS reading is reliable
+  // (degenerative artefact may inflate spine BMD).
+  const ls = patient.dexaResults?.lumbarSpineTScore ?? null;
+  const fn = patient.dexaResults?.femoralNeckTScore ?? null;
+  if (ls !== null && fn !== null) {
+    const diff = Math.round(Math.abs(ls - fn));
+    if (diff >= 1 && ls > fn) {
+      const mult = 1 - 0.10 * diff;
+      flags.push({
+        id: 'frax_ls_fn_discordance_downward',
+        severity: 'info',
+        message:
+          `LS T-score ${ls} higher than FN ${fn} by ${diff} SD. NOGG 2024 Table 2 permits a downward MOF ` +
+          `adjustment of ${(0.10 * diff * 100).toFixed(0)}% (×${mult.toFixed(2)}) — consider applying only if the LS BMD measurement is reliable. ` +
+          'Degenerative artefact (sclerotic lesions, vertebral compression, OA) may inflate spine readings; in that case do NOT apply the adjustment.',
+        rationale:
+          'NOGG 2024 Rec 3 (Conditional) / Table 2: when LS and FN T-scores differ, MOF probability may be ' +
+          'adjusted by 10% per rounded SD. Upward adjustments (LS lower than FN) are auto-applied. Downward ' +
+          'adjustments (LS higher than FN) require clinical judgement because degenerative artefact can inflate ' +
+          'LS BMD and produce a falsely reassuring difference.',
+        source: GUIDELINE_VERSIONS.nogg,
+      });
+    }
+  }
+
+  // v1.34 — when the no-risk-factor gate has been overridden, surface the NOGG Rec 1 context
+  // together with the documentation prompt so both are visible alongside the revealed FRAX.
+  if (patient.noRiskFactorOverride && !hasAnyClinicalRiskFactor(patient)) {
+    flags.unshift({
+      id: 'frax_revealed_no_rfs',
+      severity: 'info',
+      message:
+        'FRAX revealed despite no clinical risk factors recorded. By revealing FRAX you confirm that additional ' +
+        "clinical context not captured by the tool's risk-factor questions supports performing this assessment. " +
+        'Document the rationale in the patient record.',
+      rationale:
+        'NOGG 2024 Rec 1: where there are no clinical risk factors, FRAX assessment is not indicated. The override ' +
+        "path is intended for cases where the clinician has identified a risk factor outside the tool's explicit input " +
+        'fields. The NOGG Rec 1 framing is preserved as additive context, not replaced.',
+      source: GUIDELINE_VERSIONS.nogg,
+    });
+  }
 
   // Age ≥80: FRAX 10-year probability may exceed remaining life expectancy
   if (patient.age >= 80) {
