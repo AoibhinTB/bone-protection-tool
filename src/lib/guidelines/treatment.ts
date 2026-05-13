@@ -87,6 +87,31 @@ export function generateTreatmentOutput(
     return { recommendations: [], flags, referrals, supplements };
   }
 
+  // ── v1.34 — BMD unavailable + prior fragility fracture (NOGG Rec 6 + Rec 8) ──
+  // Prior-fx patients route to HIGH at risk.ts:177-186 (NOGG Rec 8) before the FRAX-based
+  // stratification runs. That path never reaches the intermediate+bmdUnavailable branch
+  // below, so the bmd_unavailable_treat_fx flag needs to fire here as a SECONDARY
+  // annotation when both apply. NOGG Rec 6 conveys "treatment recommended despite
+  // missing BMD" — distinct clinical signal from Rec 8's "treat regardless of FRAX".
+  const hasFragilityFxAtTop =
+    patient.priorFragilityFracture ||
+    patient.priorHipFracture ||
+    patient.priorVertebralFracture;
+  if (patient.bmdUnavailable && hasFragilityFxAtTop && (riskCategory === 'high' || riskCategory === 'very_high')) {
+    flags.push({
+      id: 'bmd_unavailable_treat_fx',
+      severity: 'info',
+      message:
+        'BMD not available — treatment offered based on history of fragility fracture per NOGG 2024 Rec 6 ' +
+        '(in addition to the Rec 8 prior-fracture rationale).',
+      rationale:
+        'NOGG 2024 Rec 6 (Strong): in patients where BMD is unavailable, a previous low-trauma fracture is a ' +
+        'sufficient indication for treatment. Rec 8 also applies (prior fracture → treat regardless of FRAX). ' +
+        'Both pathways converge on treatment; the Rec 6 annotation records that the decision did not require BMD.',
+      source: SRC_NOGG,
+    });
+  }
+
   // ── Imminent fracture risk (fracture within last 24 months) ──
   if (patient.recentFractureWithin2Years) {
     flags.push({

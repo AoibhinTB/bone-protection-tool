@@ -622,13 +622,10 @@ export function ResultsView({ result, patient, onReset, onBack, onRevealNoRfFrax
     rs.fraxHipPercent !== null &&
     rs.adjustedFraxHipPercent !== rs.fraxHipPercent;
 
-  // v1.34 — the NOGG Rec 1 no-risk-factor gate is detectable by the rationale prefix
-  // (the only path that emits this string). When in this state and a reveal callback
-  // is provided, render the "Show calculated FRAX anyway" toggle.
-  const noRfGateActive =
-    typeof onRevealNoRfFrax === 'function' &&
-    !patient.noRiskFactorOverride &&
-    rs.rationale.startsWith('No clinical risk factors identified.');
+  // v1.34 — the NOGG Rec 1 no-risk-factor gate sets riskStratification.gatedNoRfs.
+  // When the gate has fired AND a reveal callback is provided, render the
+  // "Show calculated FRAX anyway" toggle.
+  const noRfGateActive = typeof onRevealNoRfFrax === 'function' && rs.gatedNoRfs;
 
   return (
     <div className="space-y-5 sm:space-y-6">

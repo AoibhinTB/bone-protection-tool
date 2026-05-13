@@ -390,6 +390,11 @@ export interface RiskStratification {
   upperThreshold: number | null;
   rationale: string;
   source: GuidelineSource;
+  /** v1.34 — true iff the NOGG Rec 1 no-clinical-risk-factor gate fired (FRAX suppressed).
+   *  Used by the UI to render the "Show calculated FRAX anyway" override toggle without
+   *  string-matching the rationale text. False on every other path, including the override
+   *  path (where the gate explicitly does NOT fire). */
+  gatedNoRfs: boolean;
 }
 
 export interface ClinicalDecision {

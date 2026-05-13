@@ -314,6 +314,7 @@ function buildOutOfScopeDecision(
       upperThreshold: null,
       rationale: reason,
       source: GUIDELINE_VERSIONS.nogg,
+      gatedNoRfs: false,
     },
     riskFactorsIdentified: [],
     investigationsNeeded: [],

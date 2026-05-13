@@ -2098,6 +2098,311 @@ function tc76_v131(): TCResult {
   return { name: 'TC76 — v1.31 output gating, low-risk patient', passed: failures.length === 0, failures, decision };
 }
 
+// ═══════════════════════════════════════════════════════════════════════════
+// v1.10 TCs — TC78–TC86 — Prompt A behaviours + previously-untested branches
+// ═══════════════════════════════════════════════════════════════════════════
+
+// ─── TC78 ─────────────────────────────────────────────────────────────────
+// LS-FN upward MOF adjustment. 65F, LS -2.4 / FN -0.4 (2 SD discordance, LS
+// lower → upward), parental hip fx (passes gate). Raw MOF 12 → adjusted 14.4.
+// Hip unchanged. No degenerative-artefact flag.
+function tc78(): TCResult {
+  const failures: string[] = [];
+  const patient = basePatient({
+    age: 65,
+    sex: 'female',
+    parentalHipFracture: true,
+    dexaResults: { lumbarSpineTScore: -2.4, totalHipTScore: -0.5, femoralNeckTScore: -0.4, forearmTScore: null },
+    fraxMOFPercent: 12,
+    fraxHipPercent: 4,
+    fraxCalculatedWithBMD: true,
+    bloodResults: { adjustedCalciumMmol: 2.3, vitaminDNmol: 60, egfr: 80, alp: 80, tshMUL: 2.0, hbGramsPerLitre: 135, esrOrCrp: 'normal' },
+  });
+  const decision = runClinicalDecision(patient);
+
+  const lsfnAdj = decision.riskStratification.fraxAdjustments.find(
+    a => a.appliedTo === 'MOF' && /lumbar spine|LS/i.test(a.factor),
+  );
+  check(failures, 'LS-FN MOF adjustment entry present', !!lsfnAdj,
+    lsfnAdj ? '' : `adjustments: ${JSON.stringify(decision.riskStratification.fraxAdjustments)}`);
+  check(failures, 'LS-FN multiplier === 1.2', lsfnAdj?.multiplier === 1.2,
+    lsfnAdj ? `got ${lsfnAdj.multiplier}` : '');
+  check(failures, 'adjusted MOF === 14.4', decision.riskStratification.adjustedFraxMOFPercent === 14.4,
+    `got ${decision.riskStratification.adjustedFraxMOFPercent}`);
+  check(failures, 'hip unchanged (raw === adjusted)',
+    decision.riskStratification.adjustedFraxHipPercent === decision.riskStratification.fraxHipPercent);
+  check(failures, 'adjusted MOF drives classification (rationale references 14.4)',
+    decision.riskStratification.rationale.includes('14.4'),
+    `rationale: ${decision.riskStratification.rationale}`);
+  check(failures, 'no degenerative-artefact (downward) flag',
+    !hasFlag(decision, 'frax_ls_fn_discordance_downward'));
+
+  return { name: 'TC78 — LS-FN upward MOF adjustment +20%, hip unchanged', passed: failures.length === 0, failures, decision };
+}
+
+// ─── TC79 ─────────────────────────────────────────────────────────────────
+// LS-FN downward → clinician-decides flag. 65F, LS -0.4 / FN -2.4 (2 SD, LS
+// higher → downward). Raw MOF 10 stays 10 (no auto-apply). Flag fires citing
+// Table 2 + degenerative-artefact caveat. Classification on un-adjusted FRAX.
+function tc79(): TCResult {
+  const failures: string[] = [];
+  const patient = basePatient({
+    age: 65,
+    sex: 'female',
+    parentalHipFracture: true,
+    dexaResults: { lumbarSpineTScore: -0.4, totalHipTScore: -2.4, femoralNeckTScore: -2.4, forearmTScore: null },
+    fraxMOFPercent: 10,
+    fraxHipPercent: 3,
+    fraxCalculatedWithBMD: true,
+    bloodResults: { adjustedCalciumMmol: 2.3, vitaminDNmol: 60, egfr: 80, alp: 80, tshMUL: 2.0, hbGramsPerLitre: 135, esrOrCrp: 'normal' },
+  });
+  const decision = runClinicalDecision(patient);
+
+  check(failures, 'frax_ls_fn_discordance_downward flag fires',
+    hasFlag(decision, 'frax_ls_fn_discordance_downward'));
+  check(failures, 'flag text mentions NOGG 2024 Table 2',
+    hasFlagText(decision, 'Table 2'));
+  check(failures, 'flag text mentions degenerative artefact',
+    hasFlagText(decision, 'degenerative artefact'));
+  check(failures, 'no LS-FN entry in fraxAdjustments (no auto-apply)',
+    !decision.riskStratification.fraxAdjustments.some(
+      a => /lumbar spine|LS/i.test(a.factor),
+    ),
+    `adjustments: ${JSON.stringify(decision.riskStratification.fraxAdjustments)}`);
+  check(failures, 'adjusted MOF === raw MOF (10)',
+    decision.riskStratification.adjustedFraxMOFPercent === 10 &&
+    decision.riskStratification.fraxMOFPercent === 10,
+    `raw=${decision.riskStratification.fraxMOFPercent} adj=${decision.riskStratification.adjustedFraxMOFPercent}`);
+  check(failures, 'rationale references un-adjusted 10% (classification on un-adjusted)',
+    decision.riskStratification.rationale.includes('10%'),
+    `rationale: ${decision.riskStratification.rationale}`);
+
+  return { name: 'TC79 — LS-FN downward clinician-decides flag, no auto-apply', passed: failures.length === 0, failures, decision };
+}
+
+// ─── TC80 ─────────────────────────────────────────────────────────────────
+// Case-finder surfacing. 65F, lower-limb amputation + learning disability,
+// no other RFs. Both surface as Table 4 case-finders. FRAX un-adjusted. Low.
+function tc80(): TCResult {
+  const failures: string[] = [];
+  const patient = basePatient({
+    age: 65,
+    sex: 'female',
+    lowerLimbAmputation: true,
+    learningDisabilities: true,
+    fraxMOFPercent: 2,
+    fraxHipPercent: 0.5,
+    fraxCalculatedWithBMD: true,
+    bloodResults: { adjustedCalciumMmol: 2.3, vitaminDNmol: 60, egfr: 80, alp: 80, tshMUL: 2.0, hbGramsPerLitre: 135, esrOrCrp: 'normal' },
+  });
+  const decision = runClinicalDecision(patient);
+
+  const ampEntry = decision.riskFactorsIdentified.find(r => r.factor.toLowerCase().includes('amputation'));
+  const ldEntry  = decision.riskFactorsIdentified.find(r => r.factor.toLowerCase().includes('learning'));
+  check(failures, 'amputation entry surfaced', !!ampEntry);
+  check(failures, 'learning disability entry surfaced', !!ldEntry);
+  check(failures, 'amputation entry cites Table 4 case-finder',
+    !!ampEntry && /table 4|case-finder/i.test(ampEntry.effect));
+  check(failures, 'learning disability entry cites Table 4 case-finder',
+    !!ldEntry && /table 4|case-finder/i.test(ldEntry.effect));
+  check(failures, 'FRAX un-adjusted: adjusted MOF === raw MOF',
+    decision.riskStratification.adjustedFraxMOFPercent === decision.riskStratification.fraxMOFPercent);
+  check(failures, 'FRAX un-adjusted: adjusted hip === raw hip',
+    decision.riskStratification.adjustedFraxHipPercent === decision.riskStratification.fraxHipPercent);
+  check(failures, 'treatmentRecommended === false', decision.treatmentRecommended === false);
+  check(failures, 'category low', decision.riskStratification.category === 'low');
+  check(failures, 'recommendation list empty', decision.treatmentRecommendations.length === 0);
+
+  return { name: 'TC80 — amputation + learning disability case-finder surfacing', passed: failures.length === 0, failures, decision };
+}
+
+// ─── TC81 ─────────────────────────────────────────────────────────────────
+// No-RF override. 65F, no risk factors, noRiskFactorOverride=true. FRAX
+// computed (estimator), gatedNoRfs===false, override flag fires, no treatment.
+// Companion to TC76 which exercises noRiskFactorOverride===false (gate fires).
+function tc81(): TCResult {
+  const failures: string[] = [];
+  const patient = basePatient({
+    age: 65,
+    sex: 'female',
+    bmi: 25,
+    noRiskFactorOverride: true,
+    bloodResults: { adjustedCalciumMmol: 2.3, vitaminDNmol: 60, egfr: 80, alp: 80, tshMUL: 2.0, hbGramsPerLitre: 135, esrOrCrp: 'normal' },
+  });
+  const decision = runClinicalDecision(patient);
+
+  check(failures, 'computed FRAX MOF present (not suppressed)',
+    decision.riskStratification.fraxMOFPercent !== null,
+    `MOF=${decision.riskStratification.fraxMOFPercent}`);
+  check(failures, 'computed FRAX hip present (not suppressed)',
+    decision.riskStratification.fraxHipPercent !== null,
+    `hip=${decision.riskStratification.fraxHipPercent}`);
+  check(failures, 'frax_revealed_no_rfs documentation flag fires',
+    hasFlag(decision, 'frax_revealed_no_rfs'));
+  check(failures, 'documentation flag combines Rec 1 + documentation prompt',
+    hasFlagText(decision, 'NOGG 2024 Rec 1') && hasFlagText(decision, 'Document'));
+  check(failures, 'treatmentRecommended === false', decision.treatmentRecommended === false);
+  check(failures, 'gatedNoRfs === false (gate did NOT fire — override active)',
+    decision.riskStratification.gatedNoRfs === false);
+  // Classification should proceed on the computed FRAX, not be suppressed to low.
+  check(failures, 'classification reflects computed FRAX (not the gate stub)',
+    decision.riskStratification.category !== 'low' ||
+    decision.riskStratification.adjustedFraxMOFPercent !== null);
+
+  return { name: 'TC81 — no-RF override reveals FRAX with documentation flag', passed: failures.length === 0, failures, decision };
+}
+
+// ─── TC82 ─────────────────────────────────────────────────────────────────
+// Intermediate → DEXA → reassess. 65F intermediate FRAX (MOF 15), no DEXA,
+// not bmdUnavailable. Engine pushes intermediate_await_dexa with Rec 4 wording
+// and the BMD-reclassification instruction. Recommendation list empty.
+function tc82(): TCResult {
+  const failures: string[] = [];
+  const patient = basePatient({
+    age: 65,
+    sex: 'female',
+    parentalHipFracture: true, // passes gate; not in Table 2 → no FRAX adj
+    fraxMOFPercent: 15,
+    fraxHipPercent: 3,
+    fraxCalculatedWithBMD: false,
+    bloodResults: { adjustedCalciumMmol: 2.3, vitaminDNmol: 60, egfr: 80, alp: 80, tshMUL: 2.0, hbGramsPerLitre: 135, esrOrCrp: 'normal' },
+  });
+  const decision = runClinicalDecision(patient);
+
+  check(failures, 'intermediate_await_dexa flag set', hasFlag(decision, 'intermediate_await_dexa'));
+  check(failures, 'output cites NOGG 2024 Rec 4', hasFlagText(decision, 'NOGG 2024 Rec 4'));
+  check(failures, 'output includes the reclassify-after-BMD instruction',
+    hasFlagText(decision, 'reclassify') || hasFlagText(decision, 'refer for DEXA'));
+  check(failures, 'recommendation list empty', decision.treatmentRecommendations.length === 0);
+  check(failures, 'treatmentRecommended === false', decision.treatmentRecommended === false);
+  check(failures, 'risk category intermediate', decision.riskStratification.category === 'intermediate');
+
+  return { name: 'TC82 — intermediate → DEXA → reassess (NOGG Rec 4)', passed: failures.length === 0, failures, decision };
+}
+
+// ─── TC83 ─────────────────────────────────────────────────────────────────
+// BMD unavailable + prior fragility fracture. Engine routes to HIGH via Rec 8
+// prior-fx path, AND now (v1.34) surfaces bmd_unavailable_treat_fx as a
+// secondary annotation. Both NOGG Rec 6 and Rec 8 rationales apply.
+function tc83(): TCResult {
+  const failures: string[] = [];
+  const patient = basePatient({
+    age: 70,
+    sex: 'female',
+    priorFragilityFracture: true,
+    bmdUnavailable: true,
+    bloodResults: { adjustedCalciumMmol: 2.3, vitaminDNmol: 60, egfr: 80, alp: 80, tshMUL: 2.0, hbGramsPerLitre: 135, esrOrCrp: 'normal' },
+  });
+  const decision = runClinicalDecision(patient);
+
+  check(failures, 'bmd_unavailable_treat_fx flag set', hasFlag(decision, 'bmd_unavailable_treat_fx'));
+  check(failures, 'output cites NOGG 2024 Rec 6', hasFlagText(decision, 'NOGG 2024 Rec 6'));
+  check(failures, 'output references fragility fracture history',
+    hasFlagText(decision, 'fragility fracture') || hasFlagText(decision, 'low-trauma fracture'));
+  check(failures, 'recommendation list contains a bisphosphonate (alendronate or risedronate)',
+    hasAgent(decision, 'alendronate') || hasAgent(decision, 'risedronate'));
+  check(failures, 'treatmentRecommended === true', decision.treatmentRecommended === true);
+  check(failures, 'risk category high', decision.riskStratification.category === 'high');
+
+  return { name: 'TC83 — BMD unavailable + prior fragility fx (Rec 6 + Rec 8)', passed: failures.length === 0, failures, decision };
+}
+
+// ─── TC84 ─────────────────────────────────────────────────────────────────
+// BMD unavailable + FRAX above IT. 70F intermediate FRAX (MOF 22, ≥ itMOF
+// 20.3 at age 70), no fragility fx, bmdUnavailable=true. Pushes
+// bmd_unavailable_treat_frax + falls through to first-line BP.
+function tc84(): TCResult {
+  const failures: string[] = [];
+  const patient = basePatient({
+    age: 70,
+    sex: 'female',
+    parentalHipFracture: true, // passes gate
+    bmdUnavailable: true,
+    fraxMOFPercent: 22,
+    fraxHipPercent: 4,
+    fraxCalculatedWithBMD: false,
+    bloodResults: { adjustedCalciumMmol: 2.3, vitaminDNmol: 60, egfr: 80, alp: 80, tshMUL: 2.0, hbGramsPerLitre: 135, esrOrCrp: 'normal' },
+  });
+  const decision = runClinicalDecision(patient);
+
+  check(failures, 'bmd_unavailable_treat_frax flag set', hasFlag(decision, 'bmd_unavailable_treat_frax'));
+  check(failures, 'output cites FRAX MOF above intervention threshold',
+    hasFlagText(decision, 'exceeds intervention threshold') || hasFlagText(decision, 'intervention threshold'));
+  check(failures, 'output cites NOGG 2024 Rec 6', hasFlagText(decision, 'NOGG 2024 Rec 6'));
+  check(failures, 'recommendation list contains a bisphosphonate',
+    hasAgent(decision, 'alendronate') || hasAgent(decision, 'risedronate'));
+  check(failures, 'treatmentRecommended === true', decision.treatmentRecommended === true);
+
+  return { name: 'TC84 — BMD unavailable + FRAX above IT (Rec 6)', passed: failures.length === 0, failures, decision };
+}
+
+// ─── TC85 ─────────────────────────────────────────────────────────────────
+// BMD unavailable + neither criterion met. 70F intermediate FRAX (MOF 12,
+// between LAT 11.1 and IT 20.3), no fragility fx, bmdUnavailable=true.
+// Pushes bmd_unavailable_no_treatment + returns []; no treatment.
+function tc85(): TCResult {
+  const failures: string[] = [];
+  const patient = basePatient({
+    age: 70,
+    sex: 'female',
+    parentalHipFracture: true,
+    bmdUnavailable: true,
+    fraxMOFPercent: 12,
+    fraxHipPercent: 2.5,
+    fraxCalculatedWithBMD: false,
+    bloodResults: { adjustedCalciumMmol: 2.3, vitaminDNmol: 60, egfr: 80, alp: 80, tshMUL: 2.0, hbGramsPerLitre: 135, esrOrCrp: 'normal' },
+  });
+  const decision = runClinicalDecision(patient);
+
+  check(failures, 'bmd_unavailable_no_treatment flag set', hasFlag(decision, 'bmd_unavailable_no_treatment'));
+  check(failures, 'output cites NOGG 2024 Rec 6', hasFlagText(decision, 'NOGG 2024 Rec 6'));
+  check(failures, "output cites 'neither criterion met' rationale",
+    hasFlagText(decision, 'neither treatment criterion met') ||
+    hasFlagText(decision, 'treat only if a previous'));
+  check(failures, 'recommendation list empty', decision.treatmentRecommendations.length === 0);
+  check(failures, 'treatmentRecommended === false', decision.treatmentRecommended === false);
+
+  return { name: 'TC85 — BMD unavailable + neither criterion met (Rec 6)', passed: failures.length === 0, failures, decision };
+}
+
+// ─── TC86 ─────────────────────────────────────────────────────────────────
+// Forearm-only osteoporosis + PHPT workup. 60F, forearm T -2.7, standard
+// sites > -2.5, parental hip fx. PTH investigation pushed (Ca/ALP/PTH).
+// forearm_only_osteoporosis flag with hyperparathyroidism caveat. FRAX
+// values shown use femoral neck only — forearm BMD does not adjust FRAX.
+function tc86(): TCResult {
+  const failures: string[] = [];
+  const patient = basePatient({
+    age: 60,
+    sex: 'female',
+    parentalHipFracture: true,
+    dexaResults: { lumbarSpineTScore: -1.0, totalHipTScore: -1.5, femoralNeckTScore: -1.4, forearmTScore: -2.7 },
+    fraxMOFPercent: 8,
+    fraxHipPercent: 1.5,
+    fraxCalculatedWithBMD: true,
+    bloodResults: { adjustedCalciumMmol: 2.3, vitaminDNmol: 60, egfr: 80, alp: 80, tshMUL: 2.0, hbGramsPerLitre: 135, esrOrCrp: 'normal' },
+  });
+  const decision = runClinicalDecision(patient);
+
+  const pth = decision.investigationsNeeded.find(i => i.investigation === 'pth');
+  check(failures, 'PTH investigation present', !!pth);
+  check(failures, 'PTH workup names calcium / ALP / PTH',
+    !!pth && /calcium|ca/i.test(pth.reason) && /alp/i.test(pth.reason) && /pth/i.test(pth.reason));
+  check(failures, 'forearm_only_osteoporosis flag fires',
+    hasFlag(decision, 'forearm_only_osteoporosis'));
+  check(failures, 'forearm flag carries the hyperparathyroidism caveat',
+    hasFlagText(decision, 'hyperparathyroidism'));
+  check(failures, 'FRAX MOF shown = raw input 8 (forearm did NOT adjust FRAX)',
+    decision.riskStratification.fraxMOFPercent === 8 &&
+    decision.riskStratification.adjustedFraxMOFPercent === 8,
+    `raw=${decision.riskStratification.fraxMOFPercent} adj=${decision.riskStratification.adjustedFraxMOFPercent}`);
+  check(failures, 'FRAX hip shown = raw input 1.5 (forearm did NOT adjust FRAX)',
+    decision.riskStratification.fraxHipPercent === 1.5 &&
+    decision.riskStratification.adjustedFraxHipPercent === 1.5);
+
+  return { name: 'TC86 — forearm-only osteoporosis + PHPT workup', passed: failures.length === 0, failures, decision };
+}
+
 // ─── Runner ───────────────────────────────────────────────────────────────
 
 const TCs: Array<() => TCResult> = [
@@ -2118,6 +2423,8 @@ const TCs: Array<() => TCResult> = [
   // v1.30 follow-up — Vit D step-isolation test (renumbered to TC77 so the
   // v1.31 spec's TC76 number lines up with the runner)
   tc76,
+  // v1.10 (test-doc v1.10) — Prompt A behaviours + previously-untested branches
+  tc78, tc79, tc80, tc81, tc82, tc83, tc84, tc85, tc86,
 ];
 
 const results = TCs.map(fn => fn());

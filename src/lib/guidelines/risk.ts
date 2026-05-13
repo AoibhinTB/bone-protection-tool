@@ -30,7 +30,8 @@ export function stratifyRisk(patient: PatientInput): RiskStratification {
     return result(
       'low', 'green', null, null, null, null, null, null, [],
       'No clinical risk factors identified. FRAX assessment is not indicated at this time per NOGG 2024 Rec 1. ' +
-      'Reassess if risk factors develop. Advise on lifestyle measures and calcium/vitamin D intake.'
+      'Reassess if risk factors develop. Advise on lifestyle measures and calcium/vitamin D intake.',
+      true,
     );
   }
 
@@ -435,6 +436,7 @@ function result(
   adjustedHip: number | null,
   adjustments: FraxAdjustment[],
   rationale: string,
+  gatedNoRfs = false,
 ): RiskStratification {
   return {
     category,
@@ -448,5 +450,6 @@ function result(
     upperThreshold,
     rationale,
     source: SOURCE,
+    gatedNoRfs,
   };
 }
