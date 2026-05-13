@@ -79,7 +79,7 @@ function buildMedicalHistoryRows(
     {
       key: 'oesophagealDiseaseHistory',
       label: 'History of oesophageal disease',
-      hint: 'Stricture / achalasia / dysmotility — permanent contraindication to ALL oral bisphosphonates.',
+      hint: 'Stricture / achalasia / dysmotility.',
       checked: data.oesophagealDiseaseHistory,
       onToggle: () => onChange({ oesophagealDiseaseHistory: !data.oesophagealDiseaseHistory }),
     },
@@ -126,7 +126,6 @@ function buildMedicalHistoryRows(
     {
       key: 'rheumatoidArthritis',
       label: 'Rheumatoid arthritis',
-      hint: 'FRAX risk factor — do NOT also tick \'rheumatoid arthritis\' under secondary osteoporosis on the external FRAX form (double counts risk).',
       checked: data.rheumatoidArthritis,
       onToggle: () => onChange({ rheumatoidArthritis: !data.rheumatoidArthritis }),
     },
