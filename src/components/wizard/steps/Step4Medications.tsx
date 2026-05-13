@@ -146,6 +146,24 @@ export function Step4Medications({ data, onChange }: Props) {
           onChange={v => onChange({ onThiazolidinedione: v })}
         />
       </Field>
+      {/* Anti-epileptics moved from Step 3 — NOGG 2024 Table 4 lists enzyme-
+          inducing AEDs (phenytoin, carbamazepine, valproate) as a medication-
+          class case-finder. Engine behaviour unchanged: still flagged via
+          secondaryOsteoporosis array membership of 'antiepileptic_use'. */}
+      <Field
+        label="Enzyme-inducing anti-epileptics"
+        hint="Phenytoin, carbamazepine, valproate — NOGG 2024 Table 4 medication-class case-finder for osteoporosis."
+      >
+        <YesNo
+          value={data.secondaryOsteoporosis.includes('antiepileptic_use')}
+          onChange={v => {
+            const next = v
+              ? [...data.secondaryOsteoporosis, 'antiepileptic_use' as const]
+              : data.secondaryOsteoporosis.filter(k => k !== 'antiepileptic_use');
+            onChange({ secondaryOsteoporosis: next });
+          }}
+        />
+      </Field>
       {data.sex === 'male' && (
         <Field label="Androgen deprivation therapy (ADT)" hint="Prostate cancer treatment">
           <YesNo value={data.adtUse} onChange={v => onChange({ adtUse: v })} />

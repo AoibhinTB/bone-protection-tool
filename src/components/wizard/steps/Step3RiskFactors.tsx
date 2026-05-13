@@ -108,11 +108,10 @@ function buildMedicalHistoryRows(
       checked: hasSec('chronic_malnutrition'),
       onToggle: () => toggleSec('chronic_malnutrition') },
 
-    // Medications (clinical condition driver, not a current-medication
-    // tick on Step 4)
-    { key: 'antiepileptic_use', label: SECONDARY_CAUSE_LABELS.antiepileptic_use,
-      checked: hasSec('antiepileptic_use'),
-      onToggle: () => toggleSec('antiepileptic_use') },
+    // (Anti-epileptic drugs moved to Step 4 Medications page per NOGG 2024
+    // Table 4 — they are a medication-class case-finder, not a condition.
+    // Engine behaviour unchanged: still flagged via secondaryOsteoporosis
+    // array membership of 'antiepileptic_use'.)
   ];
 }
 

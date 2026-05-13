@@ -73,10 +73,13 @@ export function Step2FractureHistory({ data, onChange }: Props) {
       {data.priorFragilityFracture && (
         <>
           <p className="text-xs text-slate-600 bg-amber-50 border-l-4 border-amber-300 rounded-r px-3 py-2 leading-snug -mt-1 mb-2">
-            For FRAX purposes, enter any low-trauma fracture at any site age &gt;50.
-            Note: hip and clinical vertebral fractures alone are sufficient for clinical
-            diagnosis of osteoporosis without DEXA — treatment can be started without
-            waiting for a scan.
+            For FRAX purposes, enter any prior fracture at any site age &gt;50,
+            including both low-trauma (fragility) and high-trauma. Per NOGG 2024,
+            high-trauma fractures are associated with low BMD and future fracture
+            risk to the same extent as fragility fractures. Note: hip and clinical
+            vertebral fractures alone are sufficient for clinical diagnosis of
+            osteoporosis without DEXA — treatment can be started without waiting
+            for a scan.
           </p>
           <Field label="Hip fracture" indent>
             <YesNo
@@ -98,7 +101,7 @@ export function Step2FractureHistory({ data, onChange }: Props) {
           {data.priorVertebralFracture && (
             <Field
               label="Years since most recent vertebral fracture"
-              hint="≤2 years = very high risk criterion"
+              hint="≤24 months (2 years) = very high risk criterion"
               indent
             >
               <NumInput
@@ -121,7 +124,7 @@ export function Step2FractureHistory({ data, onChange }: Props) {
             />
           </Field>
           <Field
-            label="Fracture within the last 2 years"
+            label="Fracture within the last 24 months"
             hint="Imminent risk — start treatment immediately without waiting for DEXA"
             indent
           >
