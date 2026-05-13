@@ -41,7 +41,6 @@ function buildMedicalHistoryRows(
     {
       key: 'type2Diabetes',
       label: 'Type 2 diabetes',
-      hint: 'FRAX underestimates — MOF ×1.2 applied',
       checked: data.type2Diabetes,
       onToggle: () => onChange({ type2Diabetes: !data.type2Diabetes }),
     },
@@ -134,14 +133,12 @@ function buildMedicalHistoryRows(
     {
       key: 'parkinsonsDisease',
       label: 'Parkinson’s disease',
-      hint: 'Hip fracture risk ×1.5',
       checked: data.parkinsonsDisease,
       onToggle: () => onChange({ parkinsonsDisease: !data.parkinsonsDisease }),
     },
     {
       key: 'lowerLimbAmputation',
       label: 'Lower limb amputation',
-      hint: 'NOGG 2024 — use clinical judgement',
       checked: data.lowerLimbAmputation,
       onToggle: () => onChange({ lowerLimbAmputation: !data.lowerLimbAmputation }),
     },
@@ -156,7 +153,6 @@ function buildMedicalHistoryRows(
     {
       key: 'priorMIOrStrokeWithin12Months',
       label: 'MI or stroke within the last 12 months',
-      hint: 'Cardiovascular contraindication to romosozumab.',
       checked: data.priorMIOrStrokeWithin12Months,
       onToggle: () => onChange({ priorMIOrStrokeWithin12Months: !data.priorMIOrStrokeWithin12Months }),
     },
@@ -165,7 +161,6 @@ function buildMedicalHistoryRows(
     {
       key: 'pagetsDiseaseOfBone',
       label: 'Paget’s disease of bone',
-      hint: 'Requires specialist management — out of scope for the standard algorithm.',
       checked: data.pagetsDiseaseOfBone,
       onToggle: () => onChange({ pagetsDiseaseOfBone: !data.pagetsDiseaseOfBone }),
     },
