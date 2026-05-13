@@ -48,9 +48,9 @@ export type SecondaryOsteoporosisCause =
   | 'copd'                           // often combined with steroid use
   | 'chronic_kidney_disease';        // CKD 3a–5 / non-dialysis (NOGG Table 1)
 
-export interface RenalFunction {
-  egfr: number; // ml/min/1.73 m²
-}
+// v1.31 follow-up — RenalFunction removed. eGFR now lives only on
+// BloodResults.egfr. Single source of truth for kidney function across UI,
+// engine, and tests.
 
 export interface DexaResults {
   lumbarSpineTScore: number | null;
@@ -222,8 +222,8 @@ export interface PatientInput {
   // Imminent fracture risk
   recentFractureWithin2Years: boolean; // any fragility fracture within last 24 months → treat immediately
 
-  // Renal function
-  renalFunction: RenalFunction | null;
+  // (Renal function — eGFR moved to BloodResults.egfr; renalFunction field
+  // removed in v1.31 follow-up to avoid dual sources of truth.)
 
   // Investigations
   dexaResults: DexaResults | null;

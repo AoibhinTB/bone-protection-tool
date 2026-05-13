@@ -160,6 +160,17 @@ export function Step3RiskFactors({ data, onChange }: Props) {
           onChange={v => onChange({ oesophagealDiseaseHistory: v })}
         />
       </Field>
+      {/* v1.31 follow-up: MI / stroke <12mo moved here from Step 5 Physical
+          findings. Drives the romosozumab cardiovascular contraindication. */}
+      <Field
+        label="MI or stroke within the last 12 months"
+        hint="Cardiovascular contraindication to romosozumab (specialist-initiated anabolic)."
+      >
+        <YesNo
+          value={data.priorMIOrStrokeWithin12Months}
+          onChange={v => onChange({ priorMIOrStrokeWithin12Months: v })}
+        />
+      </Field>
 
       <SectionHeading>HRT safety (affects first-line recommendations)</SectionHeading>
       <Field label="Personal or family history of VTE" hint="DVT, PE — affects HRT safety assessment">

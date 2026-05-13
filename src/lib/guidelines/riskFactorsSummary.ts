@@ -160,7 +160,7 @@ export function generateRiskFactorsIdentified(
 
   // Renal function — only material if it changed treatment
   const renalCI = decision.flags.some(f => f.id === 'renal_bp_ci' || f.id === 'denosumab_ckd_hypocalcaemia');
-  const egfr = patient.renalFunction?.egfr ?? patient.bloodResults?.egfr ?? null;
+  const egfr = patient.bloodResults?.egfr ?? null;
   if (renalCI && egfr !== null) {
     items.push({
       factor: `eGFR ${egfr} ml/min`,

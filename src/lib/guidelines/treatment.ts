@@ -136,7 +136,7 @@ export function generateTreatmentOutput(
   // CKD 3a–5 is a Table 1 FRAX input (secondary cause). When the eGFR indicates CKD but
   // the clinician hasn't ticked it, prompt them to add it for FRAX accuracy.
   {
-    const egfr = patient.renalFunction?.egfr ?? patient.bloodResults?.egfr ?? null;
+    const egfr = patient.bloodResults?.egfr ?? null;
     const ckdTicked = patient.secondaryOsteoporosis.includes('chronic_kidney_disease');
     if (egfr !== null && egfr < 60 && !ckdTicked) {
       flags.push({
@@ -2830,7 +2830,7 @@ function getSupplements(patient: PatientInput): SupplementRecommendation[] {
     patient.secondaryOsteoporosis.includes('celiac_disease') ||
     patient.secondaryOsteoporosis.includes('inflammatory_bowel_disease');
   const ckd =
-    (patient.renalFunction?.egfr ?? patient.bloodResults?.egfr ?? 999) < 60;
+    (patient.bloodResults?.egfr ?? 999) < 60;
   const hyperPTH = patient.secondaryOsteoporosis.includes('hyperparathyroidism');
 
   // Context bullets reused across deficient / insufficient tiers
@@ -3492,7 +3492,10 @@ function addVitDBlock(patient: PatientInput, flags: ClinicalFlag[]): void {
 }
 
 function resolveEGFR(patient: PatientInput): number | null {
-  return patient.renalFunction?.egfr ?? patient.bloodResults?.egfr ?? null;
+  // v1.31 follow-up — eGFR now has a single schema home on BloodResults.egfr.
+  // The previous renalFunction slot has been removed; the UI exposes eGFR
+  // only on the bloods / investigations page.
+  return patient.bloodResults?.egfr ?? null;
 }
 
 function canUse(agent: keyof typeof RENAL_LIMITS, egfr: number | null): boolean {

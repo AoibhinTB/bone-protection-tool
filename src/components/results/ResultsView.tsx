@@ -316,7 +316,7 @@ function buildBloodEntries(patient: PatientInput): BloodEntry[] {
   }
 
   // eGFR
-  const egfr = patient.renalFunction?.egfr ?? b.egfr ?? null;
+  const egfr = b.egfr ?? null;
   if (egfr !== null) {
     if (egfr <= 35) {
       entries.push({

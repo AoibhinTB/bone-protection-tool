@@ -90,7 +90,7 @@ export function assessInvestigationsNeeded(
     });
   }
 
-  const hasEGFR = patient.renalFunction !== null || (patient.bloodResults?.egfr ?? null) !== null;
+  const hasEGFR = (patient.bloodResults?.egfr ?? null) !== null;
   if (!hasEGFR) {
     needed.push({
       investigation: 'egfr',

@@ -9,8 +9,6 @@ interface Props {
 }
 
 export function Step5Physical({ data, onChange }: Props) {
-  const hasRenalFunction = data.renalFunction !== null;
-
   return (
     <div>
       <SectionHeading>Physical findings</SectionHeading>
@@ -42,34 +40,10 @@ export function Step5Physical({ data, onChange }: Props) {
       <Field label="Acute back pain" hint="With osteoporosis risk factors — may indicate vertebral fracture">
         <YesNo value={data.acuteBackPain} onChange={v => onChange({ acuteBackPain: v })} />
       </Field>
-
-      <SectionHeading>Cardiovascular history</SectionHeading>
-      <Field label="MI or stroke in the last 12 months" hint="Contraindication to romosozumab">
-        <YesNo
-          value={data.priorMIOrStrokeWithin12Months}
-          onChange={v => onChange({ priorMIOrStrokeWithin12Months: v })}
-        />
-      </Field>
-
-      <SectionHeading>Renal function (eGFR)</SectionHeading>
-      <Field label="eGFR known">
-        <YesNo
-          value={hasRenalFunction}
-          onChange={v => onChange({ renalFunction: v ? { egfr: 60 } : null })}
-        />
-      </Field>
-      {hasRenalFunction && data.renalFunction && (
-        <Field label="eGFR" hint="ml/min/1.73 m²" indent>
-          <NumInput
-            value={data.renalFunction.egfr}
-            onChange={v => onChange({ renalFunction: { egfr: v ?? 60 } })}
-            min={1}
-            max={130}
-            unit="ml/min/1.73m²"
-            width="w-24"
-          />
-        </Field>
-      )}
+      {/* v1.31 follow-up: Cardiovascular history (MI / stroke <12 mo) moved to
+          Step 3 Past medical history. Renal function (eGFR) is now exposed
+          only via Step 6 bloodResults.egfr; the renalFunction schema slot
+          has been removed. */}
     </div>
   );
 }

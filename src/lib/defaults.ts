@@ -41,7 +41,6 @@ export const defaultPatient: PatientInput = {
   priorMIOrStrokeWithin12Months: false,
   strokeHistory: false,
   recentFractureWithin2Years: false,
-  renalFunction: null,
   dexaResults: null,
   bloodResults: null,
   fraxMOFPercent: null,
