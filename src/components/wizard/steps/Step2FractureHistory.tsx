@@ -153,6 +153,21 @@ export function Step2FractureHistory({ data, onChange }: Props) {
       {data.sex === 'female' && (
         <>
           <SectionHeading>Reproductive history</SectionHeading>
+          {/* v1.31 follow-up — Pregnant / breastfeeding moved here from Step 1
+              Demographics. Age-gated at <55 because pregnancy is biologically
+              implausible above that and the tool's clinical scope is
+              postmenopausal women anyway. */}
+          {data.age < 55 && (
+            <Field
+              label="Pregnant or breastfeeding"
+              hint="Will be referred — out of scope for standard algorithm"
+            >
+              <YesNo
+                value={data.pregnantOrBreastfeeding}
+                onChange={v => onChange({ pregnantOrBreastfeeding: v })}
+              />
+            </Field>
+          )}
           <Field label="Early menopause" hint="Menopause before age 45 — drives the POI / early-menopause pathway">
             <YesNo
               value={data.earlyMenopause}

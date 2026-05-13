@@ -36,19 +36,10 @@ export function Step1Demographics({ data, onChange }: Props) {
           ]}
         />
       </Field>
-      {data.sex === 'female' && (
-        <Field
-          label="Pregnant or breastfeeding"
-          hint="Will be referred — out of scope for standard algorithm"
-        >
-          <YesNo
-            value={data.pregnantOrBreastfeeding}
-            onChange={v => onChange({ pregnantOrBreastfeeding: v })}
-          />
-        </Field>
-      )}
-      {/* v1.19 — Paget's disease moved out of demographics into Step 3
-          (Risk Factors / past medical history) under "Clinical history". */}
+      {/* v1.31 follow-up — Pregnant / breastfeeding moved to Step 2
+          Reproductive history (and age-gated at <55). Demographics now
+          covers identity only: age, sex, country of birth.
+          v1.19 — Paget's disease moved into Step 3 Medical history. */}
       <Field
         label="Born outside Ireland"
         hint="FRAX should use the country-of-origin model — risk persists after migration (NOGG Table 2). The in-tool estimator uses Irish baselines (country 49); for non-Irish-born patients enter FRAX manually from frax.shef.ac.uk with the correct country selected."
