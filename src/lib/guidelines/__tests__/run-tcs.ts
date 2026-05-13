@@ -123,6 +123,7 @@ function tc1(): TCResult {
   const decision = runClinicalDecision(patient);
   check(failures, 'risk = high', decision.riskStratification.category === 'high', `got ${decision.riskStratification.category}`);
   check(failures, 'recommends alendronate', hasAgent(decision, 'alendronate'));
+  check(failures, 'recommends risedronate (equivalent first-line per NOGG 2024 Rec 12)', hasAgent(decision, 'risedronate'));
   check(failures, 'no denosumab', !hasAgent(decision, 'denosumab'));
   check(failures, 'Vit D supplement insufficient text', hasSupplementText(decision, 'vitamin_d', 'insufficient'));
   check(failures, 'Vit D 800–1000 IU/day mentioned', hasSupplementText(decision, 'vitamin_d', '800') || hasSupplementText(decision, 'vitamin_d', '1000'));
@@ -262,6 +263,7 @@ function tc7(): TCResult {
   // Spec expected: "First-line: HRT" — but current code structures HRT as a flag option, BP as the actual rec
   check(failures, 'HRT first-line option flag (under 60 + high risk)', hasFlag(decision, 'hrt_option_under60'));
   check(failures, 'alendronate as fallback if HRT contraindicated', hasAgent(decision, 'alendronate'));
+  check(failures, 'recommends risedronate (equivalent first-line per NOGG 2024 Rec 12)', hasAgent(decision, 'risedronate'));
   check(failures, 'Vit D below target maintenance', hasSupplementText(decision, 'vitamin_d', 'maintenance') || hasSupplementText(decision, 'vitamin_d', 'below target'));
   return { name: 'TC7 — 58F early menopause', passed: failures.length === 0, failures, decision };
 }
@@ -311,6 +313,8 @@ function tc9(): TCResult {
   // Treatment options must include alendronate as a recommended option (NOGG 2024 Strong first-line).
   const alenRec = decision.treatmentRecommendations.find(r => r.agent === 'alendronate');
   check(failures, 'alendronate is recommended (NOGG 2024 Strong first-line)', !!alenRec);
+  const riseRec = decision.treatmentRecommendations.find(r => r.agent === 'risedronate');
+  check(failures, 'risedronate is recommended (equivalent first-line per NOGG 2024 Rec 12)', !!riseRec);
   // Denosumab must NOT appear as primary/first-line for ADT specifically.
   const denoRec = decision.treatmentRecommendations.find(r => r.agent === 'denosumab');
   const denoIsPrimary = !!denoRec && denoRec.priority === 'first-line';
@@ -392,6 +396,7 @@ function tc12(): TCResult {
   const decision = runClinicalDecision(patient);
   check(failures, 'risk = high (T-score drives despite low FRAX)', decision.riskStratification.category === 'high', `got ${decision.riskStratification.category}`);
   check(failures, 'recommends alendronate', hasAgent(decision, 'alendronate'));
+  check(failures, 'recommends risedronate (equivalent first-line per NOGG 2024 Rec 12)', hasAgent(decision, 'risedronate'));
   // Young + osteoporosis + no obvious cause → broad workup (PTH at minimum)
   check(failures, 'PTH investigation triggered (young unexplained)', decision.investigationsNeeded.some(i => i.investigation === 'pth'));
   return { name: 'TC12 — 52F osteoporosis + low FRAX (discordance)', passed: failures.length === 0, failures, decision };
@@ -435,6 +440,7 @@ function tc14(): TCResult {
   check(failures, 'risk = high (T ≤ -2.5 despite HRT)', decision.riskStratification.category === 'high', `got ${decision.riskStratification.category}`);
   check(failures, 'HRT-on-board review flag', hasFlag(decision, 'hrt_on_board_review'));
   check(failures, 'recommends alendronate alongside HRT', hasAgent(decision, 'alendronate'));
+  check(failures, 'recommends risedronate (equivalent first-line per NOGG 2024 Rec 12)', hasAgent(decision, 'risedronate'));
   return { name: 'TC14 — 59F on HRT + T -2.8', passed: failures.length === 0, failures, decision };
 }
 
@@ -546,6 +552,7 @@ function tc19(): TCResult {
   const decision = runClinicalDecision(patient);
   check(failures, 'risk = high (GIOP context, T ≤ -1.5)', decision.riskStratification.category === 'high', `got ${decision.riskStratification.category}`);
   check(failures, 'recommends alendronate', hasAgent(decision, 'alendronate'));
+  check(failures, 'recommends risedronate (equivalent first-line per NOGG 2024 Rec 12)', hasAgent(decision, 'risedronate'));
   check(failures, 'GIOP lower-threshold flag fires', hasFlag(decision, 'giop_lower_threshold'));
   return { name: 'TC19 — 58M GIOP low-dose, T -1.7', passed: failures.length === 0, failures, decision };
 }
@@ -567,6 +574,7 @@ function tc20(): TCResult {
   check(failures, 'risk = high', decision.riskStratification.category === 'high', `got ${decision.riskStratification.category}`);
   check(failures, 'testosterone investigation triggered', decision.investigationsNeeded.some(i => i.investigation === 'testosterone'));
   check(failures, 'recommends alendronate', hasAgent(decision, 'alendronate'));
+  check(failures, 'recommends risedronate (equivalent first-line per NOGG 2024 Rec 12)', hasAgent(decision, 'risedronate'));
   check(failures, 'Vit D insufficient text', hasSupplementText(decision, 'vitamin_d', 'insufficient'));
   return { name: 'TC20 — 58M hypogonadism + VF + osteoporosis', passed: failures.length === 0, failures, decision };
 }
@@ -609,6 +617,7 @@ function tc22(): TCResult {
   check(failures, 'NO denosumab (refuses injections)', !hasAgent(decision, 'denosumab'));
   check(failures, 'NO zoledronate (refuses injections)', !hasAgent(decision, 'zoledronate'));
   check(failures, 'recommends alendronate (oral)', hasAgent(decision, 'alendronate'));
+  check(failures, 'recommends risedronate (equivalent first-line per NOGG 2024 Rec 12)', hasAgent(decision, 'risedronate'));
   return { name: 'TC22 — 78F VHR refuses injections', passed: failures.length === 0, failures, decision };
 }
 
@@ -666,6 +675,7 @@ function tc24(): TCResult {
   check(failures, 'GIOP immediate-start flag fires (criterion a)', hasFlag(decision, 'giop_immediate_start'));
   check(failures, 'flag references prior fracture (criterion a) any GC dose', hasFlagText(decision, 'prior fragility fracture'));
   check(failures, 'recommends alendronate', hasAgent(decision, 'alendronate'));
+  check(failures, 'recommends risedronate (equivalent first-line per NOGG 2024 Rec 12)', hasAgent(decision, 'risedronate'));
   return { name: 'TC24 — 62F GIOP criterion (a) any-dose prior fx', passed: failures.length === 0, failures, decision };
 }
 
@@ -688,6 +698,7 @@ function tc25(): TCResult {
   check(failures, 'GIOP immediate-start flag fires (criterion b)', hasFlag(decision, 'giop_immediate_start'));
   check(failures, 'flag references female ≥70 (criterion b)', hasFlagText(decision, 'female ≥70'));
   check(failures, 'recommends alendronate', hasAgent(decision, 'alendronate'));
+  check(failures, 'recommends risedronate (equivalent first-line per NOGG 2024 Rec 12)', hasAgent(decision, 'risedronate'));
   return { name: 'TC25 — 73F GIOP criterion (b) female ≥70', passed: failures.length === 0, failures, decision };
 }
 
@@ -1029,6 +1040,7 @@ function tc40(): TCResult {
   });
   const decision = runClinicalDecision(patient);
   check(failures, 'recommends alendronate', hasAgent(decision, 'alendronate'));
+  check(failures, 'recommends risedronate (equivalent first-line per NOGG 2024 Rec 12)', hasAgent(decision, 'risedronate'));
   const alenRec = decision.treatmentRecommendations.find(r => r.agent === 'alendronate');
   const monitoringText = (alenRec?.monitoring ?? []).join(' | ').toLowerCase();
   check(failures, 'monitoring includes dental hygiene/dental check-up',
@@ -1064,6 +1076,7 @@ function tc41(): TCResult {
   check(failures, 'GIOP immediate-start flag fires (criterion c)', hasFlag(decision, 'giop_immediate_start'));
   check(failures, 'flag references high-dose ≥7.5 mg/day', hasFlagText(decision, '≥7.5 mg/day'));
   check(failures, 'recommends alendronate', hasAgent(decision, 'alendronate'));
+  check(failures, 'recommends risedronate (equivalent first-line per NOGG 2024 Rec 12)', hasAgent(decision, 'risedronate'));
   return { name: 'TC41 — 58F high-dose GC, Table 8 upward correction', passed: failures.length === 0, failures, decision };
 }
 
@@ -1280,6 +1293,7 @@ function tc50(): TCResult {
   check(failures, 'poi_bp_layered_hrt_ineligible flag fires',
     hasFlag(decision, 'poi_bp_layered_hrt_ineligible'));
   check(failures, 'alendronate recommended', hasAgent(decision, 'alendronate'));
+  check(failures, 'recommends risedronate (equivalent first-line per NOGG 2024 Rec 12)', hasAgent(decision, 'risedronate'));
   // Both VTE and breast cancer safety flags should be visible for clinician documentation.
   check(failures, 'POI VTE flag fires', hasFlag(decision, 'poi_hrt_vte'));
   check(failures, 'POI breast cancer flag fires', hasFlag(decision, 'poi_hrt_breast_cancer'));
@@ -1518,6 +1532,7 @@ function tc59(): TCResult {
   check(failures, 'NO raloxifene in recommendations',
     !hasAgent(decision, 'raloxifene'));
   check(failures, 'alendronate first-line (T ≤ -2.5)', hasAgent(decision, 'alendronate'));
+  check(failures, 'recommends risedronate (equivalent first-line per NOGG 2024 Rec 12)', hasAgent(decision, 'risedronate'));
   return { name: 'TC59 — stroke history: raloxifene excluded, alendronate first-line', passed: failures.length === 0, failures, decision };
 }
 

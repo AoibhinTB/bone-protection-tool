@@ -1442,14 +1442,23 @@ function initiateTherapy(
       recs.push(withBPInitiationContext({
         ...alendronate(),
         rationale:
-          'Add alendronate alongside HRT: T-score remains ≤−2.5 despite HRT, suggesting HRT alone is insufficient bone protection.',
+          'Add alendronate alongside HRT: T-score remains ≤−2.5 despite HRT, suggesting HRT alone is insufficient bone protection. Equivalent first-line with risedronate per NOGG 2024 Rec 12.',
+        priority: 'first-line',
+      }, patient));
+    }
+    if (canUse('risedronate', egfr)) {
+      recs.push(withBPInitiationContext({
+        ...risedronate(),
+        rationale:
+          'Equivalent first-line alongside alendronate (NOGG 2024 Rec 12, Strong) — add alongside HRT where T-score remains ≤−2.5 despite HRT.',
         priority: 'first-line',
       }, patient));
     }
     return recs;
   }
 
-  // Alendronate first-line per NOGG 2024 Strong (most cost-effective bisphosphonate; denosumab alternative)
+  // v1.33 — Alendronate AND risedronate are equivalent first-line oral
+  // bisphosphonates per NOGG 2024 Rec 12 / Section 6 Rec 2 (Strong). Push both.
   if (canUse('alendronate', egfr) && (egfr === null || egfr > RENAL_LIMITS.alendronate.ci)) {
     // Borderline renal function: zoledronate should be avoided at eGFR <45
     if (egfr !== null && egfr < 50) {
@@ -1466,6 +1475,9 @@ function initiateTherapy(
       });
     }
     recs.push(withBPInitiationContext(alendronate(), patient));
+    if (canUse('risedronate', egfr)) {
+      recs.push(withBPInitiationContext(risedronate(), patient));
+    }
     return recs;
   }
 
@@ -1539,7 +1551,9 @@ function initiateTherapy(
     rationale: 'eGFR <35 contraindicates alendronate and zoledronate; eGFR <30 contraindicates risedronate.',
     source: SRC_HSE,
   });
+  // v1.33 — push both equivalent first-line oral BPs.
   recs.push(withBPInitiationContext(alendronate(), patient));
+  recs.push(withBPInitiationContext(risedronate(), patient));
   return recs;
 }
 
@@ -1573,7 +1587,15 @@ function sequencing(
       recs.push(withBPInitiationContext({
         ...alendronate(),
         rationale:
-          'Add alendronate alongside HRT: T-score remains ≤−2.5 despite HRT, suggesting HRT alone is insufficient bone protection.',
+          'Add alendronate alongside HRT: T-score remains ≤−2.5 despite HRT, suggesting HRT alone is insufficient bone protection. Equivalent first-line with risedronate per NOGG 2024 Rec 12.',
+        priority: 'first-line',
+      }, patient));
+    }
+    if (canUse('risedronate', egfr)) {
+      recs.push(withBPInitiationContext({
+        ...risedronate(),
+        rationale:
+          'Equivalent first-line alongside alendronate (NOGG 2024 Rec 12, Strong) — add alongside HRT where T-score remains ≤−2.5 despite HRT.',
         priority: 'first-line',
       }, patient));
     }
@@ -2289,8 +2311,16 @@ function earlyMenopause(
         priority: 'first-line',
         rationale:
           'Primary bone protection in HRT-ineligible POI (VTE + breast cancer history). ' +
-          'BMD criterion met (osteoporosis OR osteopenia + risk factors). First-line per NOGG 2024 Strong.',
+          'BMD criterion met (osteoporosis OR osteopenia + risk factors). Equivalent first-line with risedronate per NOGG 2024 Rec 12 (Strong).',
       }, patient));
+      if (canUse('risedronate', egfr)) {
+        recommendations.push(withBPInitiationContext({
+          ...risedronate(),
+          priority: 'first-line',
+          rationale:
+            'Primary bone protection in HRT-ineligible POI. Equivalent first-line with alendronate per NOGG 2024 Rec 12 (Strong) — clinician choice.',
+        }, patient));
+      }
     }
   } else if (bpCriteriaMet) {
     // HRT remains first-line but flag bisphosphonate as a "if HRT insufficient/declined" option.
@@ -2533,14 +2563,23 @@ function giop(
   }
 
   if (!aff && !giIntolerance && canUse('alendronate', egfr)) {
-    // Oral first-line per NOGG GIOP Rec 23 (Strong)
+    // Oral first-line per NOGG GIOP Rec 23 (Strong) — alendronate AND risedronate
+    // are equivalent first-line oral options (v1.33). Push both.
     recs.push(withBPInitiationContext({
       ...alendronate(),
       rationale:
-        'First-line bisphosphonate for GIOP (NOGG 2024 Rec 23 — Strong). ' +
+        'First-line oral bisphosphonate for GIOP (NOGG 2024 Rec 23 — Strong; equivalent with risedronate). ' +
         'Initiate at same time as glucocorticoid if planned duration ≥3 months. ' +
         'Calcium 1000–1500 mg/day and vitamin D ≥800 IU/day required alongside.',
     }, patient));
+    if (canUse('risedronate', egfr)) {
+      recs.push(withBPInitiationContext({
+        ...risedronate(),
+        rationale:
+          'First-line oral bisphosphonate for GIOP (NOGG 2024 Rec 23 — Strong; equivalent with alendronate). ' +
+          'Initiate at same time as glucocorticoid if planned duration ≥3 months.',
+      }, patient));
+    }
   } else if (!aff && giIntolerance && !refuses && canUse('zoledronate', egfr)) {
     // Prior oral GI intolerance — IV zoledronate bypasses GI tract
     flags.push({
@@ -3038,7 +3077,10 @@ function alendronate(): TreatmentRecommendation {
     dose: '70 mg',
     frequency: 'Once weekly, fasting with full glass of water; remain upright ≥30 minutes before eating/other medications',
     rationale:
-      'First-line bisphosphonate (NOGG 2024 Strong — most cost-effective antiresorptive; Ireland-relevant generic available). ' +
+      // v1.33 — alendronate and risedronate are equivalent first-line oral
+      // bisphosphonates per NOGG 2024 Rec 12 / Section 6 Rec 2 (Strong).
+      // Previous "PREFERRED" / sole-first-line framing removed.
+      'Equivalent first-line oral bisphosphonate with risedronate (NOGG 2024 Rec 12 / Section 6 Rec 2, Strong — most cost-effective interventions; no preference between the two). ' +
       'Reduces vertebral fractures ~47% and hip fractures ~51% (Black et al. Lancet 1996).',
     strength: 'strong',
     contraindications: [
@@ -3054,7 +3096,7 @@ function alendronate(): TreatmentRecommendation {
       'Review for treatment holiday at 5 years per NOGG 2024 Rec 17',
       'Annual enquiry about thigh/groin pain (AFF surveillance)',
     ],
-    irishPrescribingNote: 'GMS standard — GP can prescribe. NOGG 2024 Strong: most cost-effective first-line bisphosphonate.',
+    irishPrescribingNote: 'First-line (GMS) — GP can prescribe. Equivalent to risedronate per NOGG 2024 Rec 12 (Strong).',
     source: SRC_HSE,
     patientEducation: {
       whatItDoes:
@@ -3086,7 +3128,11 @@ function risedronate(): TreatmentRecommendation {
     dose: '35 mg',
     frequency: 'Once weekly, on an empty stomach; remain upright ≥30 minutes',
     rationale:
-      'Second-line oral bisphosphonate (NOGG 2024). Lower upper GI adverse effect rate than alendronate. Generic available.',
+      // v1.33 — risedronate repositioned as equivalent first-line with alendronate
+      // per NOGG 2024 Rec 12 / Section 6 Rec 2 (Strong). Previous "second-line oral"
+      // framing was historical drift from removed HSE MMP cascade text.
+      'Equivalent first-line oral bisphosphonate with alendronate (NOGG 2024 Rec 12 / Section 6 Rec 2, Strong — most cost-effective interventions; no preference between the two). ' +
+      'Slightly lower upper-GI adverse effect rate than alendronate. Licensed for men. Generic available.',
     strength: 'strong',
     contraindications: [
       'eGFR <30 ml/min',
@@ -3099,7 +3145,7 @@ function risedronate(): TreatmentRecommendation {
       'Vitamin D ≥75 nmol/L before initiation',
       'DEXA at 1–2 years; holiday review at 5 years',
     ],
-    irishPrescribingNote: 'GMS standard — second-line oral bisphosphonate per HSE MMP.',
+    irishPrescribingNote: 'First-line (GMS) — equivalent to alendronate per NOGG 2024 Rec 12 (Strong).',
     source: SRC_HSE,
     patientEducation: {
       whatItDoes:
