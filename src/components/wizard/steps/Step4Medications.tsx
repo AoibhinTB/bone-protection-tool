@@ -134,6 +134,18 @@ export function Step4Medications({ data, onChange }: Props) {
           onChange={v => onChange({ onThyroidReplacement: v })}
         />
       </Field>
+      {/* Thiazolidinedione (pioglitazone) moved from Step 3 — lives with current
+          medications. Engine fires the TZD flag unconditionally; no dependency
+          on the T2DM checkbox in Step 3 medical history. */}
+      <Field
+        label="Thiazolidinedione (pioglitazone)"
+        hint="TZDs increase fracture risk — surfaces a clinical flag. Consider alternative diabetes therapy where appropriate."
+      >
+        <YesNo
+          value={data.onThiazolidinedione}
+          onChange={v => onChange({ onThiazolidinedione: v })}
+        />
+      </Field>
       {data.sex === 'male' && (
         <Field label="Androgen deprivation therapy (ADT)" hint="Prostate cancer treatment">
           <YesNo value={data.adtUse} onChange={v => onChange({ adtUse: v })} />
