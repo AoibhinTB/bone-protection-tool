@@ -21,8 +21,8 @@ const DISCLAIMER_KEY = 'bp-disclaimer-acknowledged';
 
 const STEP_TITLES = [
   'Demographics',
-  'Fracture History',
-  'Risk Factors',
+  'Patient History',
+  'Medical History',
   'Medications',
   'Physical Findings',
   'Investigations',

@@ -8,10 +8,50 @@ interface Props {
   onChange: (patch: Partial<PatientInput>) => void;
 }
 
+// v1.31 follow-up — page 2 broadened from "Fracture history" to
+// "Patient History". Now contains: lifestyle, falls and fractures (combining
+// fragility fx + parental hip fx + falls in last 12 months), reproductive
+// history (female), and HRT safety (female). Page 3 becomes Medical History
+// only.
 export function Step2FractureHistory({ data, onChange }: Props) {
   return (
     <div>
-      <SectionHeading>Fracture history</SectionHeading>
+      {/* ── Lifestyle ──────────────────────────────────────────────────── */}
+      <SectionHeading>Lifestyle</SectionHeading>
+      <Field label="BMI" hint="kg/m²">
+        <NumInput
+          value={data.bmi}
+          onChange={v => onChange({ bmi: v })}
+          min={10}
+          max={70}
+          step={0.1}
+          unit="kg/m²"
+          width="w-20"
+        />
+      </Field>
+      <Field label="Current smoker">
+        <YesNo
+          value={data.currentSmoker}
+          onChange={v => onChange({ currentSmoker: v })}
+        />
+      </Field>
+      <Field label="Vaping" hint="NOGG 2024 addition — possible risk factor">
+        <YesNo value={data.vaping} onChange={v => onChange({ vaping: v })} />
+      </Field>
+      <Field label="Alcohol" hint="≥21 units/week (3/day) is the FRAX threshold">
+        <NumInput
+          value={data.alcoholUnitsPerWeek}
+          onChange={v => onChange({ alcoholUnitsPerWeek: v ?? 0 })}
+          min={0}
+          max={100}
+          step={1}
+          unit="units/wk"
+          width="w-20"
+        />
+      </Field>
+
+      {/* ── Falls and fractures ────────────────────────────────────────── */}
+      <SectionHeading>Falls and fractures</SectionHeading>
       <Field
         label="Prior fragility fracture"
         hint="Any prior fracture in adulthood. NOGG 2024: high-trauma fractures predict future fracture risk to the same extent as low-trauma — include both."
@@ -88,6 +128,68 @@ export function Step2FractureHistory({ data, onChange }: Props) {
             <YesNo
               value={data.recentFractureWithin2Years}
               onChange={v => onChange({ recentFractureWithin2Years: v })}
+            />
+          </Field>
+        </>
+      )}
+
+      <Field label="Parental hip fracture">
+        <YesNo
+          value={data.parentalHipFracture}
+          onChange={v => onChange({ parentalHipFracture: v })}
+        />
+      </Field>
+      <Field label="Falls in the last 12 months" hint="≥2 falls → hip risk ×1.3">
+        <NumInput
+          value={data.fallsInLastYear}
+          onChange={v => onChange({ fallsInLastYear: v ?? 0 })}
+          min={0}
+          max={20}
+          width="w-20"
+        />
+      </Field>
+
+      {/* ── Reproductive history (female only) ────────────────────────── */}
+      {data.sex === 'female' && (
+        <>
+          <SectionHeading>Reproductive history</SectionHeading>
+          <Field label="Early menopause" hint="Menopause before age 45 — drives the POI / early-menopause pathway">
+            <YesNo
+              value={data.earlyMenopause}
+              onChange={v =>
+                onChange({ earlyMenopause: v, ageAtMenopause: v ? data.ageAtMenopause : null })
+              }
+            />
+          </Field>
+          {data.earlyMenopause && (
+            <Field label="Age at menopause" indent>
+              <NumInput
+                value={data.ageAtMenopause}
+                onChange={v => onChange({ ageAtMenopause: v })}
+                min={20}
+                max={45}
+                unit="yrs"
+                width="w-20"
+              />
+            </Field>
+          )}
+        </>
+      )}
+
+      {/* ── HRT safety (female only) ──────────────────────────────────── */}
+      {data.sex === 'female' && (
+        <>
+          <SectionHeading>HRT safety (affects first-line recommendations)</SectionHeading>
+          <Field label="Personal or family history of VTE" hint="DVT, PE — affects HRT safety assessment">
+            <YesNo
+              value={data.vteHistory}
+              onChange={v => onChange({ vteHistory: v })}
+            />
+          </Field>
+          <Field label="Personal history of breast cancer or high breast cancer risk">
+            <YesNo
+              value={data.breastCancerHistory}
+              onChange={v => onChange({ breastCancerHistory: v })}
             />
           </Field>
         </>
