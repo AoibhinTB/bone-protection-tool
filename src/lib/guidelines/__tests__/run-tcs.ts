@@ -2403,6 +2403,158 @@ function tc86(): TCResult {
   return { name: 'TC86 — forearm-only osteoporosis + PHPT workup', passed: failures.length === 0, failures, decision };
 }
 
+// ═══════════════════════════════════════════════════════════════════════════
+// v1.11 TCs — TC87 + TC88 — Bisphosphonate-duration decision points
+// (Patient builders use A1-impl schema fields: ageAtStart, fractureOnCurrentTreatment,
+//  adherenceAdequate on TreatmentHistory.currentTreatment.)
+// ═══════════════════════════════════════════════════════════════════════════
+
+// ─── TC87 ─────────────────────────────────────────────────────────────────
+// Bisphosphonate drug holiday eligibility (NOGG 2024 §6.2 / Section 7 Rec 6, Strong).
+// 65F postmenopausal, started alendronate at 60, now 5y on. T-scores: hip -2.1, FN -2.0,
+// LS -1.8. FRAX MOF 12.0% (adj, with FN BMD); FRAX hip 2.5%. No fractures ever. No GC.
+// Smoker (1 FRAX RF). Adherence ≥80%. Schema fields explicitly set per A1-impl.
+function tc87(): TCResult {
+  const failures: string[] = [];
+  const patient = basePatient({
+    age: 65,
+    sex: 'female',
+    currentSmoker: true,
+    dexaResults: { lumbarSpineTScore: -1.8, totalHipTScore: -2.1, femoralNeckTScore: -2.0, forearmTScore: null },
+    fraxMOFPercent: 12.0,
+    fraxHipPercent: 2.5,
+    fraxCalculatedWithBMD: true,
+    bloodResults: { adjustedCalciumMmol: 2.32, vitaminDNmol: 70, egfr: 75, alp: 80, tshMUL: 2.0, hbGramsPerLitre: 135, esrOrCrp: 'normal' },
+    currentTreatment: {
+      agent: 'alendronate',
+      durationMonths: 60,
+      reasonStopped: null,
+      currentlyOn: true,
+      monthsSinceLastDose: null,
+      ageAtStart: 60,
+      fractureOnCurrentTreatment: false,
+      adherenceAdequate: true,
+    },
+  });
+  const decision = runClinicalDecision(patient);
+
+  check(failures, 'bp_holiday_appropriate flag fires', hasFlag(decision, 'bp_holiday_appropriate'));
+
+  // Five §6.2 criteria explicitly named as met (via shouldTakeBPHoliday's "takeHoliday:true"
+  // default reasons list interpolated into the flag message).
+  check(failures, 'criterion: T-score >−2.5 at hip named',
+    hasFlagText(decision, 'T-score >−2.5 at hip'));
+  check(failures, 'criterion: no hip or vertebral fracture named',
+    hasFlagText(decision, 'no hip or vertebral fracture'));
+  check(failures, 'criterion: age at start <70 named',
+    hasFlagText(decision, 'age at start <70'));
+  check(failures, 'criterion: no ongoing steroids ≥7.5 mg/day named',
+    hasFlagText(decision, 'no ongoing steroids'));
+  check(failures, 'criterion: FRAX adjusted below IT named',
+    hasFlagText(decision, 'FRAX adjusted below IT'));
+
+  // Cites NOGG Section 7 Rec 6 (Strong) for the pause decision.
+  check(failures, 'cites NOGG Section 7 Rec 6 (Strong)',
+    hasFlagText(decision, 'Section 7 Rec 6 (Strong)'));
+
+  // Alendronate's 2-year reassessment interval per §6.4 (NOGG Rec 4).
+  check(failures, 'names alendronate 2-year reassessment interval',
+    hasFlagText(decision, '2 years (24 months) for alendronate'));
+  check(failures, 'cites Rec 4 / §6.4 for drug-specific intervals',
+    hasFlagText(decision, 'Section 7 Rec 4') && hasFlagText(decision, '§6.4'));
+
+  // §6.5 fracture-as-independent-restart surfaced.
+  check(failures, '§6.5 fracture-as-restart trigger surfaced',
+    hasFlagText(decision, 'fracture occurs during the pause') &&
+    hasFlagText(decision, '§6.5'));
+
+  // §6.6 BMD/turnover-marker restart triggers surfaced.
+  check(failures, '§6.6 BMD/turnover-marker restart triggers surfaced',
+    hasFlagText(decision, '§6.6') &&
+    (hasFlagText(decision, 'bone turnover markers') || hasFlagText(decision, 'CTX')) &&
+    hasFlagText(decision, 'BMD'));
+
+  // treatmentRecommended === false at this assessment (per A1 Fix 3 strip).
+  check(failures, 'treatmentRecommended === false',
+    decision.treatmentRecommended === false,
+    `got ${decision.treatmentRecommended}`);
+  check(failures, 'recommendation list empty',
+    decision.treatmentRecommendations.length === 0,
+    `got ${decision.treatmentRecommendations.length} entries`);
+
+  return { name: 'TC87 — pause-eligible: all 5 §6.2 criteria + Rec 6 + §6.4/6.5/6.6', passed: failures.length === 0, failures, decision };
+}
+
+// ─── TC88 ─────────────────────────────────────────────────────────────────
+// 10-year course completed (NOGG 2024 §6.2 / Section 7 Rec 8, Conditional).
+// 75F postmenopausal, started alendronate at 65 due to prior vertebral fracture (age 64,
+// pre-treatment), now 10y on. T-scores: hip -2.4, FN -2.3, LS -2.0. FRAX MOF 18.0% (adj);
+// FRAX hip 5.0%. No fractures during 10-year treatment. No GC. Adherence ≥80% throughout.
+function tc88(): TCResult {
+  const failures: string[] = [];
+  const patient = basePatient({
+    age: 75,
+    sex: 'female',
+    priorFragilityFracture: true,
+    priorVertebralFracture: true,
+    numberOfPriorFractures: 1,
+    recentVertebralFractureYears: 11, // age 64, now 75 — pre-treatment, not within 2y
+    dexaResults: { lumbarSpineTScore: -2.0, totalHipTScore: -2.4, femoralNeckTScore: -2.3, forearmTScore: null },
+    fraxMOFPercent: 18.0,
+    fraxHipPercent: 5.0,
+    fraxCalculatedWithBMD: true,
+    bloodResults: { adjustedCalciumMmol: 2.32, vitaminDNmol: 70, egfr: 65, alp: 80, tshMUL: 2.0, hbGramsPerLitre: 135, esrOrCrp: 'normal' },
+    currentTreatment: {
+      agent: 'alendronate',
+      durationMonths: 120,
+      reasonStopped: null,
+      currentlyOn: true,
+      monthsSinceLastDose: null,
+      ageAtStart: 65,
+      // The vertebral fracture at age 64 was BEFORE this treatment course started — pre-treatment.
+      // Distinguished from a fracture-during-course (which would be true).
+      fractureOnCurrentTreatment: false,
+      adherenceAdequate: true,
+    },
+  });
+  const decision = runClinicalDecision(patient);
+
+  // After-10-years individual-decision flag fires (NOGG 2024 Section 7 Rec 8, Conditional).
+  check(failures, 'bp_individual_basis_after_long_course flag fires',
+    hasFlag(decision, 'bp_individual_basis_after_long_course'));
+  check(failures, 'cites NOGG 2024 Section 7 Rec 8 (Conditional)',
+    hasFlagText(decision, 'Section 7 Rec 8 (Conditional)'));
+
+  // Does NOT auto-pick continue/pause/switch — the flag explicitly says individual basis.
+  check(failures, 'flag explicitly names individual-basis decision',
+    hasFlagText(decision, 'individual basis'));
+
+  // Specialist referral prompt surfaced (the flag message says "Specialist advice should be sought").
+  check(failures, 'specialist advice / referral prompt surfaced',
+    hasFlagText(decision, 'Specialist advice'));
+
+  // §6.2 continuation criteria are explicitly noted as NOT applicable at the post-full-course
+  // point — the flag rationale says "evidence base for continuing oral bisphosphonate beyond
+  // 10 years ... is limited. Decisions should be individualised after specialist input."
+  check(failures, '§6.2 standard continuation criteria framed as NOT applicable beyond 10y',
+    hasFlagText(decision, 'beyond 10 years') && hasFlagText(decision, 'individualised'));
+
+  // treatmentRecommended === true — patient remains on treatment pending specialist decision.
+  // Engine push (symmetric to A1 Fix 3) adds current drug to recs on bp_holiday_not_appropriate.
+  check(failures, 'treatmentRecommended === true (patient remains on treatment)',
+    decision.treatmentRecommended === true,
+    `got ${decision.treatmentRecommended}`);
+  check(failures, 'recommendation list contains alendronate (continue current drug)',
+    hasAgent(decision, 'alendronate'));
+
+  // High-risk category (driven by prior vertebral fracture per Rec 8 routing in risk.ts).
+  check(failures, 'risk category high',
+    decision.riskStratification.category === 'high',
+    `got ${decision.riskStratification.category}`);
+
+  return { name: 'TC88 — 10y course completed: Rec 8 individual basis + continue current drug', passed: failures.length === 0, failures, decision };
+}
+
 // ─── Runner ───────────────────────────────────────────────────────────────
 
 const TCs: Array<() => TCResult> = [
@@ -2425,6 +2577,8 @@ const TCs: Array<() => TCResult> = [
   tc76,
   // v1.10 (test-doc v1.10) — Prompt A behaviours + previously-untested branches
   tc78, tc79, tc80, tc81, tc82, tc83, tc84, tc85, tc86,
+  // v1.11 (test-doc v1.11) — BP-duration decision points (pause-eligible + 10y individual basis)
+  tc87, tc88,
 ];
 
 const results = TCs.map(fn => fn());

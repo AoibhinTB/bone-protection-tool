@@ -1929,16 +1929,23 @@ function sequencing(
           message:
             `${holidayYear}-year bisphosphonate reassessment: fracture risk appears low/intermediate ` +
             `(${pauseDecision.reasons.join('; ')}). ` +
-            `An individualised treatment pause may be considered. Reassess with FRAX + femoral neck BMD in ` +
-            `${reassessText} for ${current.agent} (drug-specific offset kinetics; NOGG 2024 Section 7 Rec 4). ` +
+            'An individualised treatment pause may be considered per NOGG 2024 Section 7 Rec 6 (Strong). ' +
+            `Reassess with FRAX + femoral neck BMD in ${reassessText} for ${current.agent} ` +
+            '(drug-specific offset kinetics; NOGG 2024 Section 7 Rec 4 / §6.4). ' +
             'If a new fracture occurs during the pause, FRAX reassessment and restart is triggered immediately ' +
-            'regardless of the above interval (NOGG Section 7 Rec 3). ' +
+            'regardless of the above interval (NOGG Section 7 Rec 3 / §6.5). ' +
+            'Independent restart triggers per §6.6 (NOGG Rec 7, Conditional): consider restart if bone turnover markers ' +
+            '(CTX, P1NP) rise on monitoring OR BMD decreases on repeat DEXA — no definitive thresholds, clinical judgement applies. ' +
             'This is NOT a routine recommendation — there is no standard policy for all patients.' +
             maleCaveat,
           rationale:
-            'NOGG 2024 Section 7 Rec 4 (Strong): after a pause, FRAX reassessment intervals are drug-specific — ' +
-            'risedronate / ibandronate at 18 months, alendronate at 2 years, zoledronate at 3 years (offset kinetics differ). ' +
-            'Routine drug holidays remain unsupported (Evidence IIa); pause considered only if risk falls to low/intermediate.',
+            'NOGG 2024 Section 7 Rec 6 (Strong, §6.2): pause considered only when continuation criteria are NOT met — ' +
+            'specifically when age at start <70, no prior hip/vertebral fracture, no fracture during current course with adequate adherence, ' +
+            'no ongoing GC ≥7.5 mg/day, no hip T-score ≤−2.5, and FRAX adjusted below age-specific intervention threshold. ' +
+            'Rec 4 (Strong, §6.4): drug-specific reassessment intervals — risedronate/ibandronate 18 months, alendronate 2 years, zoledronate 3 years. ' +
+            'Rec 3 (Strong, §6.5): a new fragility fracture during pause is an absolute indication for immediate FRAX reassessment and restart. ' +
+            'Rec 7 (Conditional, §6.6): rising bone turnover markers or BMD loss on repeat DEXA are additional restart triggers. ' +
+            'Routine drug holidays remain unsupported (Evidence IIa).',
           source: SRC_NOGG,
         });
       } else {
@@ -1973,6 +1980,28 @@ function sequencing(
               'Abrupt denosumab discontinuation causes rapid BMD loss and rebound vertebral fractures.',
             source: SRC_NOGG,
           });
+        }
+
+        // v1.36 (TC88) — Symmetric to A1 Fix 3 (which strips current drug on pause):
+        // on continue, push the current drug to recs so treatmentRecommended === true and
+        // downstream output gating (Tier 1/2 bloods, monitoring schedule etc.) fires
+        // appropriately for an active-treatment patient. Pushes the basic recipe (without
+        // withBPInitiationContext) — the initiation-context wrapper carries planned-duration
+        // and dental-at-initiation text that's inappropriate for a continuing patient.
+        // Skipped if a class-switch recipe already populated recs (e.g. VHR→denosumab above).
+        if (recs.length === 0 && isBisphosphonate(current.agent)) {
+          const continueRecipe = (() => {
+            switch (current.agent) {
+              case 'alendronate': return alendronate();
+              case 'risedronate': return risedronate();
+              case 'ibandronate': return ibandronate();
+              case 'zoledronate': return zoledronate();
+              default: return null;
+            }
+          })();
+          if (continueRecipe) {
+            recs.push(continueRecipe);
+          }
         }
       }
     }
