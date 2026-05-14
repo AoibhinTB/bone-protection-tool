@@ -6,13 +6,17 @@
 // are computed from structured patient + risk state, NOT by string-matching flag names.
 //
 // Definitions:
-//   anabolicReferralFired      — any VHR referral path is active (the metabolic-bone /
-//                                rheumatology referral whose rationale mentions parenteral /
-//                                anabolic consideration). Includes the GIOP-VHR sub-case
-//                                (priorVertebralFracture + ≥2 fx OR any DEXA site T ≤ −3.5
-//                                while on GC) — that path uses lowestDexaTScore (all sites,
-//                                including total hip) which is slightly broader than the
-//                                risk.ts VHR predicate (LS/FN only at T ≤ −3.5).
+//   anabolicReferralFired      — riskCategory === 'very_high'. NOGG 2024 Section 5 does NOT
+//                                define a separate "very high risk GIOP" category with
+//                                distinct thresholds — the operational definition of
+//                                VHR-GIOP is "standard NOGG Rec 11 VHR criteria + on GC",
+//                                which is just riskCategory === 'very_high' since GC dose
+//                                is already incorporated as FRAX context. The previous
+//                                GIOP-specific OR branch (on GC + ≥2 vert fx OR any DEXA
+//                                site T ≤ −3.5) used engine-invented thresholds not
+//                                anchored to NOGG; dropped in this file. In practice the
+//                                OR branch was largely redundant since both ≥2 vert fx and
+//                                T ≤ −3.5 typically already produce VHR by standard criteria.
 //   teriparatideReferralFired  — anabolicReferralFired AND patient has not already completed
 //                                a teriparatide course (lifetime maximum is one 24-month course).
 //   romosozumabReferralFired   — anabolicReferralFired AND female (not licensed in men) AND
@@ -20,22 +24,11 @@
 //                                "avoid if MI or stroke history" — no time window).
 
 import type { PatientInput, RiskCategory } from './types';
-import { isOnGC } from './thresholds';
 
 export interface ReferralSignals {
   anabolicReferralFired: boolean;
   teriparatideReferralFired: boolean;
   romosozumabReferralFired: boolean;
-}
-
-function lowestDexaTScoreAllSites(p: PatientInput): number | null {
-  if (!p.dexaResults) return null;
-  const scores = [
-    p.dexaResults.lumbarSpineTScore,
-    p.dexaResults.totalHipTScore,
-    p.dexaResults.femoralNeckTScore,
-  ].filter((t): t is number => t != null);
-  return scores.length > 0 ? Math.min(...scores) : null;
 }
 
 function hasCompletedTeriparatide(p: PatientInput): boolean {
@@ -52,20 +45,7 @@ export function deriveReferralSignals(
   patient: PatientInput,
   riskCategory: RiskCategory,
 ): ReferralSignals {
-  const isVHR = riskCategory === 'very_high';
-
-  // GIOP-VHR anabolic referral sub-case (matches the `giopVHR` predicate inside giop()):
-  // any patient on GC whose lowest DEXA T-score (all sites) is ≤ −3.5, OR who has multiple
-  // vertebral fractures. This is broader than the standard VHR predicate (LS/FN only) and
-  // independently triggers a rheumatology anabolic-consideration referral in treatment.ts.
-  const lowestT = lowestDexaTScoreAllSites(patient);
-  const isGIOPVHRAnabolicPath =
-    isOnGC(patient) && (
-      (patient.priorVertebralFracture && patient.numberOfPriorFractures >= 2) ||
-      (lowestT !== null && lowestT <= -3.5)
-    );
-
-  const anabolicReferralFired = isVHR || isGIOPVHRAnabolicPath;
+  const anabolicReferralFired = riskCategory === 'very_high';
 
   const teriparatideReferralFired =
     anabolicReferralFired && !hasCompletedTeriparatide(patient);
