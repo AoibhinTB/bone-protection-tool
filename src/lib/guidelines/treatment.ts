@@ -1111,6 +1111,22 @@ export function generateTreatmentOutput(
     recommendations = initiateTherapy(patient, riskCategory, flags, referrals);
   }
 
+  // ── v1.36 Fix 3 (§6.2): pause-eligible suppresses current drug from recs ──
+  // When bp_holiday_appropriate has fired, the patient is moving from active to paused —
+  // the current drug should not appear in the recommendation list. Defence-in-depth filter:
+  // the current sequencing code path appears NOT to push the current drug to recs for
+  // simple-continue patients, but this guard locks the invariant against future regressions
+  // and any path that does push (e.g. very-high-risk denosumab-switch branch only fires on
+  // bp_holiday_not_appropriate, but other future branches could).
+  if (
+    flags.some(f => f.id === 'bp_holiday_appropriate') &&
+    patient.currentTreatment &&
+    isBisphosphonate(patient.currentTreatment.agent)
+  ) {
+    const pausingAgent = patient.currentTreatment.agent;
+    recommendations = recommendations.filter(r => r.agent !== pausingAgent);
+  }
+
   // ── Patient refuses injections — strip injection-based agents from output ──
   if (patient.refusesInjections) {
     const oralAgents = new Set(['alendronate', 'risedronate', 'ibandronate']);
@@ -1684,6 +1700,34 @@ function sequencing(
       source: SRC_NOGG,
     });
     // Do NOT auto-switch class. Engine surfaces guidance only.
+
+    // v1.36 Fix 4 (§6.2 callout + §6.3): when adherence is adequate AND the patient is within
+    // the first 5y oral / 3y IV course, the on-treatment fracture is an extension indication —
+    // emit a structured planned-duration-extension flag (separate from the narrative flag) so
+    // the new 10y/6y target appears as a filterable output, not just narrative.
+    const isIVCurrent = current.agent === 'zoledronate';
+    const firstCourseMonths = isIVCurrent ? 36 : 60; // 3y IV, 5y oral
+    const extendedYears = isIVCurrent ? 6 : 10;
+    if (
+      current.adherenceAdequate === true &&
+      current.durationMonths < firstCourseMonths
+    ) {
+      flags.push({
+        id: 'bp_duration_extension_indication',
+        severity: 'info',
+        message:
+          `Planned duration extended to ${extendedYears} years on ${current.agent} ` +
+          `(currently ${Math.round(current.durationMonths / 12)}y, within the first ${isIVCurrent ? 3 : 5}y course). ` +
+          'On-treatment fragility fracture with adherence ≥80% confirmed — extension indication per NOGG 2024 ' +
+          'Section 7 Rec 1–2 (Strong). Treatment not changed; review at the extended-course endpoint.',
+        rationale:
+          'NOGG 2024 §6.2 callout + §6.3 Rec 5: a fracture during the first 5y oral / 3y IV course, with adherence ' +
+          'positively confirmed at ≥80%, is an extension indication. The planned duration shifts to 10y oral / 6y IV ' +
+          '(rather than the standard 5y/3y baseline) — surfaced as a structured output so the new target is visible ' +
+          'in monitoring, not buried in narrative.',
+        source: SRC_NOGG,
+      });
+    }
   }
 
   if (explicitTreatmentFailure) {
@@ -1762,6 +1806,25 @@ function sequencing(
           ? ' No specific evidence base exists for treatment pauses in men — each case must be judged individually.'
           : '';
 
+      // v1.36 Fix 2 (§6.2 + §6.3) — fracture during current course but adherence not yet
+      // assessed. Continuation decision is blocked until the clinician records adherence;
+      // engine emits a structured prompt rather than silently defaulting either way.
+      if (pauseDecision.needsAdherenceAssessment) {
+        flags.push({
+          id: 'adherence_assessment_required',
+          severity: 'warning',
+          message:
+            `Fracture during current course of ${current.agent} but adherence not yet assessed. ` +
+            'Record adherence (≥80% threshold per §6.3 Rec 5) before applying the §6.2 continuation criteria — ' +
+            'adequate adherence supports extension to 10y oral / 6y IV; poor adherence routes to the correction pathway, not extension.',
+          rationale:
+            'NOGG 2024 §6.2 + §6.3 Rec 5 (Strong): "fracture during treatment with adequate adherence" is an extension ' +
+            'indication, but only when adherence has been positively confirmed at ≥80%. The continuation decision must not ' +
+            'fire silently when adherence is unknown — the clinician needs to assess and record it first.',
+          source: SRC_NOGG,
+        });
+      }
+
       if (pauseDecision.takeHoliday) {
         // v1.13 Step 8 — drug-specific reassessment interval after the pause
         const reassessMonths = PAUSE_REASSESSMENT_INTERVAL_MONTHS[
@@ -1836,13 +1899,20 @@ function shouldTakeBPHoliday(
   patient: PatientInput,
   riskCategory: RiskCategory,
   riskStratification: RiskStratification,
-): { takeHoliday: boolean; reasons: string[] } {
+): { takeHoliday: boolean; reasons: string[]; needsAdherenceAssessment: boolean } {
   const continueReasons: string[] = [];
+  let needsAdherenceAssessment = false;
+  const current = patient.currentTreatment;
 
   // v1.13 Step 7: continuation criteria from NOGG 2024 Section 7 Rec 1–2 + Rec 6.
-  // Continue if age ≥70
-  if (patient.age >= 70) {
-    continueReasons.push('age ≥70 at start of bisphosphonate (Section 7 Rec 1–2 Strong)');
+  // v1.36 Fix 1 (§6.2): use age AT START of treatment, not current age. A patient who started
+  // at 67 and is now 72 was previously locked into "continue" — incorrect per spec. Fallback
+  // derivation when ageAtStart is undefined: floor(currentAge - durationMonths/12).
+  const ageAtStart = current
+    ? (current.ageAtStart ?? Math.floor(patient.age - current.durationMonths / 12))
+    : patient.age;
+  if (ageAtStart >= 70) {
+    continueReasons.push(`age ${ageAtStart} at start of bisphosphonate (≥70, Section 7 Rec 1–2 Strong)`);
   }
 
   // Continue if hip or vertebral fracture history
@@ -1850,10 +1920,21 @@ function shouldTakeBPHoliday(
     continueReasons.push('prior hip or vertebral fracture (Section 7 Rec 1–2 Strong)');
   }
 
-  // Continue if fracture during the first 5 yr (oral) / 3 yr (IV) — extension indication (Section 7 Rec 1–2).
-  // Note: this is NOT auto-failure (see Section 6.3); adherence/secondary cause review required first.
-  if (patient.numberOfPriorFractures >= 2 && patient.currentTreatment?.durationMonths && patient.currentTreatment.durationMonths >= 12) {
-    continueReasons.push('fragility fracture during treatment — extension indication (Section 7 Rec 1–2; review adherence + secondary causes first per Section 6.3)');
+  // v1.36 Fix 2 (§6.2 + §6.3): fracture DURING current treatment with adequate adherence is
+  // an extension indication. Previously used proxy (numberOfPriorFractures ≥2 + duration ≥12mo)
+  // which conflated old fractures with on-treatment fractures and ignored adherence. Now reads
+  // the two dedicated schema fields. If adherence is unknown, criterion does NOT fire as met —
+  // a separate flag prompts the clinician to assess adherence before the continuation decision.
+  if (current?.fractureOnCurrentTreatment === true) {
+    if (current.adherenceAdequate === true) {
+      continueReasons.push('fragility fracture during current course with adherence ≥80% — extension indication (Section 7 Rec 1–2 Strong; Section 6.3)');
+    } else if (current.adherenceAdequate === false) {
+      // Poor adherence — fracture routes to correction path (§6.3), not extension. Do not push
+      // as a continuation reason here.
+    } else {
+      // adherence not yet assessed — surface separately via the caller's flag-emit path.
+      needsAdherenceAssessment = true;
+    }
   }
 
   // Continue if ongoing high-dose glucocorticoids (≥7.5 mg/day) — Section 6.2
@@ -1893,12 +1974,13 @@ function shouldTakeBPHoliday(
   }
 
   if (continueReasons.length > 0) {
-    return { takeHoliday: false, reasons: continueReasons };
+    return { takeHoliday: false, reasons: continueReasons, needsAdherenceAssessment };
   }
 
   return {
     takeHoliday: true,
-    reasons: ['T-score >−2.5 at hip', 'no hip or vertebral fracture', 'age <70', 'no ongoing steroids ≥7.5 mg/day', 'FRAX adjusted below IT'],
+    reasons: ['T-score >−2.5 at hip', 'no hip or vertebral fracture', 'age at start <70', 'no ongoing steroids ≥7.5 mg/day', 'FRAX adjusted below IT'],
+    needsAdherenceAssessment,
   };
 }
 
@@ -2401,7 +2483,8 @@ function giopImmediateStartCriteria(
   if (patient.priorFragilityFracture || patient.priorHipFracture || patient.priorVertebralFracture) {
     criteria.push('(a) Prior fragility fracture (any GC dose)');
   }
-  // (b) Female ≥70 — any dose
+  // (b) Female ≥70 — any dose. v1.36 audit: current-age intent (the criterion is "this
+  // patient is currently ≥70 and on any GC"), not age-at-start of a treatment course. Leave as is.
   if (patient.sex === 'female' && patient.age >= 70) {
     criteria.push('(b) Female ≥70 (any GC dose)');
   }
@@ -3062,6 +3145,9 @@ function getSupplements(patient: PatientInput): SupplementRecommendation[] {
 // ─── Treatment recipe cards ───────────────────────────────────────────────
 
 // v1.13 Step 6 — planned duration text computed from extension criteria at initiation.
+// v1.36 audit: this function is called via withBPInitiationContext when a NEW BP recipe is
+// being pushed, so patient.age IS the age at start of that new course. Current-age usage is
+// semantically correct here — leave as is.
 function plannedBPDuration(patient: PatientInput, isIV: boolean): string {
   const hasExtensionCriterion =
     patient.age >= 70 ||

@@ -114,6 +114,32 @@ export interface TreatmentHistory {
    *     active pause period.
    */
   monthsSinceLastDose: number | null;
+  /**
+   * v1.36 (§6.2) — patient age at the START of this treatment course. Drives the
+   * NOGG 2024 §6.2 "age ≥70 at start of bisphosphonate" continuation criterion.
+   * If undefined, shouldTakeBPHoliday falls back to floor(patient.age - durationMonths/12)
+   * as a transitional safety net — production builders should set explicitly.
+   */
+  ageAtStart?: number;
+  /**
+   * v1.36 (§6.3) — true iff a fragility fracture occurred DURING this current drug
+   * course (vs. before the course started). Distinct from numberOfPriorFractures
+   * which is cumulative across the patient's history. Drives the §6.2 continuation
+   * criterion "fracture during treatment with adequate adherence", and the §6.3
+   * on-treatment-fracture pathway. Undefined treated as false.
+   */
+  fractureOnCurrentTreatment?: boolean;
+  /**
+   * v1.36 (§6.3) — clinician-assessed adherence ≥80% of prescribed doses (per
+   * §6.3 Rec 5 threshold). Three states:
+   *   - true     adherence ≥80% confirmed; supports continuation + structured extension
+   *   - false    adherence <80%; routes on-treatment fracture to correction path
+   *   - null     not yet assessed; engine emits "adherence assessment required" flag
+   *              and the §6.2 fracture-with-adherence criterion does NOT fire as met.
+   * Read by both shouldTakeBPHoliday (continuation decision) and the §6.3
+   * on-treatment-fracture pathway — single source of truth, two output paths.
+   */
+  adherenceAdequate?: boolean | null;
 }
 
 // v1.19 — single 4-option GC status. Replaces the previous pair of booleans

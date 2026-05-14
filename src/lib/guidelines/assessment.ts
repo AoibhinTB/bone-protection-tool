@@ -301,6 +301,28 @@ export function assessInvestigationsNeeded(
     });
   }
 
+  // v1.36 Fix 4 (§6.3) — on-treatment fragility fracture: §6.3 Rec 5 mandates a secondary-cause
+  // workup before classifying as treatment failure. Push a Tier 3 entry covering the full
+  // workup so it appears as structured output (the §6.3 narrative flag carries the same
+  // wording but isn't filterable). Only fires when the dedicated schema field is set —
+  // legacy proxy triggers (recentFractureWithin2Years + numberOfPriorFractures) intentionally
+  // do NOT fire this entry to keep noise low for ambiguous patient shapes.
+  if (
+    patient.currentTreatment?.currentlyOn === true &&
+    patient.currentTreatment.fractureOnCurrentTreatment === true &&
+    !needed.some(i => i.investigation === 'pth')
+  ) {
+    needed.push({
+      investigation: 'pth',
+      tier: 3,
+      reason:
+        'On-treatment fragility fracture (§6.3 Rec 5): secondary-cause workup required before any treatment-failure ' +
+        'classification. PTH, calcium, vitamin D, thyroid function, testosterone (men), LH/FSH (women), and SPEP/UPEP ' +
+        'as clinically indicated. Repeat or order any element not previously documented.',
+      urgency: 'soon',
+    });
+  }
+
   return needed;
 }
 
@@ -318,6 +340,8 @@ function dexaIndications(patient: PatientInput): InvestigationRecommendation[] {
     });
     return items; // one reason is enough
   }
+  // v1.36 audit: current-age intent (case-finding decision based on the patient's age today),
+  // not age-at-start of any treatment. Leave as is.
   if (patient.sex === 'male' && patient.age >= 70) {
     items.push({
       investigation: 'dexa',

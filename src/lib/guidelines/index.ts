@@ -133,8 +133,13 @@ export function runClinicalDecision(patient: PatientInput): ClinicalDecision {
   // 1) Investigations — gate Tier 1 and Tier 2 on treatmentRecommended. Tier 3
   //    fires on its own (secondary-cause workup). DEXA / VFA / FRAX entries
   //    have no tier and fire on independent indications.
+  // v1.36 Fix 4 (§6.3): the on-treatment-fracture pathway also requires Tier 2 bloods
+  //    even when no new drug is being recommended (the patient is already on therapy and
+  //    needs secondary-cause workup before any classification decision). Bypass the
+  //    treatmentRecommended gate when the §6.3 pathway flag is present.
+  const onTxFracturePath = flags.some(f => f.id === 'on_treatment_fracture_pathway');
   const gatedInvestigations = investigationsNeeded.filter(inv => {
-    if (inv.tier === 1 || inv.tier === 2) return treatmentRecommended;
+    if (inv.tier === 1 || inv.tier === 2) return treatmentRecommended || onTxFracturePath;
     return true;
   });
 
