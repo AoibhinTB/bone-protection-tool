@@ -2928,6 +2928,155 @@ function tc93(): TCResult {
   return { name: 'TC93 (v1.14) — VHR via T ≤ −3.5 AND GC ≥7.5 × ≥3mo: full anabolic cluster + URGENT', passed: failures.length === 0, failures, decision };
 }
 
+// ═══════════════════════════════════════════════════════════════════════════
+// v1.15 TCs — TC94 + TC95 — Lock VHR classifier audit-identified fixes (B1, B3)
+// ═══════════════════════════════════════════════════════════════════════════
+
+// ─── TC94 ─────────────────────────────────────────────────────────────────
+// VHR-2 vertebral-fracture-specific count (locks Fix B1).
+// 65F, 1 vertebral fx age 61 (4y ago — OLD, outside 24mo VHR-1 window) + 1 wrist fx age
+// 60 (5y ago). T-scores all above −3.5 (no VHR-3 trigger). FRAX MOF 20% (above age-65 IT
+// 16.5% but below age-65 VHRT 26.4%). Pre-Fix B1 the engine fired VHR-2 falsely on
+// numberOfPriorFractures ≥ 2 (total fracture count, not vertebral-only). Post-fix the
+// predicate uses numberOfVertebralFractures and correctly skips the criterion.
+function tc94(): TCResult {
+  const failures: string[] = [];
+  const patient = basePatient({
+    age: 65,
+    sex: 'female',
+    priorFragilityFracture: true,
+    priorVertebralFracture: true,
+    recentVertebralFractureYears: 4, // OLD — outside VHR-1's 24mo window
+    recentFractureWithin2Years: false,
+    numberOfPriorFractures: 2,        // 1 vertebral + 1 wrist
+    numberOfVertebralFractures: 1,    // Fix B1 schema field — vertebral-specific count
+    dexaResults: { lumbarSpineTScore: -2.8, totalHipTScore: -2.7, femoralNeckTScore: -2.6, forearmTScore: null },
+    fraxMOFPercent: 20.0,
+    fraxHipPercent: 4.2,
+    fraxCalculatedWithBMD: true,
+    bloodResults: { adjustedCalciumMmol: 2.32, vitaminDNmol: 70, egfr: 75, alp: 80, tshMUL: 2.0, hbGramsPerLitre: 135, esrOrCrp: 'normal' },
+  });
+  const decision = runClinicalDecision(patient);
+
+  // Patient routes to HIGH (NOT very_high) via the prior-fragility-fracture-high path
+  // (risk.ts:177-186 — NOGG Rec 8 prior-fx treat-immediately). NO VHR criterion fires.
+  check(failures, "riskCategory === 'high' (NOT very_high)",
+    decision.riskStratification.category === 'high',
+    `got ${decision.riskStratification.category}`);
+
+  // VHR-2 specifically does NOT fire — vertebral-specific count predicate now correctly
+  // sees numberOfVertebralFractures=1 (not the legacy total-count 2).
+  check(failures, 'VHR-2 does NOT fire (rationale does not mention "two or more vertebral")',
+    !decision.riskStratification.rationale.toLowerCase().includes('two or more vertebral'));
+
+  // Sanity: rationale reflects a standard high-risk route — either T-score ≤ −2.5
+  // (LS −2.8 in this patient fires risk.ts:78-84 first) or the prior-fx-high path
+  // (NOGG Rec 8). Either is a valid non-VHR "high" route; assertion accepts both.
+  check(failures, 'rationale reflects a standard high-risk route (T-score or prior-fx)',
+    /t-score/i.test(decision.riskStratification.rationale) ||
+    /rec 8/i.test(decision.riskStratification.rationale) ||
+    /prior\s+\S+\s+fracture/i.test(decision.riskStratification.rationale));
+
+  // anabolicReferralFired === false → none of the VHR-anabolic-referral cluster fires.
+  check(failures, 'post_anabolic_antiresorptive does NOT fire (Seq.1 gate closed)',
+    !hasFlag(decision, 'post_anabolic_antiresorptive'));
+  check(failures, 'vhr_specialist_referral does NOT fire',
+    !hasFlag(decision, 'vhr_specialist_referral'));
+  check(failures, 'sequential_therapy_plan_required does NOT fire',
+    !hasFlag(decision, 'sequential_therapy_plan_required'));
+  check(failures, 'romosozumab_cv_risk_framing does NOT fire (only fires for VHR females)',
+    !hasFlag(decision, 'romosozumab_cv_risk_framing'));
+
+  // No teriparatide-specific Tier 3 PTH push (teriparatideReferralFired === false).
+  const pthEntry = decision.investigationsNeeded.find(i => i.investigation === 'pth' && i.tier === 3);
+  check(failures, 'Tier 3 PTH entry does NOT carry teriparatide-specific reason',
+    !pthEntry || !/teriparatide/i.test(pthEntry.reason));
+
+  // Standard high-risk antiresorptive pathway fires — alendronate (+ risedronate) as
+  // equivalent first-line per NOGG Rec 12 / §6 Rec 2.
+  check(failures, 'standard high-risk antiresorptive pathway fires (BP first-line)',
+    hasAgent(decision, 'alendronate') || hasAgent(decision, 'risedronate'));
+  check(failures, 'treatmentRecommended === true',
+    decision.treatmentRecommended === true);
+
+  return { name: 'TC94 — VHR-2 vertebral-specific count: 1 vert + 1 wrist → high, NOT very_high', passed: failures.length === 0, failures, decision };
+}
+
+// ─── TC95 ─────────────────────────────────────────────────────────────────
+// VHR-6 age-specific VHRT lookup (locks Fix B3).
+// 55F, manual FRAX MOF 17% (above age-55 VHRT 15.2% = itMOF 9.5 × 1.6, but below the
+// previous fixed 32.5% which was the age-70+ value). T-scores all above −2.5
+// (osteopenia only, no VHR-3 trigger). Two FRAX RFs (smoker + parental hip fx). No
+// fractures. No GC. Pre-Fix B3 the engine used fixed 32.5/8.6 thresholds — MOF 17%
+// silently missed VHR. Post-fix the engine looks up age-specific VHRT from
+// NOGG_2024_THRESHOLDS × 1.6 and correctly classifies as very_high.
+function tc95(): TCResult {
+  const failures: string[] = [];
+  const patient = basePatient({
+    age: 55,
+    sex: 'female',
+    currentSmoker: true,
+    parentalHipFracture: true,
+    dexaResults: { lumbarSpineTScore: -2.2, totalHipTScore: -2.0, femoralNeckTScore: -1.9, forearmTScore: null },
+    fraxMOFPercent: 17.0,
+    fraxHipPercent: 1.8,
+    fraxCalculatedWithBMD: true,
+    bloodResults: { adjustedCalciumMmol: 2.32, vitaminDNmol: 70, egfr: 80, alp: 80, tshMUL: 2.0, hbGramsPerLitre: 135, esrOrCrp: 'normal' },
+  });
+  const decision = runClinicalDecision(patient);
+
+  // VHR-6 fires via age-specific VHRT lookup (age-55: itMOF 9.5% × 1.6 = 15.2%). MOF 17%
+  // ≥ 15.2% → VHR. Pre-Fix B3 the engine compared to fixed 32.5% → would have classified
+  // as high or intermediate, missing VHR.
+  check(failures, "riskCategory === 'very_high'",
+    decision.riskStratification.category === 'very_high',
+    `got ${decision.riskStratification.category}`);
+
+  // Rationale explicitly cites the age-specific VHRT trigger.
+  check(failures, 'rationale references age-specific VHRT (not the fixed 32.5%)',
+    /age-specific vhrt/i.test(decision.riskStratification.rationale) &&
+    /15\.2%/.test(decision.riskStratification.rationale));
+
+  // No urgent escalation — GC is NOT among firing criteria. vhr_specialist_referral
+  // severity should be 'warning', not 'urgent'.
+  const vhrRefFlag = decision.flags.find(f => f.id === 'vhr_specialist_referral');
+  check(failures, 'vhr_specialist_referral fires', !!vhrRefFlag);
+  check(failures, 'vhr_specialist_referral severity is warning (NOT urgent — GC not firing)',
+    !!vhrRefFlag && vhrRefFlag.severity === 'warning');
+  // Referral object urgency should be 'soon' (non-GC VHR), not 'urgent'.
+  check(failures, 'metabolic_bone referral urgency soon (NOT urgent)',
+    decision.referrals.some(r => r.specialty === 'metabolic_bone' && r.urgency === 'soon'));
+
+  // anabolicReferralFired === true → full standard VHR-anabolic-referral cluster fires.
+  // Seq.1 post_anabolic_antiresorptive (Rec 14 at referral time).
+  check(failures, 'Seq.1 post_anabolic_antiresorptive fires',
+    hasFlag(decision, 'post_anabolic_antiresorptive'));
+  // Seq.2 sequential_therapy_plan_required (anabolicReferralFired push gate).
+  check(failures, 'Seq.2 sequential_therapy_plan_required fires',
+    hasFlag(decision, 'sequential_therapy_plan_required'));
+  // Pre.1 — teriparatideReferralFired drives PTH Tier 3 with teri-specific reason.
+  // PTH always pushes for teriRef (schema doesn't carry a PTH value to gate on).
+  const pthEntry = decision.investigationsNeeded.find(i => i.investigation === 'pth' && i.tier === 3);
+  check(failures, 'Pre.1 PTH Tier 3 entry fires with teriparatide-specific reason',
+    !!pthEntry && /teriparatide/i.test(pthEntry.reason));
+  // Pre.1 eGFR Tier 1 entry does NOT fire — eGFR replete (present + normal) means the
+  // missing-only Tier 1 push doesn't fire. Document this gate state explicitly.
+  const egfrEntry = decision.investigationsNeeded.find(i => i.investigation === 'egfr' && i.tier === 1);
+  check(failures, 'Pre.1 eGFR Tier 1 entry NOT present (eGFR replete, not missing)',
+    !egfrEntry);
+  // Pre.2 / romoRef — romosozumab_cv_risk_framing fires for female VHR without
+  // priorMIOrStroke (proxy that romosozumabReferralFired === true). Pre.2 Tier 1/Tier 3
+  // calcium entries do NOT fire — calcium replete + in range means neither the
+  // missing-only Tier 1 push nor the (missing OR out-of-range) Tier 3 push fires.
+  check(failures, 'Pre.2 — romosozumab_cv_risk_framing fires (romoRef passes gate)',
+    hasFlag(decision, 'romosozumab_cv_risk_framing'));
+  const calciumTier3 = decision.investigationsNeeded.find(i => i.investigation === 'calcium' && i.tier === 3);
+  check(failures, 'Pre.2 Tier 3 corrected-Ca NOT present (calcium replete + in range)',
+    !calciumTier3);
+
+  return { name: 'TC95 — VHR-6 age-specific VHRT: 55F MOF 17% (≥ 15.2%) → very_high', passed: failures.length === 0, failures, decision };
+}
+
 // ─── Runner ───────────────────────────────────────────────────────────────
 
 const TCs: Array<() => TCResult> = [
@@ -2954,6 +3103,8 @@ const TCs: Array<() => TCResult> = [
   tc87, tc88,
   // v1.12 (test-doc v1.12) — A1-Fix-4 / A2-impl / romo CV gate / GIOP simplification locks
   tc89, tc90, tc91, tc92, tc93,
+  // v1.15 (test-doc v1.15) — lock VHR classifier audit fixes B1 + B3
+  tc94, tc95,
 ];
 
 const results = TCs.map(fn => fn());
