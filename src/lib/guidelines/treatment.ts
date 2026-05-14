@@ -1054,9 +1054,9 @@ export function generateTreatmentOutput(
       id: 'abaloparatide_not_reimbursed_ireland',
       severity: 'info',
       message:
-        'Abaloparatide (Eladynos) is NOT currently reimbursed in Ireland — no HSE High-Tech listing. ' +
-        'NICE-approved (England/Wales/NI Aug 2024) and SMC-approved (Scotland Jul 2025) but these do not apply in Ireland. ' +
-        'Continue under private prescription only, or switch to a reimbursed anabolic alternative (teriparatide via specialist).',
+        'Abaloparatide (Eladynos): do not recommend as a treatment option for Irish patients unless private pay is confirmed. ' +
+        'NICE-approved (England/Wales/NI Aug 2024) and SMC-approved (Scotland Jul 2025) but these do not apply in Ireland; no HSE High-Tech listing. ' +
+        'If private pay is not confirmed, switch to a reimbursed anabolic alternative (teriparatide via specialist).',
       rationale:
         'HSE PCRS High-Tech scheme listings as of May 2026: abaloparatide is not present (v1.21 correction). ' +
         'The previous spec incorrectly listed it as an active Irish treatment option.',
@@ -1765,7 +1765,7 @@ function sequencing(
         case 'zoledronate':
           return 'Zoledronate: confirm annual infusion attended each year. A missed annual infusion = poor adherence.';
         case 'denosumab':
-          return 'Denosumab: confirm 6-monthly injection not missed (>6 months since last dose = effectively poor adherence and rebound risk — Section 8.2).';
+          return 'Denosumab: confirm 6-monthly injection not missed (>6 months since last dose = effectively poor adherence and rebound risk — §8.1).';
         default:
           return 'Confirm patient has taken ≥80% of prescribed doses correctly.';
       }
@@ -1891,7 +1891,7 @@ function sequencing(
       const pauseDecision = shouldTakeBPHoliday(patient, riskCategory, riskStratification);
       const maleCaveat =
         patient.sex === 'male'
-          ? ' No specific evidence base exists for treatment pauses in men — each case must be judged individually.'
+          ? ' Note: NOGG offset-kinetics evidence (alendronate 2y, risedronate/ibandronate 18m, zoledronate 3y) is derived from postmenopausal-women extension studies — applying the same intervals in men is by extrapolation. Each case must be judged individually.'
           : '';
 
       // v1.36 Fix 2 (§6.2 + §6.3) — fracture during current course but adherence not yet
@@ -2213,7 +2213,7 @@ function postAnabolicFlags(flags: ClinicalFlag[]): void {
 
 // ─── Denosumab rebound / cessation pathway (v1.19, Section 8) ────────────────
 //
-// Tiered timing alerts driven by monthsSinceLastDose (Section 8.2 table):
+// Tiered timing alerts driven by monthsSinceLastDose (§8.3 Timing Alerts table):
 //   approaching 6m (5–5.999):  prompt — arrange IV zoledronate now
 //   ≥6m and <7m:               IV zoledronate due. Urgent if not arranged.
 //   ≥7m:                       URGENT — elevated vertebral rebound risk.
@@ -2270,12 +2270,12 @@ function denosumabReboundFlags(
       id: 'denosumab_cessation_plan',
       severity: 'warning',
       message:
-        'Sequential antiresorptive plan required on denosumab cessation. NOGG 2024 Strong (Section 8.1): IV zoledronate 5 mg at 6 months after the last injection is the recommended sequential agent — NOT equivalent to alendronate. ' +
+        'Sequential antiresorptive plan required on denosumab cessation. NOGG 2024 Strong (§8.2): IV zoledronate 5 mg at 6 months after the last injection is the recommended sequential agent — NOT equivalent to alendronate. ' +
         'After IV zoledronate, follow CTX at 3 and 6 months (Strong) to guide further infusions; if CTX is not available, give a second IV zoledronate 6 months after the first (Conditional). ' +
         'Alendronate is a secondary option where IV is not feasible; it maintains BMD for ~12 months in most patients after short denosumab courses but is less reliable, particularly after >3 years denosumab.',
       rationale:
         'NOGG 2024 Recs 18–19 (Strong): inform patients of rebound fracture risk before initiating denosumab; sequential antiresorptive therapy is mandatory on cessation. ' +
-        'Section 8.1: IV zoledronate is the preferred sequential agent (Strong). Alendronate as alternative carries Evidence IIa — significant bone loss occurs in a minority. ' +
+        '§8.2: IV zoledronate is the preferred sequential agent (Strong). Alendronate as alternative carries Evidence IIa — significant bone loss occurs in a minority. ' +
         'For patients on >3 years denosumab, a single zoledronate infusion may not maintain BMD beyond 12 months — plan second infusion or CTX-guided follow-up (Evidence IIb).',
       source: SRC_NOGG,
     });
@@ -2292,9 +2292,9 @@ function denosumabReboundFlags(
       message:
         `Approaching 6 months since the last denosumab injection (${monthsSinceLastDose} months). ` +
         'Arrange IV zoledronate 5 mg now — it must be given at 6 months after the last denosumab dose. ' +
-        'NOGG 2024 Strong (Section 8.1): IV zoledronate is the recommended sequential agent — NOT equivalent to alendronate.',
+        'NOGG 2024 Strong (§8.2): IV zoledronate is the recommended sequential agent — NOT equivalent to alendronate.',
       rationale:
-        'NOGG 2024 Section 8.2 (v1.19): the 5–6 month window is the actionable point. Delaying beyond 6 months exposes the patient to rebound vertebral fracture risk. ' +
+        'NOGG 2024 §8.3 Timing Alerts (v1.19): the 5–6 month window is the actionable point. Delaying beyond 6 months exposes the patient to rebound vertebral fracture risk. ' +
         'Arrange the infusion in advance so it lands at 6 months, not later.',
       source: SRC_NOGG,
     });
@@ -2312,7 +2312,7 @@ function denosumabReboundFlags(
           : 'URGENT: no sequential antiresorptive arranged. Arrange IV zoledronate immediately.'),
       rationale:
         'NOGG 2024 Rec 18 / Cummings SR et al. JBMR 2018: bone resorption markers (CTX) rise progressively from 3 months after a missed dose; ' +
-        'by 6 months they exceed pre-treatment baseline. IV zoledronate at this point both replaces the missed denosumab and acts as the sequential antiresorptive (Section 8.1 Strong). ' +
+        'by 6 months they exceed pre-treatment baseline. IV zoledronate at this point both replaces the missed denosumab and acts as the sequential antiresorptive (§8.2 Strong). ' +
         'Alendronate is a secondary option only — NOT equivalent.',
       source: SRC_NOGG,
     });
@@ -2332,7 +2332,7 @@ function denosumabReboundFlags(
         'Cummings SR et al. Vertebral fractures after discontinuation of denosumab: a post hoc analysis of the FREEDOM trial and its extension. ' +
         'J Bone Miner Res. 2018;33(2):190–198. https://pubmed.ncbi.nlm.nih.gov/29105841/. ' +
         'Vertebral fracture rate rose from 1.2 per 100 patient-years (on denosumab) to 7.1 per 100 patient-years after stopping. ' +
-        'NOGG 2024 Recs 18–19 / Section 8.2: gaps ≥7 months since the last denosumab dose mark imminent rebound risk.',
+        'NOGG 2024 Recs 18–19 / §8.1 Rebound Risk on Cessation: gaps ≥7 months since the last denosumab dose mark imminent rebound risk.',
       source: SRC_NOGG,
     });
 
@@ -2345,7 +2345,7 @@ function denosumabReboundFlags(
           'URGENT REFERRAL: high rebound fracture risk with no sequential antiresorptive arranged. ' +
           'Refer urgently if you cannot arrange IV zoledronate immediately in primary care.',
         rationale:
-          'NOGG 2024 Section 8.2 (v1.19): >7 months without sequential antiresorptive marks imminent vertebral fracture risk. ' +
+          'NOGG 2024 §8.1 Rebound Risk on Cessation (v1.19): >7 months without sequential antiresorptive marks imminent vertebral fracture risk. ' +
           'Specialist referral is appropriate when zoledronate cannot be arranged promptly in primary care.',
         source: SRC_NOGG,
       });
@@ -3643,8 +3643,12 @@ function denosumab(egfr: number | null): TreatmentRecommendation {
       'v1.19 — "men on ADT" no longer listed as a first-line carve-out. NOGG 2024 (Conditional, Section 10.1): for ADT-associated bone loss, ' +
       'bisphosphonate and denosumab are equivalent options and normal first-line guidelines apply. The HALT trial established efficacy vs placebo but did NOT establish superiority over bisphosphonates. ' +
       'Not renally cleared, hence the preferred antiresorptive in CKD. ' +
-      // v1.26 Step 5 — licensing statement.
-      'LICENSING (v1.26): approved for postmenopausal osteoporosis, male osteoporosis, bone loss with hormone ablation in men (ADT / prostate cancer) at increased fracture risk, and glucocorticoid-induced osteoporosis in men and women. ' +
+      // v1.26 Step 5 — licensing statement. v1.36 §5.3 rewording: "male osteoporosis (which
+      // covers ADT-associated bone loss)" replaces the previous "bone loss with hormone
+      // ablation in men (ADT / prostate cancer)" clause; explicit note added that denosumab
+      // is NOT uniquely ADT-licensed and that BPs + denosumab are equal first-line per §10.1.
+      'LICENSING (v1.26 / v1.36 §5.3): approved for postmenopausal osteoporosis, male osteoporosis (which covers ADT-associated bone loss), and glucocorticoid-induced osteoporosis in men and women. ' +
+      'Note: denosumab is NOT uniquely licensed for ADT — bisphosphonates and denosumab are equal first-line for ADT-associated bone loss per NOGG 2024 / §10.1. ' +
       'Safety and efficacy maintained over 10 years of continuous use (Evidence Ib).',
     strength: 'strong',
     contraindications: [
@@ -3665,7 +3669,7 @@ function denosumab(egfr: number | null): TreatmentRecommendation {
       'Strict 6-monthly schedule — clinical risk begins to rise after 6 months + 2 weeks; treat >7 months as urgent',
       'DEXA at 1–2 years',
       // v1.26 Step 4 — cessation hierarchy with FREEDOM statistic.
-      'CRITICAL: Plan sequential antiresorptive BEFORE stopping denosumab. NOGG 2024 Strong (Section 8.1, v1.19/v1.26): ' +
+      'CRITICAL: Plan sequential antiresorptive BEFORE stopping denosumab. NOGG 2024 Strong (§8.2, v1.19/v1.26/v1.36): ' +
         '(1) IV zoledronate 5 mg given 6 months after the last denosumab injection — recommended (Strong). NOT equivalent to alendronate. ' +
         '(2) CTX monitoring at 3 and 6 months post-zoledronate to guide further infusions (Strong). ' +
         '(3) If CTX not available: second IV zoledronate 6 months after the first (Conditional). ' +
