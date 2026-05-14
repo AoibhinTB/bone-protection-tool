@@ -16,7 +16,8 @@
 //   teriparatideReferralFired  — anabolicReferralFired AND patient has not already completed
 //                                a teriparatide course (lifetime maximum is one 24-month course).
 //   romosozumabReferralFired   — anabolicReferralFired AND female (not licensed in men) AND
-//                                no recent MI/stroke within 12 months (CV CI gate).
+//                                no prior MI or stroke (CV CI gate per spec v1.36 §5.5:
+//                                "avoid if MI or stroke history" — no time window).
 
 import type { PatientInput, RiskCategory } from './types';
 import { isOnGC } from './thresholds';
@@ -72,7 +73,7 @@ export function deriveReferralSignals(
   const romosozumabReferralFired =
     anabolicReferralFired &&
     patient.sex === 'female' &&
-    !patient.priorMIOrStrokeWithin12Months;
+    !patient.priorMIOrStroke;
 
   return {
     anabolicReferralFired,

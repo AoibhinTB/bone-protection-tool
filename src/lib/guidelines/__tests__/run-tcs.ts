@@ -45,7 +45,7 @@ function basePatient(overrides: Partial<PatientInput>): PatientInput {
     acuteBackPain: false,
     vteHistory: false,
     breastCancerHistory: false,
-    priorMIOrStrokeWithin12Months: false,
+    priorMIOrStroke: false,
     strokeHistory: false,
     recentFractureWithin2Years: false,
     dexaResults: null,

@@ -233,15 +233,22 @@ export interface PatientInput {
   vteHistory: boolean;                // personal or family VTE history
   breastCancerHistory: boolean;       // personal breast cancer or high familial risk
 
-  // Cardiovascular history (romosozumab contraindication)
-  priorMIOrStrokeWithin12Months: boolean;
+  // Cardiovascular history (romosozumab contraindication).
+  // v1.36 — broadened from "within 12 months" to "any history" per spec §5.5 romosozumab
+  // row: "avoid if MI or stroke history" — no time window. The previous 12-month framing
+  // was an engine-side narrowing; spec has always read "history". A patient with MI 5
+  // years ago was incorrectly cleared under the old field. Field renamed from
+  // priorMIOrStrokeWithin12Months to priorMIOrStroke; semantics broadened. Only the
+  // romosozumab CV gate (referralSignals.ts) consumed this field — no other consumer
+  // depended on the 12-month window.
+  priorMIOrStroke: boolean;
 
   /**
    * v1.27 — any history of stroke (ischaemic OR haemorrhagic), regardless of timing.
    * Drives raloxifene exclusion: NOGG 2024 (Evidence IIa) notes a small increase in
    * fatal-stroke risk on raloxifene. Use with caution in patients with prior stroke
-   * or risk factors for stroke disease. Distinct from priorMIOrStrokeWithin12Months
-   * (which is the romosozumab 12-month CI gate).
+   * or risk factors for stroke disease. Distinct from priorMIOrStroke (which is the
+   * romosozumab CV gate covering MI and stroke).
    */
   strokeHistory: boolean;
 

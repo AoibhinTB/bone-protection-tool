@@ -93,9 +93,10 @@ function buildMedicalHistoryRows(
       onToggle: () => onChange({ learningDisabilities: !data.learningDisabilities }) },
 
     // Cardiovascular
-    { key: 'priorMIOrStrokeWithin12Months', label: 'MI or stroke within the last 12 months',
-      checked: data.priorMIOrStrokeWithin12Months,
-      onToggle: () => onChange({ priorMIOrStrokeWithin12Months: !data.priorMIOrStrokeWithin12Months }) },
+    { key: 'priorMIOrStroke', label: 'Prior MI or stroke (any time)',
+      hint: 'Romosozumab contraindicated with any MI or stroke history (NOGG 2024 / spec §5.5) — no time window.',
+      checked: data.priorMIOrStroke,
+      onToggle: () => onChange({ priorMIOrStroke: !data.priorMIOrStroke }) },
 
     // Bone
     { key: 'pagetsDiseaseOfBone', label: 'Paget’s disease of bone',
