@@ -32,6 +32,7 @@ import {
   gcStoppedOver12MonthsAgo,
 } from './thresholds';
 import type { RiskStratification } from './types';
+import { deriveReferralSignals } from './referralSignals';
 
 const SRC_HSE      = GUIDELINE_VERSIONS.hse_mmp;
 const SRC_NOGG     = GUIDELINE_VERSIONS.nogg;
@@ -60,6 +61,13 @@ export function generateTreatmentOutput(
   const flags: ClinicalFlag[]               = [];
   const referrals: ReferralRecommendation[] = [];
   const supplements                         = getSupplements(patient);
+
+  // v1.36 A2-impl — derived referral signals. Used by:
+  //   Seq.1: post_anabolic_antiresorptive (Rec 14) — fires at referral time, not just after course
+  //   Seq.2: sequential_therapy_plan_required — third push gate for new-anabolic-referral patients
+  //   Seq.5: raloxifene_anabolic_follow_on_option — postmenopausal female + BP-CI + denosumab unsuitable
+  // Computed once here so all downstream gates read the same source of truth.
+  const referralSignals = deriveReferralSignals(patient, riskCategory);
 
   // Out-of-scope patients should not receive treatment logic
   if (riskCategory === 'out_of_scope') {
@@ -734,7 +742,11 @@ export function generateTreatmentOutput(
   }
 
   // ── Post-anabolic sequencing (highest priority safety flag) ──
-  if (patient.completedAnabolicCourse) {
+  // v1.36 A2-impl Seq.1: NOGG 2024 Rec 14 (Strong) — sequential antiresorptive must be planned
+  // at the time the anabolic is initiated, not at the end. Trigger now widened to also fire
+  // when an anabolic referral is active (the prompt is most useful BEFORE the course starts so
+  // the referral letter includes the follow-on plan).
+  if (patient.completedAnabolicCourse || referralSignals.anabolicReferralFired) {
     postAnabolicFlags(flags);
   }
 
@@ -1053,12 +1065,15 @@ export function generateTreatmentOutput(
   }
 
   // ── v1.23 Step 9 (partial) — Sequential therapy planning flag for already-on ──
-  // Fires for anyone established on denosumab / teriparatide / romosozumab.
-  // (The initiation-time variant downstream also covers new denosumab recs.)
+  // Fires for anyone established on denosumab / teriparatide / romosozumab / abaloparatide.
+  // (The initiation-time variant downstream also covers new denosumab recs; the
+  // anabolic-referral variant in generateTreatmentOutput covers new-referral patients.)
+  // v1.36 A2-impl Seq.2: abaloparatide added — was missed in v1.23.
   if (current?.currentlyOn === true &&
       (current.agent === 'denosumab' ||
        current.agent === 'teriparatide' ||
-       current.agent === 'romosozumab')) {
+       current.agent === 'romosozumab' ||
+       current.agent === 'abaloparatide')) {
     flags.push({
       id: 'sequential_therapy_plan_required',
       severity: 'info',
@@ -1222,6 +1237,79 @@ export function generateTreatmentOutput(
         'Document the sequential plan at initiation so it is not missed at cessation.',
       source: SRC_NOGG,
     });
+  }
+
+  // ── v1.36 A2-impl Seq.2 — Third push gate: new-anabolic-referral patient ──
+  // The existing two gates above cover (i) already-on denosumab/teri/romo/abalo and (ii)
+  // denosumab in recommendations. For a new-anabolic-REFERRAL patient (e.g. VHR woman being
+  // referred for romosozumab consideration, not yet on any antiresorptive), neither gate
+  // fires because the anabolic is not in `recommendations` (it's surfaced via referrals).
+  // This gate closes that gap. Dedup with the earlier pushes.
+  if (referralSignals.anabolicReferralFired &&
+      !flags.some(f => f.id === 'sequential_therapy_plan_required')) {
+    flags.push({
+      id: 'sequential_therapy_plan_required',
+      severity: 'info',
+      message:
+        'Plan the sequential therapy strategy at the time of initiation — not retrospectively. ' +
+        'For teriparatide / romosozumab / abaloparatide being considered at specialist review: an antiresorptive must follow the course ' +
+        '(prescribed 1 month before the final anabolic dose to avoid a gap). Document the follow-on plan in the referral letter so the specialist sees it at initiation.',
+      rationale:
+        'NOGG 2024 Rec 14 (Strong): sequential antiresorptive after anabolic is mandatory — BMD gains are lost rapidly without it. ' +
+        'The plan must accompany the referral (specialist initiates the anabolic; GP continues the follow-on antiresorptive).',
+      source: SRC_NOGG,
+    });
+  }
+
+  // ── v1.36 A2-impl Seq.5 — Raloxifene as follow-on sequential after anabolic (NOGG Conditional) ──
+  // Postmenopausal female where BP is contraindicated AND denosumab is unsuitable. Raloxifene
+  // is vertebral-only (no hip fracture efficacy) and is itself contraindicated in stroke/VTE
+  // history, so surface only when raloxifene would actually be prescribable.
+  {
+    const seqContext =
+      referralSignals.anabolicReferralFired ||
+      patient.completedAnabolicCourse ||
+      (patient.currentTreatment?.currentlyOn === true &&
+        (patient.currentTreatment.agent === 'teriparatide' ||
+         patient.currentTreatment.agent === 'romosozumab' ||
+         patient.currentTreatment.agent === 'abaloparatide'));
+
+    const postmenopausalFemale =
+      patient.sex === 'female' && (patient.age >= 50 || patient.earlyMenopause);
+
+    const egfrForRalox = resolveEGFR(patient);
+    const bpContraindicated =
+      patient.oesophagealDiseaseHistory ||
+      hasAFFHistory(patient) ||
+      (egfrForRalox !== null && egfrForRalox <= RENAL_LIMITS.alendronate.ci) ||
+      hasGIIntoleranceToBothOralAndIVBP(patient);
+
+    const denosumabUnsuitable =
+      patient.refusesInjections ||
+      (egfrForRalox !== null && egfrForRalox < RENAL_LIMITS.denosumab.extremeRiskBelow);
+
+    const raloxifeneOwnEligible =
+      !patient.strokeHistory && !patient.vteHistory;
+
+    if (seqContext &&
+        postmenopausalFemale &&
+        bpContraindicated &&
+        denosumabUnsuitable &&
+        raloxifeneOwnEligible) {
+      flags.push({
+        id: 'raloxifene_anabolic_follow_on_option',
+        severity: 'info',
+        message:
+          'Raloxifene is an option as follow-on sequential therapy after an anabolic — vertebral-only benefit, no hip fracture efficacy. ' +
+          'NOGG 2024 Conditional. Contraindicated with VTE history.',
+        rationale:
+          'NOGG 2024 (Conditional): in postmenopausal women where both bisphosphonate (oral and IV) and denosumab are not options, ' +
+          'raloxifene may be considered as the follow-on antiresorptive after an anabolic course. Evidence is restricted to ' +
+          'vertebral fracture reduction — no hip fracture efficacy demonstrated. Contraindications: VTE history, stroke history, ' +
+          'oestrogen-sensitive malignancy. Not licensed in men.',
+        source: SRC_NOGG,
+      });
+    }
   }
 
   // ── v1.23 Step 10 (initiation-time) — Hip / non-vertebral efficacy note ──
@@ -2626,8 +2714,9 @@ function giop(
     severity: 'info',
     message:
       'GIOP monitoring: DEXA within 6 months of starting treatment, then every 1–2 years. ' +
-      'Annual bloods: calcium, vitamin D, eGFR.',
-    rationale: 'NOGG 2024 monitoring recommendations for GIOP.',
+      'Annual bloods: calcium, vitamin D, eGFR, ALP. ' +
+      'Reassess FRAX with BMD at each DEXA repeat.',
+    rationale: 'NOGG 2024 §9.6 monitoring recommendations for GIOP: ALP added (bone turnover / osteomalacia screen) and FRAX-at-DEXA-repeat made explicit.',
     source: SRC_IOS,
   });
 

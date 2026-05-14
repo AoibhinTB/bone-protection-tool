@@ -21,7 +21,7 @@ export function runClinicalDecision(patient: PatientInput): ClinicalDecision {
   const riskStratification = stratifyRisk(patient);
   const riskCategory       = riskStratification.category;
 
-  const investigationsNeeded = assessInvestigationsNeeded(patient);
+  const investigationsNeeded = assessInvestigationsNeeded(patient, riskCategory);
 
   // Intermediate risk without DEXA → DEXA is the decision gate
   if (riskCategory === 'intermediate' && !patient.dexaResults) {

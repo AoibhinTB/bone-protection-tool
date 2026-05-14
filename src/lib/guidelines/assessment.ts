@@ -2,13 +2,20 @@
 // Source: NOGG 2024 Recs 2–7, NICE NG187 (v1.18: standalone IOS 2024 attribution removed —
 // no IOS prescribing guideline document identified; NOGG 2024 covers DEXA case-finding independently)
 
-import type { PatientInput, InvestigationRecommendation } from './types';
+import type { PatientInput, InvestigationRecommendation, RiskCategory } from './types';
 import { BLOOD_RANGES, GIOP, isOnGC, gcDurationMonths, gcStoppedWithin12Months } from './thresholds';
+import { deriveReferralSignals } from './referralSignals';
 
 export function assessInvestigationsNeeded(
   patient: PatientInput,
+  riskCategory: RiskCategory = 'low',
 ): InvestigationRecommendation[] {
   const needed: InvestigationRecommendation[] = [];
+
+  // v1.36 A2-impl Pre.1 + Pre.2 — derive anabolic-referral signals so the pre-referral
+  // investigation entries (PTH for teriparatide; corrected Ca for romosozumab) can fire
+  // structurally rather than relying on the engine's downstream flag wording.
+  const referralSignals = deriveReferralSignals(patient, riskCategory);
 
   // FRAX — external calculation required if not provided
   if (patient.fraxMOFPercent === null && patient.age >= 50) {
@@ -51,14 +58,42 @@ export function assessInvestigationsNeeded(
   // ── Tier 1: Mandatory pre-treatment bloods ────────────────────────────────
 
   if (!patient.bloodResults?.adjustedCalciumMmol) {
+    // v1.36 A2-impl Pre.2 — append romosozumab-specific reason when romo referral is active.
+    // Hypocalcaemia must be corrected before initiation; the GP confirms calcium in primary
+    // care before the referral letter goes out.
+    const romoSuffix = referralSignals.romosozumabReferralFired
+      ? ' Romosozumab: hypocalcaemia must be corrected before initiation — confirm corrected calcium before referral.'
+      : '';
     needed.push({
       investigation: 'calcium',
       tier: 1,
       reason:
         'Adjusted serum calcium: hypocalcaemia must be corrected before ' +
-        'bisphosphonate or denosumab; hypercalcaemia may indicate primary hyperparathyroidism (refer endocrinology).',
+        'bisphosphonate or denosumab; hypercalcaemia may indicate primary hyperparathyroidism (refer endocrinology).' +
+        romoSuffix,
       urgency: 'routine',
     });
+  } else if (referralSignals.romosozumabReferralFired) {
+    // v1.36 A2-impl Pre.2 — calcium is present but out of range AND romosozumab referral
+    // active: push a Tier 3 corrected-calcium entry naming romo specifically. Tier 3 because
+    // this is the secondary-cause / specialist-context level, distinct from the routine
+    // pre-treatment Tier 1 baseline calcium check (which only fires when the value is missing).
+    const ca = patient.bloodResults.adjustedCalciumMmol;
+    const calciumOutOfRange =
+      ca < BLOOD_RANGES.adjustedCalcium.low || ca > BLOOD_RANGES.adjustedCalcium.high;
+    if (calciumOutOfRange) {
+      needed.push({
+        investigation: 'calcium',
+        tier: 3,
+        reason:
+          `Corrected serum calcium ${ca} mmol/L is outside the normal range ` +
+          `(${BLOOD_RANGES.adjustedCalcium.low}–${BLOOD_RANGES.adjustedCalcium.high} mmol/L). ` +
+          'Romosozumab referral active — hypocalcaemia must be corrected before initiation; ' +
+          'hypercalcaemia warrants investigation (primary hyperparathyroidism, malignancy) before referral. ' +
+          'Document the corrected value in the referral letter.',
+        urgency: 'soon',
+      });
+    }
   }
 
   const vitD = patient.bloodResults?.vitaminDNmol ?? null;
@@ -92,13 +127,20 @@ export function assessInvestigationsNeeded(
 
   const hasEGFR = (patient.bloodResults?.egfr ?? null) !== null;
   if (!hasEGFR) {
+    // v1.36 A2-impl Pre.1 — append teriparatide-specific reason when an anabolic referral
+    // is active. Severe renal impairment is a contraindication; the GP confirms eGFR
+    // before the referral letter so the specialist has a complete picture.
+    const teriSuffix = referralSignals.teriparatideReferralFired
+      ? ' Teriparatide: contraindicated in severe renal impairment — confirm eGFR before referral.'
+      : '';
     needed.push({
       investigation: 'egfr',
       tier: 1,
       reason:
         'eGFR required to select safe agent: ' +
         'alendronate/zoledronate CI if eGFR <35; risedronate CI if eGFR <30. ' +
-        'eGFR <35 with denosumab: mandatory corrected calcium check 2 weeks after every injection.',
+        'eGFR <35 with denosumab: mandatory corrected calcium check 2 weeks after every injection.' +
+        teriSuffix,
       urgency: 'routine',
     });
   }
@@ -216,19 +258,29 @@ export function assessInvestigationsNeeded(
     !patient.adtUse &&
     !patient.aromataseInhibitorUse;
 
-  // PTH — fires on abnormal Ca/ALP, hyperparathyroidism flag, or young unexplained osteoporosis
+  // PTH — fires on abnormal Ca/ALP, hyperparathyroidism flag, or young unexplained osteoporosis.
+  // v1.36 A2-impl Pre.1 — also fires when teriparatide referral is active: PTH must be normal
+  // before initiation (specialist enforces actual CI; GP confirms in primary care before referral).
+  // Schema does not carry PTH numeric value, so "missing OR out of range" collapses to "ensure
+  // it's measured and documented".
+  const teriPthTrigger = referralSignals.teriparatideReferralFired;
   if (
     alpAbnormal ||
     calciumAbnormal ||
     patient.secondaryOsteoporosis.includes('hyperparathyroidism') ||
-    youngOpUnexplained
+    youngOpUnexplained ||
+    teriPthTrigger
   ) {
+    const teriPthSuffix = teriPthTrigger
+      ? ' Teriparatide referral — PTH must be normal before initiation (raised PTH = contraindication). Document the result in the referral letter.'
+      : '';
     needed.push({
       investigation: 'pth',
       tier: 3,
       reason:
         'Abnormal calcium or ALP — measure PTH to exclude primary hyperparathyroidism. ' +
-        'Elevated PTH with normal/high calcium → refer endocrinology.',
+        'Elevated PTH with normal/high calcium → refer endocrinology.' +
+        teriPthSuffix,
       urgency: 'routine',
     });
   }
