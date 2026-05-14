@@ -460,12 +460,20 @@ function tc15(): TCResult {
     bloodResults: { adjustedCalciumMmol: 2.30, vitaminDNmol: 22, egfr: 35, alp: 80, tshMUL: 2.0, hbGramsPerLitre: 140, esrOrCrp: 'normal' },
   });
   const decision = runClinicalDecision(patient);
-  check(failures, 'risk = very_high (recent hip fx)', decision.riskStratification.category === 'very_high', `got ${decision.riskStratification.category}`);
+  // v1.37 Fix B4: hip-fracture-alone no longer fires VHR. Patient routes to high via the
+  // prior-fx-high path (NOGG Rec 8, risk.ts:177-186) and treat-immediately via the
+  // post_hip_fracture_zoledronate path (treatment.ts:1368+). T -3.4 is above the -3.5 VHR
+  // threshold, no GC, no manual FRAX above age-specific VHRT → no other VHR trigger fires.
+  check(failures, 'risk = high (prior-fx-high path post-NEG-1 removal)',
+    decision.riskStratification.category === 'high',
+    `got ${decision.riskStratification.category}`);
+  check(failures, 'post-hip-fracture treat-immediately flag fires',
+    hasFlag(decision, 'post_hip_fracture_zoledronate_first_line'));
   check(failures, 'recommends denosumab (eGFR 35 borderline)', hasAgent(decision, 'denosumab'));
   check(failures, 'NO alendronate at eGFR 35', !hasAgent(decision, 'alendronate'));
   check(failures, 'age ≥80 FRAX caveat', hasFlag(decision, 'frax_life_expectancy_caveat'));
   check(failures, 'denosumab Vit D block (severe deficiency)', hasFlag(decision, 'denosumab_vitd_block'));
-  return { name: 'TC15 — 91F frail, recent hip fx, eGFR 35, Vit D 22', passed: failures.length === 0, failures, decision };
+  return { name: 'TC15 — 91F frail, recent hip fx, eGFR 35, Vit D 22 → high (post NEG-1 removal)', passed: failures.length === 0, failures, decision };
 }
 
 // ─── TC16 ─────────────────────────────────────────────────────────────────
@@ -2819,18 +2827,19 @@ function tc92(): TCResult {
   return { name: 'TC92 — romo CV any-history exclusion: VHR + prior MI 5y ago → no romo, teri remains', passed: failures.length === 0, failures, decision };
 }
 
-// ─── TC93 ─────────────────────────────────────────────────────────────────
-// GIOP simplification (engine commit b0d19dd: dropped GIOP-OR branch).
-// 62F treatment-naïve, prednisolone 8 mg/day × 18mo. T-scores per doc: hip −2.9, FN −2.8,
-// LS −3.6. No fractures. FRAX MOF 21% with GC (above IT, below engine VHRT 32.5).
+// ─── TC93 (v1.14) ─────────────────────────────────────────────────────────
+// VHR-via-VHR-3 (LS ≤ −3.5) AND VHR-via-VHR-4 (high-dose GC ≥7.5 mg/day × ≥3mo).
+// 62F treatment-naïve, prednisolone 8 mg/day × 18mo. T-scores: hip −2.9, FN −2.8, LS −3.6.
+// No fractures. FRAX MOF 21%. eGFR + calcium both MISSING (drives Pre.1 eGFR teri suffix
+// and Pre.2 Ca Tier 1 + Tier 3 corrected-calcium).
 //
-// NOTE: as written, the doc's stated patient inputs trigger standard NOGG Rec 11 T-score
-// VHR (LS = -3.6 ≤ -3.5) — so the engine correctly routes to riskCategory='very_high'
-// and anabolicReferralFired=true. The doc-stated assertion "anabolicReferralFired === false"
-// contradicts standard Rec 11. This TC is written verbatim per the doc and is EXPECTED
-// to fail under the current engine. See failure report in commit message for the
-// recommended fix (move the severe T-score from LS to total hip — which the dropped
-// OR-branch covered via all-sites min, but standard Rec 11 does not).
+// Two VHR criteria fire: (1) standard NOGG Rec 8 T-score VHR via LS = −3.6 ≤ −3.5; (2) GC
+// VHR via 8 mg/day × 18mo (≥7.5 × ≥3mo). Because GC is among the firing VHR criteria,
+// the vhr_specialist_referral message escalates to URGENT with the bridging-BP +
+// urgent-referral instruction (gcDrivesVHR predicate in treatment.ts).
+//
+// v1.14 doc flipped this TC: previously asserted "no anabolic referral" (contradicted
+// standard Rec 8); now asserts VHR + full anabolic-referral cluster fires.
 function tc93(): TCResult {
   const failures: string[] = [];
   const patient = basePatient({
@@ -2844,36 +2853,66 @@ function tc93(): TCResult {
     fraxMOFPercent: 21.0,
     fraxHipPercent: 3.2,
     fraxCalculatedWithBMD: true,
-    bloodResults: { adjustedCalciumMmol: 2.32, vitaminDNmol: 70, egfr: 75, alp: 80, tshMUL: 2.0, hbGramsPerLitre: 135, esrOrCrp: 'normal' },
+    bloodResults: {
+      adjustedCalciumMmol: null, // MISSING — drives Pre.2 Tier 1 (romo suffix) + Tier 3 corrected-Ca
+      vitaminDNmol: 70,
+      egfr: null, // MISSING — drives Pre.1 Tier 1 eGFR (teri suffix)
+      alp: 80,
+      tshMUL: 2.0,
+      hbGramsPerLitre: 135,
+      esrOrCrp: 'normal',
+    },
   });
   const decision = runClinicalDecision(patient);
 
-  // Per doc: risk classification computed as high (not very_high). NOTE expected to fail
-  // — see header comment.
-  check(failures, 'risk category high (NOT very_high)',
-    decision.riskStratification.category === 'high',
+  // VHR classification: standard Rec 8 fires via LS ≤ −3.5 AND GC ≥7.5 × ≥3mo.
+  check(failures, 'riskCategory === very_high',
+    decision.riskStratification.category === 'very_high',
     `got ${decision.riskStratification.category}`);
 
-  // anabolicReferralFired === false → post_anabolic_antiresorptive should NOT fire.
-  check(failures, 'post_anabolic_antiresorptive does NOT fire (no anabolic referral)',
-    !hasFlag(decision, 'post_anabolic_antiresorptive'));
+  // anabolicReferralFired === true (proxy: post_anabolic_antiresorptive fires).
+  check(failures, 'post_anabolic_antiresorptive fires (Rec 14 at referral time)',
+    hasFlag(decision, 'post_anabolic_antiresorptive'));
 
-  // No anabolic in any output.
-  check(failures, 'no teriparatide in recs/refs',
-    !decision.treatmentRecommendations.some(r => r.agent === 'teriparatide') &&
-    !decision.referrals.some(r => /teriparatide/i.test(r.reason)));
-  check(failures, 'no romosozumab in recs/refs',
-    !decision.treatmentRecommendations.some(r => r.agent === 'romosozumab') &&
-    !decision.referrals.some(r => /romosozumab/i.test(r.reason)));
+  // VHR specialist referral fires (§3.3 routing).
+  check(failures, 'vhr_specialist_referral flag fires',
+    hasFlag(decision, 'vhr_specialist_referral'));
 
-  // Standard high-risk antiresorptive pathway fires — BP or denosumab in recommendations.
-  check(failures, 'high-risk antiresorptive pathway fires (BP or denosumab)',
-    hasAgent(decision, 'alendronate') ||
-    hasAgent(decision, 'risedronate') ||
-    hasAgent(decision, 'zoledronate') ||
-    hasAgent(decision, 'denosumab'));
+  // URGENT escalation + bridging-BP instruction because GC drives VHR (gcDrivesVHR).
+  const vhrRefFlag = decision.flags.find(f => f.id === 'vhr_specialist_referral');
+  check(failures, 'vhr_specialist_referral severity URGENT (GC drives VHR)',
+    !!vhrRefFlag && vhrRefFlag.severity === 'urgent');
+  check(failures, 'vhr_specialist_referral message includes URGENT + bridging-BP instruction',
+    hasFlagText(decision, 'URGENT') && hasFlagText(decision, 'oral bisphosphonate in the meantime'));
+  // Referral object on the rheumatology/metabolic-bone side carries urgent urgency.
+  check(failures, 'referral urgency is urgent (GC drives VHR)',
+    decision.referrals.some(r => r.urgency === 'urgent'));
 
-  // giop_monitoring flag fires with A2-impl-corrected text (ALP + FRAX-at-DEXA-repeat).
+  // Sequential-planning fires (Seq.2 third push gate on anabolicReferralFired).
+  check(failures, 'sequential_therapy_plan_required fires',
+    hasFlag(decision, 'sequential_therapy_plan_required'));
+
+  // Pre.1 PTH Tier 3 with teri-specific reason.
+  const pthEntry = decision.investigationsNeeded.find(i => i.investigation === 'pth' && i.tier === 3);
+  check(failures, 'Tier 3 PTH entry fires with teriparatide-specific reason',
+    !!pthEntry && /teriparatide/i.test(pthEntry.reason));
+
+  // Pre.1 eGFR Tier 1 with teri-specific suffix (eGFR missing).
+  const egfrEntry = decision.investigationsNeeded.find(i => i.investigation === 'egfr' && i.tier === 1);
+  check(failures, 'Tier 1 eGFR entry fires (eGFR missing) with teriparatide suffix',
+    !!egfrEntry && /teriparatide/i.test(egfrEntry.reason));
+
+  // Pre.2 Ca Tier 1 with romo-specific suffix (Ca missing).
+  const calciumTier1 = decision.investigationsNeeded.find(i => i.investigation === 'calcium' && i.tier === 1);
+  check(failures, 'Tier 1 calcium entry fires (calcium missing) with romosozumab suffix',
+    !!calciumTier1 && /romosozumab/i.test(calciumTier1.reason));
+
+  // Pre.2 Tier 3 corrected-calcium fires (missing + romoReferralFired).
+  const calciumTier3 = decision.investigationsNeeded.find(i => i.investigation === 'calcium' && i.tier === 3);
+  check(failures, 'Tier 3 corrected-calcium entry fires (missing + romoRef)',
+    !!calciumTier3 && /romosozumab/i.test(calciumTier3.reason));
+
+  // giop_monitoring fires with A2-impl-corrected text.
   check(failures, 'giop_monitoring flag fires',
     hasFlag(decision, 'giop_monitoring'));
   check(failures, 'giop_monitoring includes ALP in annual bloods',
@@ -2883,9 +2922,10 @@ function tc93(): TCResult {
 
   // treatmentRecommended === true.
   check(failures, 'treatmentRecommended === true',
-    decision.treatmentRecommended === true);
+    decision.treatmentRecommended === true,
+    `got ${decision.treatmentRecommended}`);
 
-  return { name: 'TC93 — GIOP simplification: severe BMD on GC but not standard VHR → no anabolic', passed: failures.length === 0, failures, decision };
+  return { name: 'TC93 (v1.14) — VHR via T ≤ −3.5 AND GC ≥7.5 × ≥3mo: full anabolic cluster + URGENT', passed: failures.length === 0, failures, decision };
 }
 
 // ─── Runner ───────────────────────────────────────────────────────────────

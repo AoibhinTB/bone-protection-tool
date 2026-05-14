@@ -2792,6 +2792,45 @@ function giop(
     source: SRC_IOS,
   });
 
+  // v1.37 Option B (TC93) — Standard VHR-anabolic-referral cluster for GIOP-VHR patients.
+  // The GIOP override at generateTreatmentOutput:746-752 returns early before the standard
+  // VHR block at :815 and the post-recipe Seq.2 push gate, so GIOP-VHR patients otherwise
+  // miss vhr_specialist_referral and sequential_therapy_plan_required. Mirror both pushes
+  // here when riskCategory === 'very_high' so GIOP-VHR has the same flag-ID contract as
+  // non-GIOP VHR (TC90 / TC92 / TC93). The GIOP-specific giop_anabolic_preferred + the
+  // rheumatology referral below remain as the GIOP-pathway addition; both clusters coexist.
+  if (riskCategory === 'very_high') {
+    const gcDrivesVHR = isOnHighDoseGC(patient) && gcDurationMonths(patient) >= GIOP.highDoseMinMonths;
+    flags.push({
+      id: 'vhr_specialist_referral',
+      severity: gcDrivesVHR ? 'urgent' : 'warning',
+      message: gcDrivesVHR
+        ? 'URGENT: refer to osteoporosis specialist in secondary care. Start an oral bisphosphonate in the meantime if any delay is anticipated — rapid bone loss post-glucocorticoid initiation.'
+        : 'Refer to osteoporosis specialist in secondary care for assessment and consideration of parenteral treatment. Some may need first-line anabolic drug treatment, especially those with multiple vertebral fractures.',
+      rationale:
+        'NOGG 2024 (Conditional): consider referral of very high-risk patients to an osteoporosis specialist in secondary care, ' +
+        'for assessment and consideration of parenteral treatment. GIOP-VHR: GC-driven VHR ' +
+        '(≥7.5 mg/day × ≥3 months) carries rapid post-initiation bone loss — refer urgently and bridge with an oral bisphosphonate.',
+      source: SRC_NOGG,
+    });
+
+    // Seq.2 third push gate equivalent: anabolic referral active → sequential planning required.
+    if (!flags.some(f => f.id === 'sequential_therapy_plan_required')) {
+      flags.push({
+        id: 'sequential_therapy_plan_required',
+        severity: 'info',
+        message:
+          'Plan the sequential therapy strategy at the time of initiation — not retrospectively. ' +
+          'For teriparatide / romosozumab / abaloparatide being considered at specialist review: an antiresorptive must follow the course ' +
+          '(prescribed 1 month before the final anabolic dose to avoid a gap). Document the follow-on plan in the referral letter so the specialist sees it at initiation.',
+        rationale:
+          'NOGG 2024 Rec 14 (Strong): sequential antiresorptive after anabolic is mandatory — BMD gains are lost rapidly without it. ' +
+          'The plan must accompany the referral (specialist initiates the anabolic; GP continues the follow-on antiresorptive).',
+        source: SRC_NOGG,
+      });
+    }
+  }
+
   // GIOP very high risk: multiple VF or T-score ≤-3.5 → anabolic (not just any high dose)
   const giopVHR =
     (patient.priorVertebralFracture && patient.numberOfPriorFractures >= 2) ||

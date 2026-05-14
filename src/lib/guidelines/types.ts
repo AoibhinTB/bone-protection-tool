@@ -179,7 +179,14 @@ export interface PatientInput {
   priorHipFracture: boolean;
   priorVertebralFracture: boolean;
   recentVertebralFractureYears: number | null; // how many years ago was the last vertebral fracture
-  numberOfPriorFractures: number;
+  numberOfPriorFractures: number; // total fracture count across all sites (vert + non-vert)
+  /**
+   * v1.37 Fix B1 — vertebral-specific fracture count. Separate from numberOfPriorFractures
+   * (which counts all sites). Drives VHR-2 ("≥2 vertebral fractures, whenever they have
+   * occurred" per NOGG Rec 8). Optional with undefined = 0 — no false-positive risk for
+   * existing patient builders that haven't been updated.
+   */
+  numberOfVertebralFractures?: number;
 
   // FRAX clinical risk factors (Section 2.1)
   parentalHipFracture: boolean;

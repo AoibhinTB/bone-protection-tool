@@ -243,8 +243,24 @@ export function stratifyRisk(patient: PatientInput): RiskStratification {
     'FRAX not available and age <50 — stratification based on clinical features only.');
 }
 
-// ─── Very high risk override criteria (NOGG 2024, Rec 11 / Section 3.2) ──
+// ─── Very high risk override criteria (NOGG 2024 Rec 8 / spec v1.37 §3.2) ──
 // ANY single criterion is sufficient.
+//
+// v1.37 audit alignment:
+//   Fix B1 (VHR-2): vertebral-specific count via numberOfVertebralFractures (was buggy
+//     numberOfPriorFractures — total count, fired on 1 vert + 1 wrist).
+//   Fix B2 (VHR-3): DEXA-site scope extended to include totalHipTScore (was LS+FN only —
+//     missed total hip per spec "any DEXA site").
+//   Fix B3 (VHR-6): FRAX VHRT now age-specific via NOGG_2024_THRESHOLDS × 1.6 (was fixed
+//     32.5/8.6 — the 70+ values, masking VHR for younger patients above their age-specific
+//     threshold).
+//   Fix B4 (NEG-1): removed hip-fracture-alone VHR trigger — NOGG Rec 8 doesn't include
+//     hip fx as single-criterion VHR. Hip-fx patients still treat-immediately via the
+//     high-risk prior-fx routing at risk.ts:177-186 and post-hip-fracture zoledronate at
+//     treatment.ts:1368+.
+//   Fix B5 (NEG-2): removed treatment-failure VHR trigger — not a NOGG-defined VHR
+//     criterion (Diez-Perez 2012 origin, not NOGG). Treatment failure routes to §6.3
+//     on-treatment-fracture pathway (A1-impl Fix 4 / TC89) + §7.4 explicit-failure switch.
 
 function veryHighRiskReason(
   patient: PatientInput,
@@ -253,7 +269,7 @@ function veryHighRiskReason(
 ): string | null {
   const criteria: string[] = [];
 
-  // Recent vertebral fracture within 2 years (highest imminent re-fracture risk)
+  // VHR-1: Recent vertebral fracture within 2 years (highest imminent re-fracture risk).
   if (
     patient.priorVertebralFracture &&
     patient.recentVertebralFractureYears !== null &&
@@ -262,37 +278,40 @@ function veryHighRiskReason(
     criteria.push(`vertebral fracture within the last ${patient.recentVertebralFractureYears} year(s)`);
   }
 
-  // Recent hip fracture within 24 months — imminent re-fracture risk; NOGG VHR criterion
-  if (patient.priorHipFracture && patient.recentFractureWithin2Years) {
-    criteria.push('hip fracture within the last 24 months (imminent re-fracture risk)');
+  // VHR-2 (v1.37 Fix B1): ≥2 vertebral fractures, whenever they have occurred. Uses the
+  // dedicated numberOfVertebralFractures field. The previous predicate used
+  // numberOfPriorFractures (total fracture count) which falsely fired on 1 vert + 1 wrist.
+  if (
+    patient.priorVertebralFracture &&
+    (patient.numberOfVertebralFractures ?? 0) >= VERY_HIGH_RISK.minVertebralFracturesForVHR
+  ) {
+    criteria.push(`two or more vertebral fragility fractures (${patient.numberOfVertebralFractures} vertebral)`);
   }
 
-  // Two or more vertebral fractures (any time)
-  if (patient.priorVertebralFracture && patient.numberOfPriorFractures >= VERY_HIGH_RISK.minVertebralFracturesForVHR) {
-    criteria.push('two or more vertebral fragility fractures');
-  }
-
-  // T-score ≤ -3.5 at femoral neck or lumbar spine (CORRECTED from -3.0 per spec Section 3.2)
+  // VHR-3 (v1.37 Fix B2): T-score ≤ −3.5 at ANY DEXA site (LS, total hip, or FN). Spec
+  // v1.37 §3.2 / NOGG Rec 8: "BMD T-Score ≤ -3.5" — no site qualifier. Forearm not
+  // included (not standard NOGG VHR; covered via separate forearm-only-osteoporosis path).
   if (patient.dexaResults) {
     const scores = [
       patient.dexaResults.lumbarSpineTScore,
+      patient.dexaResults.totalHipTScore,
       patient.dexaResults.femoralNeckTScore,
     ].filter((t): t is number => t != null);
     const lowest = scores.length > 0 ? Math.min(...scores) : null;
     if (lowest !== null && lowest <= VERY_HIGH_RISK.tScore) {
-      criteria.push(`T-score ${lowest} ≤ ${VERY_HIGH_RISK.tScore} at femoral neck or lumbar spine`);
+      criteria.push(`T-score ${lowest} ≤ ${VERY_HIGH_RISK.tScore} at LS, total hip, or femoral neck`);
     }
   }
 
-  // High-dose glucocorticoids ≥7.5 mg/day for ≥3 months (NOGG 2024 Rec 11)
+  // VHR-4: High-dose glucocorticoids ≥7.5 mg/day prednisolone-equivalent × ≥3 months.
   if (isOnHighDoseGC(patient) && gcDurationMonths(patient) >= GIOP.highDoseMinMonths) {
     const dose = patient.glucocorticoidDoseMgDay ?? '?';
     const months = gcDurationMonths(patient);
     criteria.push(`high-dose glucocorticoid (${dose} mg/day, ${months} months)`);
   }
 
-  // Multiple clinical risk factors with a recent fragility fracture (any site) —
-  // NOGG 2024: high imminent re-fracture risk. ≥3 risk factors used as a sensible threshold.
+  // VHR-5: Multiple clinical risk factors with a recent fragility fracture (any site).
+  // Operational interpretation per spec v1.37 §3.2: ≥3 FRAX RFs + within 24 months.
   if (patient.recentFractureWithin2Years) {
     const rfCount = countFraxClinicalRiskFactors(patient);
     if (rfCount >= 3) {
@@ -300,33 +319,43 @@ function veryHighRiskReason(
     }
   }
 
-  // FRAX MOF / hip VHR triggers
-  // - MOF VHR fires only when FRAX MOF was manually entered (estimator too coarse for VHR designation).
-  // - Hip VHR fires only when BMD was included in the FRAX calculation (NOGG 2024 / SCOOP — hip
-  //   probability is unreliable without BMD).
+  // VHR-6 (v1.37 Fix B3): FRAX-based VHR with AGE-SPECIFIC VHRT (NOGG Table 5: VHRT = IT × 1.6).
+  // The previous fixed 32.5/8.6 thresholds masked VHR for younger patients above their
+  // age-specific threshold. Falls back to fixed 32.5/8.6 only when age is outside the
+  // NOGG Table 5 band (getAgeThreshold returns null).
+  //   - MOF VHR fires only on manual FRAX entry (estimator too coarse for VHR designation).
+  //   - Hip VHR fires only when BMD was included in the FRAX (NOGG / SCOOP — hip probability
+  //     is unreliable without BMD).
   const fraxIsManual = patient.fraxMOFPercent !== null || patient.fraxHipPercent !== null;
   if (fraxIsManual) {
-    if (adjustedMOF !== null && adjustedMOF >= VERY_HIGH_RISK.fraxMOF) {
-      criteria.push(`adjusted FRAX MOF ${adjustedMOF}% ≥ ${VERY_HIGH_RISK.fraxMOF}%`);
+    const ageThr = getAgeThreshold(patient.age);
+    const vhrtMOF = ageThr !== null ? ageThr.itMOF * 1.6 : VERY_HIGH_RISK.fraxMOF;
+    const vhrtHip = ageThr !== null ? ageThr.itHip * 1.6 : VERY_HIGH_RISK.fraxHip;
+    if (adjustedMOF !== null && adjustedMOF >= vhrtMOF) {
+      const ageContext = ageThr !== null ? ` at age ${patient.age}` : ' (fixed 70+ fallback — age outside NOGG Table 5)';
+      criteria.push(`adjusted FRAX MOF ${adjustedMOF}% ≥ age-specific VHRT ${vhrtMOF.toFixed(1)}%${ageContext}`);
     }
     if (
       adjustedHip !== null &&
-      adjustedHip >= VERY_HIGH_RISK.fraxHip &&
+      adjustedHip >= vhrtHip &&
       patient.fraxCalculatedWithBMD
     ) {
-      criteria.push(`adjusted FRAX hip ${adjustedHip}% ≥ ${VERY_HIGH_RISK.fraxHip}% (BMD-included)`);
+      const ageContext = ageThr !== null ? ` at age ${patient.age}` : ' (fixed 70+ fallback)';
+      criteria.push(`adjusted FRAX hip ${adjustedHip}% ≥ age-specific VHRT ${vhrtHip.toFixed(2)}%${ageContext} (BMD-included)`);
     }
   }
 
-  // Fracture on adequate therapy — treatment failure
-  if (
-    patient.currentTreatment?.currentlyOn &&
-    patient.currentTreatment.durationMonths >= 12 &&
-    patient.priorFragilityFracture &&
-    patient.numberOfPriorFractures >= 2
-  ) {
-    criteria.push('possible treatment failure: fracture(s) during adequate antiresorptive therapy');
-  }
+  // v1.37 Fix B4 (NEG-1): hip-fracture-alone VHR criterion REMOVED. NOGG Rec 8 does not
+  // include hip fx as a single-criterion VHR trigger; spec v1.37 §3.2 explicitly flags
+  // this as a misattribution. Hip-fx patients route to treat-immediately via the high-risk
+  // prior-fx path at risk.ts:177-186 (NOGG Rec 8 — high not VHR) and post-hip-fracture
+  // zoledronate at treatment.ts:1368+ — both pathways remain reachable.
+  //
+  // v1.37 Fix B5 (NEG-2): treatment-failure VHR criterion REMOVED. NOGG Rec 1 treats
+  // fracture-during-treatment as a duration-extension trigger (§6.2 callout / §6.3 pathway),
+  // not a VHR-anabolic-referral trigger. The on-treatment-fracture pathway at
+  // treatment.ts:1635-1687 (A1-impl Fix 4 / TC89) and §7.4 explicit-failure switch at
+  // treatment.ts:1821-1860 own this routing.
 
   if (criteria.length === 0) return null;
 
