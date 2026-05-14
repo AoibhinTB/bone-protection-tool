@@ -2555,6 +2555,339 @@ function tc88(): TCResult {
   return { name: 'TC88 — 10y course completed: Rec 8 individual basis + continue current drug', passed: failures.length === 0, failures, decision };
 }
 
+// ═══════════════════════════════════════════════════════════════════════════
+// v1.12 TCs — TC89–TC93 — Lock A1-impl Fix 4 / A2-impl / romo CV gate / GIOP simplification
+// ═══════════════════════════════════════════════════════════════════════════
+
+// ─── TC89 ─────────────────────────────────────────────────────────────────
+// On-treatment fragility fracture with adherence ≥80% (A1-impl Fix 4 + new continue-drug push).
+// 70F, alendronate 3y, new T8 vert fragility fracture this week. Prior wrist fx age 65
+// (pre-treatment). Adherence ≥80% confirmed. Schema fields ageAtStart=67, durationMonths=36,
+// fractureOnCurrentTreatment=true, adherenceAdequate=true.
+function tc89(): TCResult {
+  const failures: string[] = [];
+  const patient = basePatient({
+    age: 70,
+    sex: 'female',
+    priorFragilityFracture: true,
+    priorVertebralFracture: true,
+    recentVertebralFractureYears: 0,
+    recentFractureWithin2Years: true,
+    numberOfPriorFractures: 2, // pre-treatment wrist + new vert
+    dexaResults: { lumbarSpineTScore: -2.5, totalHipTScore: -2.4, femoralNeckTScore: -2.3, forearmTScore: null },
+    fraxMOFPercent: 22.0,
+    fraxHipPercent: 4.5,
+    fraxCalculatedWithBMD: true,
+    bloodResults: { adjustedCalciumMmol: 2.35, vitaminDNmol: 70, egfr: 65, alp: 80, tshMUL: 2.0, hbGramsPerLitre: 135, esrOrCrp: 'normal' },
+    currentTreatment: {
+      agent: 'alendronate',
+      durationMonths: 36,
+      reasonStopped: null,
+      currentlyOn: true,
+      monthsSinceLastDose: null,
+      ageAtStart: 67,
+      fractureOnCurrentTreatment: true,
+      adherenceAdequate: true,
+    },
+  });
+  const decision = runClinicalDecision(patient);
+
+  // Tier 2 + Tier 3 secondary-cause-workup bloods appear as STRUCTURED entries (not only
+  // in the narrative flag). on_treatment_fracture_pathway flag bypasses the index.ts gate.
+  check(failures, 'Tier 2 entries present in investigationsNeeded',
+    decision.investigationsNeeded.some(i => i.tier === 2));
+  check(failures, 'Tier 3 PTH entry fires (Fix 4a or Pre.1)',
+    decision.investigationsNeeded.some(i => i.investigation === 'pth' && i.tier === 3));
+
+  // Planned-duration output extended to 10 yr (bp_duration_extension_indication).
+  check(failures, 'planned-duration extension flag fires',
+    hasFlag(decision, 'bp_duration_extension_indication'));
+  check(failures, 'flag names extended target 10 years on alendronate',
+    hasFlagText(decision, 'extended to 10 years') && hasFlagText(decision, 'alendronate'));
+
+  // On-treatment-fracture narrative flag still fires.
+  check(failures, 'on_treatment_fracture_pathway flag fires',
+    hasFlag(decision, 'on_treatment_fracture_pathway'));
+
+  // Treatment NOT routed to §7.4 failure.
+  check(failures, 'treatment_failure flag does NOT fire',
+    !hasFlag(decision, 'treatment_failure'));
+  check(failures, 'treatment_failure_switch flag does NOT fire',
+    !hasFlag(decision, 'treatment_failure_switch'));
+
+  // bp_holiday_appropriate does NOT fire (duration < 60mo).
+  check(failures, 'bp_holiday_appropriate does NOT fire',
+    !hasFlag(decision, 'bp_holiday_appropriate'));
+
+  // treatmentRecommended === true with alendronate continued.
+  check(failures, 'treatmentRecommended === true',
+    decision.treatmentRecommended === true,
+    `got ${decision.treatmentRecommended}`);
+  check(failures, 'alendronate in recommendations (continued)',
+    hasAgent(decision, 'alendronate'));
+
+  return { name: 'TC89 — on-treatment fracture + adherence ≥80%: extension + continue, not failure', passed: failures.length === 0, failures, decision };
+}
+
+// ─── TC90 ─────────────────────────────────────────────────────────────────
+// VHR anabolic-referral cluster: Seq.1 + Seq.2 + Pre.1 + Pre.2 (A2-impl).
+// 72F treatment-naïve, recent vert fx 14mo ago + FRAX MOF 31% (above engine VHRT 32.5? Not
+// quite — falls back to recent-vert-fx VHR criterion). PTH and adjusted calcium both
+// MISSING in bloodResults. No CV/VTE history.
+function tc90(): TCResult {
+  const failures: string[] = [];
+  const patient = basePatient({
+    age: 72,
+    sex: 'female',
+    priorFragilityFracture: true,
+    priorVertebralFracture: true,
+    recentVertebralFractureYears: 1, // 14 months ≈ 1y (engine VHR fires at ≤2)
+    recentFractureWithin2Years: true,
+    numberOfPriorFractures: 2,
+    dexaResults: { lumbarSpineTScore: -3.1, totalHipTScore: -2.6, femoralNeckTScore: -2.5, forearmTScore: null },
+    fraxMOFPercent: 33.0, // ≥ engine VHRT MOF 32.5 — also fires MOF VHR
+    fraxHipPercent: 8.0,
+    fraxCalculatedWithBMD: true,
+    bloodResults: {
+      adjustedCalciumMmol: null, // MISSING — drives Pre.2 Tier 1 + Tier 3
+      vitaminDNmol: 62,
+      egfr: 68,
+      alp: 80,
+      tshMUL: 2.0,
+      hbGramsPerLitre: 135,
+      esrOrCrp: 'normal',
+    },
+  });
+  const decision = runClinicalDecision(patient);
+
+  // VHR classification (recent vert fx within 2y).
+  check(failures, 'risk category very_high',
+    decision.riskStratification.category === 'very_high',
+    `got ${decision.riskStratification.category}`);
+
+  // Seq.1 — post_anabolic_antiresorptive fires at referral time.
+  check(failures, 'post_anabolic_antiresorptive fires (Rec 14 at referral time)',
+    hasFlag(decision, 'post_anabolic_antiresorptive'));
+
+  // Seq.2 — sequential_therapy_plan_required fires (anabolicReferralFired gate).
+  check(failures, 'sequential_therapy_plan_required fires',
+    hasFlag(decision, 'sequential_therapy_plan_required'));
+
+  // Pre.1 — Tier 3 PTH entry with teriparatide-specific reason.
+  const pthEntry = decision.investigationsNeeded.find(i => i.investigation === 'pth' && i.tier === 3);
+  check(failures, 'Tier 3 PTH entry present', !!pthEntry);
+  check(failures, 'PTH entry has teriparatide-specific reason',
+    !!pthEntry && /teriparatide/i.test(pthEntry.reason));
+
+  // Pre.1 — Tier 1 eGFR entry not present here (eGFR is present in patient input, so the
+  // missing-only Tier 1 push does not fire). This is the expected interaction: when eGFR
+  // IS recorded, no Tier 1 entry. The teri-specific suffix would only apply if eGFR were
+  // missing. This is a coverage gap worth a follow-up TC; for TC90 we only check that the
+  // teri-PTH entry is present.
+
+  // Pre.2 — Tier 1 calcium entry (missing) with romo-specific reason appended.
+  const calciumTier1 = decision.investigationsNeeded.find(i => i.investigation === 'calcium' && i.tier === 1);
+  check(failures, 'Tier 1 calcium entry fires (calcium missing)', !!calciumTier1);
+  check(failures, 'Tier 1 calcium entry has romosozumab-specific reason',
+    !!calciumTier1 && /romosozumab/i.test(calciumTier1.reason));
+
+  // Pre.2 — Tier 3 corrected-calcium entry fires (missing + romoRef).
+  const calciumTier3 = decision.investigationsNeeded.find(i => i.investigation === 'calcium' && i.tier === 3);
+  check(failures, 'Tier 3 corrected-calcium entry fires', !!calciumTier3);
+  check(failures, 'Tier 3 corrected-calcium entry references romosozumab referral',
+    !!calciumTier3 && /romosozumab/i.test(calciumTier3.reason));
+
+  // Both teriparatide and romosozumab pass gates — proxy: teri triggers Pre.1 PTH (✓ above);
+  // romo triggers Pre.2 calcium Tier 3 (✓ above) AND romosozumab_cv_risk_framing fires
+  // (rather than the exclusion variant, since no MI/stroke history).
+  check(failures, 'romosozumab_cv_risk_framing fires (romo passes gate, female VHR, no CV CI)',
+    hasFlag(decision, 'romosozumab_cv_risk_framing'));
+  check(failures, 'romosozumab_excluded_mi_stroke_history does NOT fire (no MI/stroke)',
+    !hasFlag(decision, 'romosozumab_excluded_mi_stroke_history'));
+
+  return { name: 'TC90 — VHR anabolic cluster: Seq.1 + Seq.2 + Pre.1 PTH + Pre.2 Ca Tier1+Tier3', passed: failures.length === 0, failures, decision };
+}
+
+// ─── TC91 ─────────────────────────────────────────────────────────────────
+// Raloxifene follow-on after anabolic (A2-impl Seq.5).
+// 68F treatment-naïve, recent vert fx 10mo ago → VHR. eGFR 28 (BPs CI'd by renal cutoff).
+// Denosumab declined → refusesInjections=true. No VTE. No stroke.
+function tc91(): TCResult {
+  const failures: string[] = [];
+  const patient = basePatient({
+    age: 68,
+    sex: 'female',
+    priorFragilityFracture: true,
+    priorVertebralFracture: true,
+    recentVertebralFractureYears: 1, // 10 months ≈ 1y (engine VHR fires at ≤2)
+    recentFractureWithin2Years: true,
+    numberOfPriorFractures: 1,
+    dexaResults: { lumbarSpineTScore: -3.0, totalHipTScore: -2.5, femoralNeckTScore: -2.4, forearmTScore: null },
+    fraxMOFPercent: 35.0, // also above VHRT for belt-and-braces
+    fraxHipPercent: 8.0,
+    fraxCalculatedWithBMD: true,
+    refusesInjections: true, // denosumab declined
+    bloodResults: { adjustedCalciumMmol: 2.32, vitaminDNmol: 70, egfr: 28, alp: 80, tshMUL: 2.0, hbGramsPerLitre: 135, esrOrCrp: 'normal' },
+  });
+  const decision = runClinicalDecision(patient);
+
+  // VHR + anabolic referral fires (proxy via post_anabolic_antiresorptive).
+  check(failures, 'risk category very_high',
+    decision.riskStratification.category === 'very_high');
+  check(failures, 'anabolicReferralFired (proxy: post_anabolic_antiresorptive fires)',
+    hasFlag(decision, 'post_anabolic_antiresorptive'));
+
+  // Seq.5 raloxifene_anabolic_follow_on_option flag fires.
+  check(failures, 'raloxifene_anabolic_follow_on_option flag fires',
+    hasFlag(decision, 'raloxifene_anabolic_follow_on_option'));
+
+  // Flag text includes vertebral-only-benefit caveat and VTE-CI note.
+  check(failures, 'flag includes vertebral-only-benefit caveat',
+    hasFlagText(decision, 'vertebral-only') || hasFlagText(decision, 'no hip fracture efficacy'));
+  check(failures, 'flag includes VTE CI note',
+    hasFlagText(decision, 'VTE'));
+
+  // No oral or IV bisphosphonate in recommendations (eGFR 28 → all BPs CI'd).
+  check(failures, 'no alendronate in recommendations', !hasAgent(decision, 'alendronate'));
+  check(failures, 'no risedronate in recommendations', !hasAgent(decision, 'risedronate'));
+  check(failures, 'no ibandronate in recommendations', !hasAgent(decision, 'ibandronate'));
+  check(failures, 'no zoledronate in recommendations', !hasAgent(decision, 'zoledronate'));
+
+  // No denosumab in recommendations (stripped by refusesInjections filter).
+  check(failures, 'no denosumab in recommendations', !hasAgent(decision, 'denosumab'));
+
+  return { name: 'TC91 — Seq.5 raloxifene follow-on: VHR + BP-CI + denosumab declined + no VTE', passed: failures.length === 0, failures, decision };
+}
+
+// ─── TC92 ─────────────────────────────────────────────────────────────────
+// Romosozumab CV gate any-history tightening (engine commit b0d19dd predecessor: 87beee6).
+// 70F treatment-naïve, recent vert fx 8mo ago + FRAX 33% above engine VHRT 32.5% → VHR.
+// LS = -3.4 (just ABOVE the -3.5 standard VHR cutoff so VHR fires via FRAX MOF and
+// recent-fx, not via direct T-score). Prior MI 5y ago → priorMIOrStroke=true.
+function tc92(): TCResult {
+  const failures: string[] = [];
+  const patient = basePatient({
+    age: 70,
+    sex: 'female',
+    priorFragilityFracture: true,
+    priorVertebralFracture: true,
+    recentVertebralFractureYears: 0, // 8 months — within 2y
+    recentFractureWithin2Years: true,
+    numberOfPriorFractures: 1,
+    dexaResults: { lumbarSpineTScore: -3.4, totalHipTScore: -2.7, femoralNeckTScore: -2.6, forearmTScore: null },
+    fraxMOFPercent: 33.0, // ≥ 32.5 fires MOF VHR; recent vert fx also fires VHR independently
+    fraxHipPercent: 8.0,
+    fraxCalculatedWithBMD: true,
+    priorMIOrStroke: true, // prior MI 5y ago
+    bloodResults: { adjustedCalciumMmol: 2.32, vitaminDNmol: 70, egfr: 70, alp: 80, tshMUL: 2.0, hbGramsPerLitre: 135, esrOrCrp: 'normal' },
+  });
+  const decision = runClinicalDecision(patient);
+
+  // VHR classification.
+  check(failures, 'risk category very_high',
+    decision.riskStratification.category === 'very_high');
+
+  // CV-history exclusion explicitly cited.
+  check(failures, 'romosozumab_excluded_mi_stroke_history flag fires',
+    hasFlag(decision, 'romosozumab_excluded_mi_stroke_history'));
+  check(failures, 'exclusion flag cites MI or stroke history',
+    hasFlagText(decision, 'MI or stroke history') ||
+    hasFlagText(decision, 'prior MI'));
+  check(failures, 'exclusion flag cites spec §5.5 no-time-window',
+    hasFlagText(decision, '§5.5') || hasFlagText(decision, 'no time window'));
+
+  // romosozumab_cv_risk_framing should NOT fire (replaced by exclusion variant for this subgroup).
+  check(failures, 'romosozumab_cv_risk_framing does NOT fire (replaced by exclusion)',
+    !hasFlag(decision, 'romosozumab_cv_risk_framing'));
+
+  // Teriparatide is the remaining anabolic option — Pre.1 PTH Tier 3 fires.
+  const pthEntry = decision.investigationsNeeded.find(i => i.investigation === 'pth' && i.tier === 3);
+  check(failures, 'teriparatide PTH Tier 3 entry fires',
+    !!pthEntry && /teriparatide/i.test(pthEntry.reason));
+
+  // Pre.2 romo outputs do NOT fire (romoRef === false).
+  // Calcium is present (not missing) — so Tier 1 entry does not fire at all here.
+  // Tier 3 corrected-Ca entry must NOT fire because romoRef is false.
+  const calciumTier3 = decision.investigationsNeeded.find(i => i.investigation === 'calcium' && i.tier === 3);
+  check(failures, 'no Tier 3 corrected-Ca entry (romoRef === false)', !calciumTier3);
+
+  // Romosozumab is NOT in any recommendation or referral list (it never is — surfaced via
+  // flags only — but assert explicitly per spec).
+  check(failures, 'no romosozumab in recommendations',
+    !decision.treatmentRecommendations.some(r => r.agent === 'romosozumab'));
+
+  return { name: 'TC92 — romo CV any-history exclusion: VHR + prior MI 5y ago → no romo, teri remains', passed: failures.length === 0, failures, decision };
+}
+
+// ─── TC93 ─────────────────────────────────────────────────────────────────
+// GIOP simplification (engine commit b0d19dd: dropped GIOP-OR branch).
+// 62F treatment-naïve, prednisolone 8 mg/day × 18mo. T-scores per doc: hip −2.9, FN −2.8,
+// LS −3.6. No fractures. FRAX MOF 21% with GC (above IT, below engine VHRT 32.5).
+//
+// NOTE: as written, the doc's stated patient inputs trigger standard NOGG Rec 11 T-score
+// VHR (LS = -3.6 ≤ -3.5) — so the engine correctly routes to riskCategory='very_high'
+// and anabolicReferralFired=true. The doc-stated assertion "anabolicReferralFired === false"
+// contradicts standard Rec 11. This TC is written verbatim per the doc and is EXPECTED
+// to fail under the current engine. See failure report in commit message for the
+// recommended fix (move the severe T-score from LS to total hip — which the dropped
+// OR-branch covered via all-sites min, but standard Rec 11 does not).
+function tc93(): TCResult {
+  const failures: string[] = [];
+  const patient = basePatient({
+    age: 62,
+    sex: 'female',
+    glucocorticoidUse: { current: true, durationMonths: 18, dose: 'medium' },
+    glucocorticoidDoseMgDay: 8,
+    glucocorticoidStatus: 'current',
+    rheumatoidArthritis: true, // GC for RA per doc context
+    dexaResults: { lumbarSpineTScore: -3.6, totalHipTScore: -2.9, femoralNeckTScore: -2.8, forearmTScore: null },
+    fraxMOFPercent: 21.0,
+    fraxHipPercent: 3.2,
+    fraxCalculatedWithBMD: true,
+    bloodResults: { adjustedCalciumMmol: 2.32, vitaminDNmol: 70, egfr: 75, alp: 80, tshMUL: 2.0, hbGramsPerLitre: 135, esrOrCrp: 'normal' },
+  });
+  const decision = runClinicalDecision(patient);
+
+  // Per doc: risk classification computed as high (not very_high). NOTE expected to fail
+  // — see header comment.
+  check(failures, 'risk category high (NOT very_high)',
+    decision.riskStratification.category === 'high',
+    `got ${decision.riskStratification.category}`);
+
+  // anabolicReferralFired === false → post_anabolic_antiresorptive should NOT fire.
+  check(failures, 'post_anabolic_antiresorptive does NOT fire (no anabolic referral)',
+    !hasFlag(decision, 'post_anabolic_antiresorptive'));
+
+  // No anabolic in any output.
+  check(failures, 'no teriparatide in recs/refs',
+    !decision.treatmentRecommendations.some(r => r.agent === 'teriparatide') &&
+    !decision.referrals.some(r => /teriparatide/i.test(r.reason)));
+  check(failures, 'no romosozumab in recs/refs',
+    !decision.treatmentRecommendations.some(r => r.agent === 'romosozumab') &&
+    !decision.referrals.some(r => /romosozumab/i.test(r.reason)));
+
+  // Standard high-risk antiresorptive pathway fires — BP or denosumab in recommendations.
+  check(failures, 'high-risk antiresorptive pathway fires (BP or denosumab)',
+    hasAgent(decision, 'alendronate') ||
+    hasAgent(decision, 'risedronate') ||
+    hasAgent(decision, 'zoledronate') ||
+    hasAgent(decision, 'denosumab'));
+
+  // giop_monitoring flag fires with A2-impl-corrected text (ALP + FRAX-at-DEXA-repeat).
+  check(failures, 'giop_monitoring flag fires',
+    hasFlag(decision, 'giop_monitoring'));
+  check(failures, 'giop_monitoring includes ALP in annual bloods',
+    hasFlagText(decision, 'calcium, vitamin D, eGFR, ALP'));
+  check(failures, 'giop_monitoring includes FRAX-at-DEXA-repeat sentence',
+    hasFlagText(decision, 'Reassess FRAX with BMD at each DEXA repeat'));
+
+  // treatmentRecommended === true.
+  check(failures, 'treatmentRecommended === true',
+    decision.treatmentRecommended === true);
+
+  return { name: 'TC93 — GIOP simplification: severe BMD on GC but not standard VHR → no anabolic', passed: failures.length === 0, failures, decision };
+}
+
 // ─── Runner ───────────────────────────────────────────────────────────────
 
 const TCs: Array<() => TCResult> = [
@@ -2579,6 +2912,8 @@ const TCs: Array<() => TCResult> = [
   tc78, tc79, tc80, tc81, tc82, tc83, tc84, tc85, tc86,
   // v1.11 (test-doc v1.11) — BP-duration decision points (pause-eligible + 10y individual basis)
   tc87, tc88,
+  // v1.12 (test-doc v1.12) — A1-Fix-4 / A2-impl / romo CV gate / GIOP simplification locks
+  tc89, tc90, tc91, tc92, tc93,
 ];
 
 const results = TCs.map(fn => fn());

@@ -853,19 +853,39 @@ export function generateTreatmentOutput(
     // no recent MI/stroke), surface a referral-context flag covering CV risk assessment,
     // renal cautions, and the dosing detail the specialist will need.
     if (patient.sex === 'female') {
-      flags.push({
-        id: 'romosozumab_cv_risk_framing',
-        severity: 'info',
-        message:
-          'If romosozumab is being considered at specialist review: both 1-year fracture risk AND 1-year cardiovascular risk must be assessed. ' +
-          'Flag explicit CV risk factors in the referral letter (prior MI / stroke / unstable angina / heart failure / uncontrolled hypertension / CV risk score) — the specialist needs this to decide whether romosozumab is appropriate. ' +
-          'Romosozumab dosing: TWO SC injections of 105 mg each (total 210 mg) given monthly for 12 months. ' +
-          'Severe renal impairment or dialysis → increased hypocalcaemia risk with romosozumab — flag renal status in the referral.',
-        rationale:
-          'NOGG 2024 (v1.28): romosozumab carries a small but real CV signal from ARCH-trial subgroup analysis. ' +
-          'The CV risk assessment is part of the prescribing decision and must accompany the referral; specialists need the full CV picture to decide between romosozumab and an alternative.',
-        source: SRC_ROMO_MAP,
-      });
+      if (patient.priorMIOrStroke) {
+        // v1.36 (TC92) — Romosozumab CV-history exclusion. Spec §5.5: "avoid if MI or
+        // stroke history" — no time window. Replaces the broader CV-risk-framing flag for
+        // this subgroup since romosozumab is explicitly off the table; the framing prompt
+        // is for candidates still in consideration.
+        flags.push({
+          id: 'romosozumab_excluded_mi_stroke_history',
+          severity: 'warning',
+          message:
+            'Romosozumab is excluded for this patient — prior MI or stroke history (any time). ' +
+            'Per spec v1.36 §5.5: "avoid if MI or stroke history" with no time window. ' +
+            'Teriparatide is the remaining anabolic option (specialist-initiated; document the CV history in the referral letter).',
+          rationale:
+            'NOGG 2024 / spec v1.36 §5.5 romosozumab row: any prior MI or stroke (historic or recent) is a contraindication ' +
+            'to romosozumab. The ARCH-trial CV signal is the basis for this exclusion. Teriparatide carries no equivalent ' +
+            'CV CI and remains an option for this VHR patient.',
+          source: SRC_ROMO_MAP,
+        });
+      } else {
+        flags.push({
+          id: 'romosozumab_cv_risk_framing',
+          severity: 'info',
+          message:
+            'If romosozumab is being considered at specialist review: both 1-year fracture risk AND 1-year cardiovascular risk must be assessed. ' +
+            'Flag explicit CV risk factors in the referral letter (prior MI / stroke / unstable angina / heart failure / uncontrolled hypertension / CV risk score) — the specialist needs this to decide whether romosozumab is appropriate. ' +
+            'Romosozumab dosing: TWO SC injections of 105 mg each (total 210 mg) given monthly for 12 months. ' +
+            'Severe renal impairment or dialysis → increased hypocalcaemia risk with romosozumab — flag renal status in the referral.',
+          rationale:
+            'NOGG 2024 (v1.28): romosozumab carries a small but real CV signal from ARCH-trial subgroup analysis. ' +
+            'The CV risk assessment is part of the prescribing decision and must accompany the referral; specialists need the full CV picture to decide between romosozumab and an alternative.',
+          source: SRC_ROMO_MAP,
+        });
+      }
     }
 
     // ── v1.29 Step 11 — Bisphosphonate blunting effect in anabolic-referral letter ──
@@ -1815,6 +1835,29 @@ function sequencing(
           'in monitoring, not buried in narrative.',
         source: SRC_NOGG,
       });
+    }
+
+    // v1.36 (TC89) — push current drug to recs when on-treatment-fracture path fires with
+    // adherence confirmed ≥80%. Per spec §6.3 Rec 5: treatment is NOT changed (no failure
+    // route); the patient continues the current agent on the extended planned duration.
+    // Without this push, recs is empty for the sequencing path's on-treatment-fracture
+    // branch → treatmentRecommended is false, which contradicts "patient remains on
+    // treatment, extended planned course". Symmetric to TC88's bp_holiday_not_appropriate
+    // continue-drug-push. Skipped when adherenceAdequate is false (poor adherence routes
+    // to correction path) or null (assessment pending).
+    if (current.adherenceAdequate === true && isBisphosphonate(current.agent)) {
+      const continueRecipe = (() => {
+        switch (current.agent) {
+          case 'alendronate': return alendronate();
+          case 'risedronate': return risedronate();
+          case 'ibandronate': return ibandronate();
+          case 'zoledronate': return zoledronate();
+          default: return null;
+        }
+      })();
+      if (continueRecipe && !recs.some(r => r.agent === current.agent)) {
+        recs.push(continueRecipe);
+      }
     }
   }
 

@@ -5,6 +5,7 @@
 import type { PatientInput, ClinicalDecision, RiskCategory, ReferralRecommendation, ClinicalFlag } from './types';
 import { assessInvestigationsNeeded } from './assessment';
 import { stratifyRisk, hasAnyClinicalRiskFactor } from './risk';
+import { deriveReferralSignals } from './referralSignals';
 import { generateTreatmentOutput } from './treatment';
 import { generateBloodFlags } from './bloodFlags';
 import { generateRiskFactorsIdentified } from './riskFactorsSummary';
@@ -168,7 +169,12 @@ export function runClinicalDecision(patient: PatientInput): ClinicalDecision {
         (patient.currentTreatment.agent === 'teriparatide' ||
          patient.currentTreatment.agent === 'romosozumab' ||
          patient.currentTreatment.agent === 'abaloparatide');
-      return anabolicInRecs || onDenosumab || onAnabolic;
+      // v1.36 (TC90): also allow through when an anabolic referral is firing (new-referral
+      // patient has no anabolic in `recommendations` because anabolics surface via referrals,
+      // not recipes — without this allow-through, the third push gate's flag was being
+      // suppressed by the output filter).
+      const referralSignals = deriveReferralSignals(patient, riskCategory);
+      return anabolicInRecs || onDenosumab || onAnabolic || referralSignals.anabolicReferralFired;
     }
     // Denosumab cessation / timing / sequential alerts — only relevant when
     // denosumab is in recommendations OR patient is currently on denosumab.

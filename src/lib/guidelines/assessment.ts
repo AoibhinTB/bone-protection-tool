@@ -57,10 +57,12 @@ export function assessInvestigationsNeeded(
 
   // ── Tier 1: Mandatory pre-treatment bloods ────────────────────────────────
 
-  if (!patient.bloodResults?.adjustedCalciumMmol) {
-    // v1.36 A2-impl Pre.2 — append romosozumab-specific reason when romo referral is active.
-    // Hypocalcaemia must be corrected before initiation; the GP confirms calcium in primary
-    // care before the referral letter goes out.
+  // v1.36 A2-impl Pre.2 — Tier 1 calcium check (missing) with romo-specific suffix when
+  // romoRef fires. Note: ca === 0 is treated as a real value, so we use explicit null/undefined
+  // checks rather than truthiness.
+  const caRaw = patient.bloodResults?.adjustedCalciumMmol;
+  const caMissing = caRaw === null || caRaw === undefined;
+  if (caMissing) {
     const romoSuffix = referralSignals.romosozumabReferralFired
       ? ' Romosozumab: hypocalcaemia must be corrected before initiation — confirm corrected calcium before referral.'
       : '';
@@ -73,22 +75,31 @@ export function assessInvestigationsNeeded(
         romoSuffix,
       urgency: 'routine',
     });
-  } else if (referralSignals.romosozumabReferralFired) {
-    // v1.36 A2-impl Pre.2 — calcium is present but out of range AND romosozumab referral
-    // active: push a Tier 3 corrected-calcium entry naming romo specifically. Tier 3 because
-    // this is the secondary-cause / specialist-context level, distinct from the routine
-    // pre-treatment Tier 1 baseline calcium check (which only fires when the value is missing).
-    const ca = patient.bloodResults.adjustedCalciumMmol;
+  }
+
+  // v1.36 (TC90) — Tier 3 romo-specific corrected-calcium entry. Fires when romoRef is
+  // active AND the calcium value is EITHER missing OR present-and-out-of-range. Distinct
+  // from the Tier 1 baseline check above (which only fires on missing); this entry is the
+  // pre-referral structured prompt the specialist needs in the referral letter. Both
+  // entries can coexist when calcium is missing — that's intentional (Tier 1 = baseline
+  // pre-treatment; Tier 3 = pre-referral specialist context).
+  if (referralSignals.romosozumabReferralFired) {
+    const ca = caRaw;
     const calciumOutOfRange =
-      ca < BLOOD_RANGES.adjustedCalcium.low || ca > BLOOD_RANGES.adjustedCalcium.high;
-    if (calciumOutOfRange) {
+      !caMissing && (
+        ca! < BLOOD_RANGES.adjustedCalcium.low ||
+        ca! > BLOOD_RANGES.adjustedCalcium.high
+      );
+    if (caMissing || calciumOutOfRange) {
+      const reasonContext = caMissing
+        ? 'Corrected serum calcium not recorded.'
+        : `Corrected serum calcium ${ca} mmol/L is outside the normal range ` +
+          `(${BLOOD_RANGES.adjustedCalcium.low}–${BLOOD_RANGES.adjustedCalcium.high} mmol/L).`;
       needed.push({
         investigation: 'calcium',
         tier: 3,
         reason:
-          `Corrected serum calcium ${ca} mmol/L is outside the normal range ` +
-          `(${BLOOD_RANGES.adjustedCalcium.low}–${BLOOD_RANGES.adjustedCalcium.high} mmol/L). ` +
-          'Romosozumab referral active — hypocalcaemia must be corrected before initiation; ' +
+          `${reasonContext} Romosozumab referral active — hypocalcaemia must be corrected before initiation; ` +
           'hypercalcaemia warrants investigation (primary hyperparathyroidism, malignancy) before referral. ' +
           'Document the corrected value in the referral letter.',
         urgency: 'soon',
