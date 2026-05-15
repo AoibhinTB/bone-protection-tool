@@ -198,9 +198,22 @@ export interface PatientInput {
   secondaryOsteoporosis: SecondaryOsteoporosisCause[];
 
   // FRAX arithmetic adjustment factors (Section 2.2, NOGG 2024 Table 2)
-  type2Diabetes: boolean;             // FRAX underestimates — MOF ×1.2
+  type2Diabetes: boolean;             // FRAX underestimates — MOF ×1.2 (engine-side operational approximation; see v1.39 audit note)
+  /**
+   * v1.39 Round 3 Change 1 — T1DM handling.
+   * Per NOGG 2024 body para y (Evidence level IV): "Although type 1 diabetes carries a
+   * risk of fracture over and above that provided by FRAX, there are yet no empirical
+   * data from which to recommend adjustment. In the meanwhile, the same adjustment can
+   * be used as for type 2 diabetes." Engine applies ×1.2 MOF matching T2DM. Single-
+   * application gate: if both type1Diabetes AND type2Diabetes are true, multiplier
+   * fires ONCE via the T2DM block (NOGG doesn't address compounding explicitly;
+   * single-application is the conservative read).
+   * Engine also OR's with secondaryOsteoporosis.includes('type1_diabetes') for backwards
+   * compatibility with existing UI/data paths that store T1DM in the array.
+   */
+  type1Diabetes: boolean;
   fallsInLastYear: number;            // ≥2 → hip ×1.3
-  parkinsonsDisease: boolean;         // hip ×1.5
+  parkinsonsDisease: boolean;         // hip ×1.5 (engine-side operational approximation; see v1.39 audit note)
   lowerLimbAmputation: boolean;       // NOGG 2024 addition — clinical judgement
   learningDisabilities: boolean;      // NOGG 2024 addition — e.g. Down syndrome
 

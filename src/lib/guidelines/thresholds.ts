@@ -196,13 +196,39 @@ export function applyFraxAdjustments(
     // Medium dose 2.5–7.5: no adjustment (FRAX is accurate at this dose)
   }
 
-  // Type 2 diabetes — FRAX underestimates fracture risk
+  // Type 2 diabetes — ×1.2 MOF uplift.
+  // v1.39 Round 3 Change 4 — attribution updated: this ×1.2 output multiplier is an
+  // engine-side operational approximation, NOT a direct NOGG Table 2 prescription.
+  // NOGG 2024 Table 2 actually prescribes RA-proxy INPUT to FRAX (Leslie 2018) — this
+  // output multiplier has no verifiable primary-source attribution. Multiplier stays in
+  // place pending future RA-proxy alignment round (engine + UX work, tracked separately).
   if (patient.type2Diabetes) {
     mof = mof * 1.20;
     adjustments.push({ factor: 'Type 2 diabetes', multiplier: 1.20, appliedTo: 'MOF' });
   }
 
-  // Falls ≥2 in past year — NOGG Table 2: ×1.30 for BOTH MOF and hip
+  // v1.39 Round 3 Change 1 — Type 1 diabetes.
+  // Per NOGG 2024 body para y (Evidence level IV): "Although type 1 diabetes carries a
+  // risk of fracture over and above that provided by FRAX, there are yet no empirical
+  // data from which to recommend adjustment. In the meanwhile, the same adjustment can
+  // be used as for type 2 diabetes." Engine applies ×1.2 MOF matching T2DM.
+  // Single-application gate: T2DM block fires above first; T1DM block fires only when
+  // T2DM is NOT already set. If both T1DM and T2DM are true (unusual — e.g. LADA
+  // misclassified, or T1DM with steroid-induced secondary diabetes), the multiplier
+  // fires ONCE via the T2DM block above. NOGG doesn't address compounding explicitly;
+  // single-application is the conservative read.
+  // Reads BOTH the new type1Diabetes boolean AND the legacy
+  // secondaryOsteoporosis.includes('type1_diabetes') path for backwards compatibility
+  // with existing UI/data — mirrors the pattern at treatment.ts:780.
+  const hasT1DM =
+    patient.type1Diabetes === true ||
+    patient.secondaryOsteoporosis.includes('type1_diabetes');
+  if (hasT1DM && !patient.type2Diabetes) {
+    mof = mof * 1.20;
+    adjustments.push({ factor: 'Type 1 diabetes', multiplier: 1.20, appliedTo: 'MOF' });
+  }
+
+  // Falls ≥2 in past year — NOGG Table 2: ×1.30 for BOTH MOF and hip.
   if (patient.fallsInLastYear >= 2) {
     mof = mof * 1.30;
     hip = hip * 1.30;
@@ -210,9 +236,14 @@ export function applyFraxAdjustments(
     adjustments.push({ factor: 'Falls ≥2/year', multiplier: 1.30, appliedTo: 'hip' });
   }
 
-  // Parkinson's disease — NOGG Table 2: enter as RA surrogate (affects both MOF and hip).
-  // RA-β derived multipliers approximate to ~×1.30 MOF; we retain the existing ×1.50 hip
-  // (PD increases hip risk beyond the RA-surrogate per NOGG footnote z, Evidence Ib).
+  // Parkinson's disease — ×1.30 MOF / ×1.50 hip.
+  // v1.39 Round 3 Change 4 — attribution updated: these output multipliers are
+  // engine-side operational approximations, NOT direct NOGG Table 2 prescriptions.
+  // NOGG 2024 Table 2 actually prescribes RA-proxy INPUT to FRAX (Schini 2023) — these
+  // output multipliers have no verifiable primary-source attribution. NOGG body para z
+  // explicitly states RA-proxy "only partly accounts for" the residual Parkinson's-
+  // associated fracture risk. The ×1.50 hip in particular has no NOGG citation.
+  // Multipliers stay in place pending future RA-proxy alignment round.
   if (patient.parkinsonsDisease) {
     mof = mof * 1.30;
     hip = hip * 1.50;

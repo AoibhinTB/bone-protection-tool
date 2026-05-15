@@ -79,6 +79,40 @@ export function runClinicalDecision(patient: PatientInput): ClinicalDecision {
     }
   }
 
+  // v1.39 Round 3 Change 2 — Recent MOF imminent-risk caveat.
+  // When FRAX is shown for a patient with a recent fragility fracture (within 24 months),
+  // surface the NOGG §4h / Kanis 2020 caveat that 10-year FRAX may underestimate
+  // near-term imminent risk. NO math change to FRAX itself — informational flag only.
+  // Fires regardless of risk band (low / intermediate / high / very_high) because the
+  // caveat is about the FRAX number's potential underestimate, not about routing.
+  // §3.4 HIGH→VHR re-designation logic already handles the routing dimension separately
+  // via vhr_redesignation_consideration.
+  if (
+    riskStratification.fraxMOFPercent !== null &&
+    patient.recentFractureWithin2Years === true
+  ) {
+    flags.push({
+      id: 'recent_mof_imminent_risk_caveat',
+      severity: 'info',
+      message:
+        '⚠ Recent major osteoporotic fracture within 2 years — 10-year FRAX may underestimate ' +
+        'near-term imminent fracture risk per NOGG §4h / Kanis 2020 (Evidence level Ic). The ' +
+        'imminent-risk uplift varies by patient age, sex, and fracture site (Kanis 2020 Table 3); ' +
+        'NOGG does not specify a single multiplier because the actual adjustment is ' +
+        'patient-specific. This patient is already routed for HIGH→VHR re-designation ' +
+        'consideration via §3.4 modifier list. For an age/sex/site-adjusted probability, refer to ' +
+        'FRAXplus (frax.shef.ac.uk/FRAXplus).',
+      rationale:
+        'NOGG 2024 §4h (page 19) + Kanis 2020 (ref 52). NOGG §4h verbatim: "This effect of recency ' +
+        'of fracture, sometimes termed imminent risk, is also dependent on age, sex and site of ' +
+        'fracture. This complexity is being addressed by the development of optional post-FRAX ' +
+        'algorithms to allow clinicians to explore the potential impact of fracture recency on ' +
+        'the calculated probability of MOF and hip fracture (see Table 2)." Engine surfaces the ' +
+        'caveat without applying a single multiplier (NOGG itself declines to specify one).',
+      source: GUIDELINE_VERSIONS.nogg,
+    });
+  }
+
   // v1.34 — when the no-risk-factor gate has been overridden, surface the NOGG Rec 1 context
   // together with the documentation prompt so both are visible alongside the revealed FRAX.
   if (patient.noRiskFactorOverride && !hasAnyClinicalRiskFactor(patient)) {

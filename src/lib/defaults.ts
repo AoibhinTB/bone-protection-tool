@@ -18,6 +18,7 @@ export const defaultPatient: PatientInput = {
   rheumatoidArthritis: false,
   secondaryOsteoporosis: [],
   type2Diabetes: false,
+  type1Diabetes: false,
   fallsInLastYear: 0,
   parkinsonsDisease: false,
   lowerLimbAmputation: false,

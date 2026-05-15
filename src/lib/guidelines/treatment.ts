@@ -777,7 +777,11 @@ export function generateTreatmentOutput(
     if (patient.fallsInLastYear >= 2) {
       modifiers.push(`recurrent falls (${patient.fallsInLastYear}/year)`);
     }
-    if (patient.type2Diabetes || patient.secondaryOsteoporosis.includes('type1_diabetes')) {
+    if (
+      patient.type2Diabetes ||
+      patient.type1Diabetes === true ||
+      patient.secondaryOsteoporosis.includes('type1_diabetes')
+    ) {
       modifiers.push('diabetes mellitus');
     }
     if (patient.parkinsonsDisease) {
@@ -1019,17 +1023,33 @@ export function generateTreatmentOutput(
   }
 
   // ── v1.22 Step 3 — Specialist initiation vs GP continuation flag ──
-  // For teriparatide / romosozumab specifically. Don't emit a referral
-  // instruction for someone already established on the drug.
-  if (current?.currentlyOn === true && (current.agent === 'teriparatide' || current.agent === 'romosozumab')) {
+  // For teriparatide / romosozumab / abaloparatide. Don't emit a referral instruction
+  // for someone already established on the drug.
+  // v1.39 Round 3 Change 3 — abaloparatide added to the gate (spec v1.38B already
+  // added it to the High-Tech context-flag rule; engine list was missing it).
+  if (current?.currentlyOn === true && (
+    current.agent === 'teriparatide' ||
+    current.agent === 'romosozumab' ||
+    current.agent === 'abaloparatide'
+  )) {
     // v1.28 Step 9 — drug-specific side-effect + monitoring text for shared-care continuation.
-    const sharedCareDetail = current.agent === 'teriparatide'
-      ? 'Side effects to monitor (v1.28): headache, nausea, dizziness, postural hypotension, leg pain, transient serum calcium elevation post-injection (expected). ' +
-        'Caution with moderate renal impairment — monitor eGFR during GP continuation (not just severe impairment as a CI). ' +
-        'Begin planning sequential antiresorptive NOW — prescribe 1 month before final dose so there is zero gap. Failure to follow on negates the BMD gain.'
-      : 'Romosozumab (v1.28): two SC injections of 105 mg each (total 210 mg) monthly for 12 months total. ' +
-        'Monitor for hypocalcaemia, especially in renal impairment. Plan sequential antiresorptive before the 12-month course ends. ' +
-        'Flag any new CV symptoms — small CV signal in ARCH trial subgroup analysis.';
+    // v1.39 Round 3 — abaloparatide branch added (PTH-class side-effect profile + same
+    // sequential antiresorptive mandate as teriparatide; not reimbursed in Ireland —
+    // the separate abaloparatide_not_reimbursed_ireland flag covers the funding caveat).
+    const sharedCareDetail =
+      current.agent === 'teriparatide'
+        ? 'Side effects to monitor (v1.28): headache, nausea, dizziness, postural hypotension, leg pain, transient serum calcium elevation post-injection (expected). ' +
+          'Caution with moderate renal impairment — monitor eGFR during GP continuation (not just severe impairment as a CI). ' +
+          'Begin planning sequential antiresorptive NOW — prescribe 1 month before final dose so there is zero gap. Failure to follow on negates the BMD gain.'
+        : current.agent === 'abaloparatide'
+        ? 'Abaloparatide (v1.39): PTHrP analogue with PTH-class side-effect profile similar to teriparatide ' +
+          '(headache, nausea, dizziness, postural hypotension, transient post-injection serum calcium elevation expected). ' +
+          'Monitor for hypercalcaemia; monitor eGFR. Begin planning sequential antiresorptive NOW — prescribe 1 month before ' +
+          'final dose so there is zero gap. Note: not currently reimbursed in Ireland (no HSE High-Tech listing — private pay ' +
+          'must be confirmed; see abaloparatide_not_reimbursed_ireland flag).'
+        : 'Romosozumab (v1.28): two SC injections of 105 mg each (total 210 mg) monthly for 12 months total. ' +
+          'Monitor for hypocalcaemia, especially in renal impairment. Plan sequential antiresorptive before the 12-month course ends. ' +
+          'Flag any new CV symptoms — small CV signal in ARCH trial subgroup analysis.';
     flags.push({
       id: 'anabolic_gp_shared_care_continue',
       severity: 'info',
