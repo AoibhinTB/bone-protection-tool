@@ -6,6 +6,7 @@ import type { PatientInput, ClinicalDecision, RiskCategory, ReferralRecommendati
 import { assessInvestigationsNeeded } from './assessment';
 import { stratifyRisk, hasAnyClinicalRiskFactor } from './risk';
 import { deriveReferralSignals } from './referralSignals';
+import { applyPreTreatmentSafetyFilters } from './safetyFilters';
 import { generateTreatmentOutput } from './treatment';
 import { generateBloodFlags } from './bloodFlags';
 import { generateRiskFactorsIdentified } from './riskFactorsSummary';
@@ -40,6 +41,14 @@ export function runClinicalDecision(patient: PatientInput): ClinicalDecision {
 
   const { recommendations, flags, referrals, supplements } =
     generateTreatmentOutput(patient, riskCategory, riskStratification);
+
+  // v1.37 Filters 1-5 — structural pre-treatment safety filters (hypoCa + Vit D).
+  // Mutates recommendations in place (tags status/blockReason/unblockAction) and pushes
+  // urgent flags. Single call site applies regardless of which path produced the recipes
+  // (standard recipe / GIOP / early menopause / oesophageal disease / sequencing).
+  // Sources: NOGG 2024 p.29 §a, p.30 §a, p.34 §c (universal hypoCa CI for all
+  // antiresorptives); NOGG Rec 17 Strong (parenteral Vit D pre-condition).
+  applyPreTreatmentSafetyFilters(patient, recommendations, flags);
 
   // Append biochemistry-driven flags (ALP, TSH, calcium)
   flags.push(...generateBloodFlags(patient));

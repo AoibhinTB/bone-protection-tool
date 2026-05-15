@@ -397,6 +397,20 @@ export interface TreatmentRecommendation {
   patientEducation?: PatientEducation;
   /** First-line vs alternative (e.g. ADT: denosumab first, alendronate alternative). Defaults to first-line. */
   priority?: 'first-line' | 'alternative';
+  /**
+   * v1.37 Filters 1-5 (NOGG 2024 p.29/30/34 hypoCa CI + Rec 17 parenteral Vit D).
+   *   'active'  — currently recommendable, no block (default; undefined treated as 'active')
+   *   'blocked' — recommendation withheld pending corrective action (e.g. hypoCa correction,
+   *               Vit D treatment). Entry stays in treatmentRecommendations so UI can show
+   *               "this is what you'd be prescribing once the blocker is resolved".
+   *   'pending' — recommendation withheld pending investigation (e.g. Ca or Vit D not measured).
+   * Blocked/pending entries carry blockReason + unblockAction below.
+   */
+  status?: 'active' | 'blocked' | 'pending';
+  /** Short label naming the blocker — for UI to display alongside the recommendation. */
+  blockReason?: string;
+  /** What the GP needs to do to unblock the recommendation. */
+  unblockAction?: string;
 }
 
 export interface ReferralRecommendation {
