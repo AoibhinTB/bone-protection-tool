@@ -3474,6 +3474,174 @@ function tc100(): TCResult {
   return { name: 'TC100 — F4 missing Vit D parenteral pending block: oral BPs active w/ Rec 17 note + urgent flag', passed: failures.length === 0, failures, decision };
 }
 
+// ═══════════════════════════════════════════════════════════════════════════
+// v1.18 TCs — TC101 + TC102 — Close the F3/F4 vacuous-assertion gap from v1.17
+// At eGFR <35 the engine renally CI's all bisphosphonates → denosumab is the only
+// viable parenteral, forcing it into treatmentRecommendations. Filter F3/F4 then
+// operates on a non-empty subset and the status-tagging assertions are meaningful.
+// ═══════════════════════════════════════════════════════════════════════════
+
+// ─── TC101 ────────────────────────────────────────────────────────────────
+// F3 Vit D <50 parenteral block at low eGFR. 69F LS-osteoporosis (T-score-high path),
+// Vit D 42 insufficient, Ca normal, eGFR 25 (stage 4 CKD). renal_bp_ci block at
+// treatment.ts:1565+ filters out all bisphosphonates, leaving denosumab as the only
+// parenteral candidate — Filter F3 then tags it 'blocked' on a non-empty subset.
+function tc101(): TCResult {
+  const failures: string[] = [];
+  const patient = basePatient({
+    age: 69,
+    sex: 'female',
+    dexaResults: { lumbarSpineTScore: -2.9, totalHipTScore: -2.7, femoralNeckTScore: -2.6, forearmTScore: null },
+    fraxMOFPercent: 22.0,
+    fraxHipPercent: 5.0,
+    fraxCalculatedWithBMD: true,
+    bloodResults: {
+      adjustedCalciumMmol: 2.35,
+      vitaminDNmol: 42,             // insufficient — <50, >25
+      egfr: 25,                     // stage 4 CKD — renally CI's all BPs
+      alp: 80, tshMUL: 2.0, hbGramsPerLitre: 135, esrOrCrp: 'normal',
+    },
+  });
+  const decision = runClinicalDecision(patient);
+
+  check(failures, "riskCategory === 'high' (LS −2.9 fires T-score-high path)",
+    decision.riskStratification.category === 'high',
+    `got ${decision.riskStratification.category}`);
+  check(failures, 'treatmentRecommended === true',
+    decision.treatmentRecommended === true);
+
+  // Sanity check FIRST: denosumab must actually be in recs for status-tagging to be
+  // meaningful (closes the vacuous-assertion gap from TC99).
+  const denoRec = decision.treatmentRecommendations.find(r => r.agent === 'denosumab');
+  check(failures, 'SANITY: denosumab IS in treatmentRecommendations (renal CI to BPs at eGFR 25 → denosumab is the viable parenteral)',
+    !!denoRec,
+    `agents in recs: [${decision.treatmentRecommendations.map(r => r.agent).join(', ')}]`);
+
+  // F3 status-tagging on the non-empty subset.
+  check(failures, "denosumab status === 'blocked' (F3 parenteral block)",
+    denoRec?.status === 'blocked',
+    `got status=${denoRec?.status}`);
+  check(failures, 'denosumab blockReason cites Vit D 42 / below 50',
+    !!denoRec?.blockReason && /vit d/i.test(denoRec.blockReason) &&
+    (/42/.test(denoRec.blockReason) || /below 50/i.test(denoRec.blockReason)));
+  check(failures, 'denosumab unblockAction references Vit D treatment / loading / ≥50',
+    !!denoRec?.unblockAction &&
+    (/treat vit d/i.test(denoRec.unblockAction) || /loading/i.test(denoRec.unblockAction) ||
+     /§4\.3/.test(denoRec.unblockAction) || /≥50/.test(denoRec.unblockAction)));
+
+  // F3 urgent flag with NOGG Rec 17 attribution.
+  const f3Flag = decision.flags.find(f => f.id === 'vitd_parenteral_block');
+  check(failures, 'vitd_parenteral_block flag fires urgent',
+    !!f3Flag && f3Flag.severity === 'urgent');
+  check(failures, 'F3 message cites NOGG + Rec 17',
+    !!f3Flag && /NOGG/i.test(f3Flag.message) &&
+    (/rec 17/i.test(f3Flag.message) || /recommendation 17/i.test(f3Flag.message)));
+
+  // Existing CKD-hypocalcaemia flag fires additively (eGFR <35 per NOGG p.30 §c).
+  check(failures, 'denosumab_ckd_hypocalcaemia fires additively (eGFR <35)',
+    hasFlag(decision, 'denosumab_ckd_hypocalcaemia'));
+
+  // Oral and IV BPs filtered upstream by renal CIs.
+  for (const a of ['alendronate', 'risedronate', 'ibandronate', 'zoledronate'] as const) {
+    check(failures, `${a} NOT in recommendations (renal CI at eGFR 25)`,
+      !hasAgent(decision, a));
+  }
+
+  // Other safety filters do NOT fire.
+  check(failures, 'F1 does NOT fire (Ca replete)',
+    !hasFlag(decision, 'hypocalcaemia_antiresorptive_block'));
+  check(failures, 'F2 does NOT fire (Ca measured)',
+    !hasFlag(decision, 'calcium_unmeasured_antiresorptive_block'));
+  check(failures, 'F4 does NOT fire (Vit D measured)',
+    !hasFlag(decision, 'vitd_unmeasured_parenteral_block'));
+  check(failures, 'two_safety_blockers does NOT fire (Vit D 42 above 25 severe threshold)',
+    !hasFlag(decision, 'two_safety_blockers'));
+
+  return { name: 'TC101 — F3 parenteral block at eGFR 25: denosumab tagged blocked + Rec 17 flag + CKD-hypoCa additive', passed: failures.length === 0, failures, decision };
+}
+
+// ─── TC102 ────────────────────────────────────────────────────────────────
+// F4 missing-Vit-D parenteral pending block at low eGFR. 67F LS-osteoporosis, Vit D
+// null (not measured), Ca normal, eGFR 25. Same renal-CI funnel as TC101 forces
+// denosumab as the parenteral candidate; Filter F4 tags it 'pending'.
+function tc102(): TCResult {
+  const failures: string[] = [];
+  const patient = basePatient({
+    age: 67,
+    sex: 'female',
+    dexaResults: { lumbarSpineTScore: -2.7, totalHipTScore: -2.6, femoralNeckTScore: -2.5, forearmTScore: null },
+    fraxMOFPercent: 20.0,
+    fraxHipPercent: 4.0,
+    fraxCalculatedWithBMD: true,
+    bloodResults: {
+      adjustedCalciumMmol: 2.32,
+      vitaminDNmol: null,           // MISSING
+      egfr: 25,                     // stage 4 CKD
+      alp: 80, tshMUL: 2.0, hbGramsPerLitre: 135, esrOrCrp: 'normal',
+    },
+  });
+  const decision = runClinicalDecision(patient);
+
+  check(failures, "riskCategory === 'high'",
+    decision.riskStratification.category === 'high',
+    `got ${decision.riskStratification.category}`);
+  check(failures, 'treatmentRecommended === true',
+    decision.treatmentRecommended === true);
+
+  // Sanity check FIRST.
+  const denoRec = decision.treatmentRecommendations.find(r => r.agent === 'denosumab');
+  check(failures, 'SANITY: denosumab IS in treatmentRecommendations',
+    !!denoRec,
+    `agents in recs: [${decision.treatmentRecommendations.map(r => r.agent).join(', ')}]`);
+
+  // F4 status-tagging.
+  check(failures, "denosumab status === 'pending' (F4 missing-Vit-D pending block)",
+    denoRec?.status === 'pending',
+    `got status=${denoRec?.status}`);
+  check(failures, 'denosumab blockReason references missing Vit D',
+    !!denoRec?.blockReason &&
+    (/not yet measured/i.test(denoRec.blockReason) || /require vit d/i.test(denoRec.blockReason)));
+  check(failures, 'denosumab unblockAction references Check Vit D / Tier 1 / ≥50',
+    !!denoRec?.unblockAction &&
+    (/check vit d/i.test(denoRec.unblockAction) || /tier 1/i.test(denoRec.unblockAction) ||
+     /≥50/.test(denoRec.unblockAction)));
+
+  // F4 urgent flag with NOGG Rec 17 attribution.
+  const f4Flag = decision.flags.find(f => f.id === 'vitd_unmeasured_parenteral_block');
+  check(failures, 'vitd_unmeasured_parenteral_block flag fires urgent',
+    !!f4Flag && f4Flag.severity === 'urgent');
+  check(failures, 'F4 message cites NOGG Rec 17',
+    !!f4Flag &&
+    (/rec 17/i.test(f4Flag.message) || /recommendation 17/i.test(f4Flag.message)));
+
+  // CKD-hypocalcaemia flag fires additively (eGFR <35).
+  check(failures, 'denosumab_ckd_hypocalcaemia fires additively (eGFR <35)',
+    hasFlag(decision, 'denosumab_ckd_hypocalcaemia'));
+
+  // Tier 1 vitamin_d investigation entry fires.
+  const tier1VitD = decision.investigationsNeeded.find(i => i.investigation === 'vitamin_d' && i.tier === 1);
+  check(failures, 'Tier 1 vitamin_d entry fires (missing Vit D)',
+    !!tier1VitD);
+
+  // Oral and IV BPs filtered upstream by renal CIs.
+  for (const a of ['alendronate', 'risedronate', 'ibandronate', 'zoledronate'] as const) {
+    check(failures, `${a} NOT in recommendations (renal CI at eGFR 25)`,
+      !hasAgent(decision, a));
+  }
+
+  // Other safety filters do NOT fire.
+  check(failures, 'F1 does NOT fire (Ca replete)',
+    !hasFlag(decision, 'hypocalcaemia_antiresorptive_block'));
+  check(failures, 'F2 does NOT fire (Ca measured)',
+    !hasFlag(decision, 'calcium_unmeasured_antiresorptive_block'));
+  check(failures, 'F3 does NOT fire (Vit D not measured — F3 is for measured-and-low)',
+    !hasFlag(decision, 'vitd_parenteral_block'));
+  check(failures, 'two_safety_blockers does NOT fire',
+    !hasFlag(decision, 'two_safety_blockers'));
+
+  return { name: 'TC102 — F4 parenteral pending at eGFR 25: denosumab tagged pending + Rec 17 flag + Tier 1 vitamin_d', passed: failures.length === 0, failures, decision };
+}
+
 // ─── Runner ───────────────────────────────────────────────────────────────
 
 const TCs: Array<() => TCResult> = [
@@ -3504,6 +3672,8 @@ const TCs: Array<() => TCResult> = [
   tc94, tc95,
   // v1.17 (test-doc v1.17) — lock pre-treatment safety filters F1-F5 (hypoCa + Vit D)
   tc96, tc97, tc98, tc99, tc100,
+  // v1.18 (test-doc v1.18) — close F3/F4 vacuous-assertion gap from v1.17 via eGFR 25
+  tc101, tc102,
 ];
 
 const results = TCs.map(fn => fn());
