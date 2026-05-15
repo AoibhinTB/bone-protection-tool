@@ -3077,6 +3077,403 @@ function tc95(): TCResult {
   return { name: 'TC95 — VHR-6 age-specific VHRT: 55F MOF 17% (≥ 15.2%) → very_high', passed: failures.length === 0, failures, decision };
 }
 
+// ═══════════════════════════════════════════════════════════════════════════
+// v1.17 TCs — TC96–TC100 — Pre-treatment safety filters (F1–F5)
+// Locks the safetyFilters.ts engine impl (NOGG 2024 p.29/30/34 + Rec 17 Strong).
+// ═══════════════════════════════════════════════════════════════════════════
+
+// All five TCs reference these antiresorptive lists. Ibandronate has both oral and IV
+// preparations sharing agent='ibandronate' — distinguish via dose.includes('IV') when
+// the oral-vs-parenteral distinction matters.
+const ANTIRESORPTIVE_AGENTS: ReadonlyArray<TreatmentAgent> = [
+  'alendronate', 'risedronate', 'ibandronate', 'zoledronate', 'denosumab', 'romosozumab',
+];
+
+function isOralBP(rec: { agent: TreatmentAgent; dose: string }): boolean {
+  if (rec.agent === 'alendronate' || rec.agent === 'risedronate') return true;
+  if (rec.agent === 'ibandronate' && !rec.dose.includes('IV')) return true;
+  return false;
+}
+
+function isParenteralAR(rec: { agent: TreatmentAgent; dose: string }): boolean {
+  if (rec.agent === 'denosumab' || rec.agent === 'romosozumab' || rec.agent === 'zoledronate') return true;
+  if (rec.agent === 'ibandronate' && rec.dose.includes('IV')) return true;
+  return false;
+}
+
+// ─── TC96 ─────────────────────────────────────────────────────────────────
+// Filter F1 — universal hypocalcaemia block (NOGG p.29 §a / p.30 §a / p.34 §c).
+// 72F high-risk (T-score LS −3.0 fires T-score-high path). Ca 2.05 → ALL antiresorptive
+// entries in treatmentRecommendations tagged 'blocked'. Vit D 65 replete → no Vit D
+// filter. Combined safety gate doesn't fire (Vit D replete, only hypoCa).
+function tc96(): TCResult {
+  const failures: string[] = [];
+  const patient = basePatient({
+    age: 72,
+    sex: 'female',
+    dexaResults: { lumbarSpineTScore: -3.0, totalHipTScore: -2.7, femoralNeckTScore: -2.6, forearmTScore: null },
+    fraxMOFPercent: 22.0,
+    fraxHipPercent: 5.0,
+    fraxCalculatedWithBMD: true,
+    bloodResults: {
+      adjustedCalciumMmol: 2.05, // hypoCa
+      vitaminDNmol: 65,          // replete
+      egfr: 62,                  // normal
+      alp: 80, tshMUL: 2.0, hbGramsPerLitre: 135, esrOrCrp: 'normal',
+    },
+  });
+  const decision = runClinicalDecision(patient);
+
+  check(failures, "riskCategory === 'high' (LS −3.0 hits T-score-high path; no VHR triggers)",
+    decision.riskStratification.category === 'high',
+    `got ${decision.riskStratification.category}`);
+  check(failures, 'treatmentRecommended === true',
+    decision.treatmentRecommended === true);
+
+  // Every antiresorptive in recs tagged 'blocked' with citation of Ca value.
+  const antiresorptiveRecs = decision.treatmentRecommendations.filter(r => ANTIRESORPTIVE_AGENTS.includes(r.agent));
+  check(failures, 'at least one antiresorptive in recommendations',
+    antiresorptiveRecs.length > 0,
+    `got ${antiresorptiveRecs.length}`);
+  for (const rec of antiresorptiveRecs) {
+    check(failures, `${rec.agent} status === 'blocked'`,
+      rec.status === 'blocked',
+      `got status=${rec.status}`);
+    check(failures, `${rec.agent} blockReason cites 2.05 mmol/L below 2.10`,
+      !!rec.blockReason && rec.blockReason.includes('2.05') && rec.blockReason.includes('below 2.10'));
+    check(failures, `${rec.agent} unblockAction references "Correct hypocalcaemia"`,
+      !!rec.unblockAction && /correct hypocalcaemia/i.test(rec.unblockAction));
+  }
+
+  // F1 flag fires urgent with NOGG attribution + Vit D loading-dose guidance.
+  const f1Flag = decision.flags.find(f => f.id === 'hypocalcaemia_antiresorptive_block');
+  check(failures, 'hypocalcaemia_antiresorptive_block flag fires',
+    !!f1Flag);
+  check(failures, 'F1 flag severity urgent',
+    f1Flag?.severity === 'urgent');
+  check(failures, 'F1 message cites NOGG 2024 + one of p.29/p.30/p.34',
+    !!f1Flag && /NOGG 2024/i.test(f1Flag.message) && /(p\.29|p\.30|p\.34)/i.test(f1Flag.message));
+  check(failures, 'F1 message references Vit D loading dose (100,000 or 300,000)',
+    !!f1Flag && /(100,?000|300,?000)/i.test(f1Flag.message));
+
+  // No anabolic in recommendations (anabolics surface via referrals only). Verify that
+  // any teri/abalo entry that did slip in is NOT tagged 'blocked' by F1.
+  const anabolicsInRecs = decision.treatmentRecommendations.filter(
+    r => r.agent === 'teriparatide' || r.agent === 'abaloparatide',
+  );
+  check(failures, "anabolic entries (if any) NOT tagged 'blocked' by F1",
+    anabolicsInRecs.every(r => r.status !== 'blocked'));
+
+  // Existing bloodFlags hypocalcaemia narrative warning continues to fire (additive).
+  check(failures, 'bloodFlags hypocalcaemia narrative flag continues to fire (additive)',
+    hasFlag(decision, 'hypocalcaemia') &&
+    !!decision.flags.find(f => f.id === 'hypocalcaemia' && f.severity === 'urgent'));
+
+  // Combined safety gate does NOT fire (Vit D replete).
+  check(failures, 'two_safety_blockers does NOT fire (Vit D replete)',
+    !hasFlag(decision, 'two_safety_blockers'));
+
+  // Tier 1 missing-Ca entry does NOT fire (Ca IS measured, just out of range).
+  const tier1Ca = decision.investigationsNeeded.find(i => i.investigation === 'calcium' && i.tier === 1);
+  check(failures, 'Tier 1 calcium entry NOT pushed (Ca measured)',
+    !tier1Ca);
+
+  return { name: 'TC96 — F1 universal hypoCa block: every antiresorptive tagged blocked + NOGG-attributed urgent flag', passed: failures.length === 0, failures, decision };
+}
+
+// ─── TC97 ─────────────────────────────────────────────────────────────────
+// Filter F2 — missing-calcium pending block (spec v1.37 §4 + §5.3).
+// 68F high-risk. Ca null → ALL antiresorptive entries tagged 'pending'. Vit D replete.
+function tc97(): TCResult {
+  const failures: string[] = [];
+  const patient = basePatient({
+    age: 68,
+    sex: 'female',
+    dexaResults: { lumbarSpineTScore: -2.8, totalHipTScore: -2.6, femoralNeckTScore: -2.5, forearmTScore: null },
+    fraxMOFPercent: 20.0,
+    fraxHipPercent: 4.5,
+    fraxCalculatedWithBMD: true,
+    bloodResults: {
+      adjustedCalciumMmol: null, // missing
+      vitaminDNmol: 62,          // replete
+      egfr: 70,                  // normal
+      alp: 80, tshMUL: 2.0, hbGramsPerLitre: 135, esrOrCrp: 'normal',
+    },
+  });
+  const decision = runClinicalDecision(patient);
+
+  check(failures, "riskCategory === 'high'",
+    decision.riskStratification.category === 'high',
+    `got ${decision.riskStratification.category}`);
+  check(failures, 'treatmentRecommended === true',
+    decision.treatmentRecommended === true);
+
+  // Every antiresorptive tagged 'pending'.
+  const antiresorptiveRecs = decision.treatmentRecommendations.filter(r => ANTIRESORPTIVE_AGENTS.includes(r.agent));
+  check(failures, 'at least one antiresorptive in recommendations',
+    antiresorptiveRecs.length > 0);
+  for (const rec of antiresorptiveRecs) {
+    check(failures, `${rec.agent} status === 'pending'`,
+      rec.status === 'pending');
+    check(failures, `${rec.agent} blockReason cites missing-Ca`,
+      !!rec.blockReason && (/not yet measured/i.test(rec.blockReason) || /pre-treatment corrected calcium/i.test(rec.blockReason)));
+    check(failures, `${rec.agent} unblockAction references Check Ca / Tier 1`,
+      !!rec.unblockAction && (/check corrected calcium/i.test(rec.unblockAction) || /tier 1/i.test(rec.unblockAction)));
+  }
+
+  // F2 flag fires urgent.
+  const f2Flag = decision.flags.find(f => f.id === 'calcium_unmeasured_antiresorptive_block');
+  check(failures, 'calcium_unmeasured_antiresorptive_block fires urgent',
+    !!f2Flag && f2Flag.severity === 'urgent');
+
+  // Tier 1 missing-calcium investigation entry still fires (existing behaviour).
+  const tier1Ca = decision.investigationsNeeded.find(i => i.investigation === 'calcium' && i.tier === 1);
+  check(failures, 'Tier 1 calcium entry fires (existing missing-Ca path)',
+    !!tier1Ca);
+
+  // F1 / F3 / F4 do NOT fire.
+  check(failures, 'F1 hypocalcaemia_antiresorptive_block does NOT fire',
+    !hasFlag(decision, 'hypocalcaemia_antiresorptive_block'));
+  check(failures, 'F3 vitd_parenteral_block does NOT fire (Vit D replete)',
+    !hasFlag(decision, 'vitd_parenteral_block'));
+  check(failures, 'F4 vitd_unmeasured_parenteral_block does NOT fire (Vit D measured)',
+    !hasFlag(decision, 'vitd_unmeasured_parenteral_block'));
+
+  // Planned treatment preserved with pending tag.
+  check(failures, 'treatmentRecommendations is non-empty (planned treatment preserved)',
+    decision.treatmentRecommendations.length > 0);
+
+  return { name: 'TC97 — F2 missing-Ca pending block: every antiresorptive tagged pending + urgent flag', passed: failures.length === 0, failures, decision };
+}
+
+// ─── TC98 ─────────────────────────────────────────────────────────────────
+// Filter F5 — continuation-context hypoCa for on-denosumab patients.
+// 74F currently on denosumab 18mo (next dose due at 6mo from last). New hypoCa on routine
+// pre-dose bloods. VHR via prior vert fx within 2y. F1 also fires (universal hypoCa); F5
+// adds the continuation-specific "HOLD next dose" action. Vit D replete + Ca measured →
+// F3/F4 don't fire.
+function tc98(): TCResult {
+  const failures: string[] = [];
+  const patient = basePatient({
+    age: 74,
+    sex: 'female',
+    priorFragilityFracture: true,
+    priorVertebralFracture: true,
+    recentVertebralFractureYears: 2, // VHR-1 trigger (≤ 2y)
+    recentFractureWithin2Years: false, // pre-treatment vert fx; not a new fracture in last 24mo
+    numberOfPriorFractures: 1,
+    numberOfVertebralFractures: 1,
+    dexaResults: { lumbarSpineTScore: -2.8, totalHipTScore: -2.7, femoralNeckTScore: -2.6, forearmTScore: null },
+    fraxMOFPercent: 25.0,
+    fraxHipPercent: 6.0,
+    fraxCalculatedWithBMD: true,
+    bloodResults: {
+      adjustedCalciumMmol: 2.05, // new hypoCa on routine monitoring
+      vitaminDNmol: 60,           // replete
+      egfr: 55,                   // CKD stage 3a, not severe
+      alp: 80, tshMUL: 2.0, hbGramsPerLitre: 135, esrOrCrp: 'normal',
+    },
+    currentTreatment: {
+      agent: 'denosumab',
+      durationMonths: 18,
+      reasonStopped: null,
+      currentlyOn: true,
+      monthsSinceLastDose: 5, // approaching 6-month next dose
+    },
+  });
+  const decision = runClinicalDecision(patient);
+
+  // F5 flag fires with severity urgent and distinct id.
+  const f5Flag = decision.flags.find(f => f.id === 'denosumab_continuation_hypocalcaemia_hold');
+  check(failures, 'denosumab_continuation_hypocalcaemia_hold flag fires',
+    !!f5Flag);
+  check(failures, 'F5 severity urgent',
+    f5Flag?.severity === 'urgent');
+  check(failures, 'F5 message contains "HOLD next denosumab dose"',
+    !!f5Flag && /HOLD next denosumab dose/i.test(f5Flag.message));
+  check(failures, 'F5 message references 7-month rebound risk window',
+    !!f5Flag && /7 months/i.test(f5Flag.message) && /rebound/i.test(f5Flag.message));
+
+  // Generic bloodFlags hypocalcaemia warning continues to fire alongside (additive).
+  check(failures, 'bloodFlags hypocalcaemia urgent flag continues to fire (additive)',
+    !!decision.flags.find(f => f.id === 'hypocalcaemia' && f.severity === 'urgent'));
+
+  // Denosumab in recommendations tagged blocked via F1; F5 overrides unblockAction.
+  const denoRec = decision.treatmentRecommendations.find(r => r.agent === 'denosumab');
+  check(failures, 'denosumab in treatmentRecommendations',
+    !!denoRec);
+  check(failures, "denosumab status === 'blocked'",
+    denoRec?.status === 'blocked');
+  check(failures, 'denosumab unblockAction overridden to HOLD-next-dose wording (F5)',
+    !!denoRec?.unblockAction && /HOLD next denosumab dose/i.test(denoRec.unblockAction));
+  check(failures, "denosumab recipe contraindications retain 'Uncorrected hypocalcaemia' entry (regression check)",
+    !!denoRec?.contraindications.some(s => /uncorrected hypocalcaemia/i.test(s)));
+
+  // F1 also fires (combined with F5).
+  check(failures, 'F1 hypocalcaemia_antiresorptive_block also fires (combined)',
+    hasFlag(decision, 'hypocalcaemia_antiresorptive_block'));
+
+  // F2, F3 do NOT fire.
+  check(failures, 'F2 calcium_unmeasured_antiresorptive_block does NOT fire (Ca measured)',
+    !hasFlag(decision, 'calcium_unmeasured_antiresorptive_block'));
+  check(failures, 'F3 vitd_parenteral_block does NOT fire (Vit D replete)',
+    !hasFlag(decision, 'vitd_parenteral_block'));
+
+  // treatmentRecommended === true — recommendation preserved (blocked tag, not removed).
+  check(failures, 'treatmentRecommended === true (recipe preserved with blocked tag)',
+    decision.treatmentRecommended === true);
+
+  return { name: 'TC98 — F5 continuation hypoCa: HOLD-next-dose flag + denosumab blocked w/ continuation-specific action', passed: failures.length === 0, failures, decision };
+}
+
+// ─── TC99 ─────────────────────────────────────────────────────────────────
+// Filter F3 — Vit D <50 parenteral block (NOGG Rec 17 Strong).
+// 69F high-risk (LS −2.9). Vit D 42 < 50, Ca normal, eGFR 68 normal. Engine pushes oral
+// BPs only (eGFR normal). Parenteral block flag fires; oral BPs continue 'active' with
+// the Rec 17 supplementation note appended to monitoring.
+function tc99(): TCResult {
+  const failures: string[] = [];
+  const patient = basePatient({
+    age: 69,
+    sex: 'female',
+    dexaResults: { lumbarSpineTScore: -2.9, totalHipTScore: -2.7, femoralNeckTScore: -2.6, forearmTScore: null },
+    fraxMOFPercent: 21.0,
+    fraxHipPercent: 4.8,
+    fraxCalculatedWithBMD: true,
+    bloodResults: {
+      adjustedCalciumMmol: 2.35, // normal
+      vitaminDNmol: 42,           // insufficient (<50, >25)
+      egfr: 68,                   // normal
+      alp: 80, tshMUL: 2.0, hbGramsPerLitre: 135, esrOrCrp: 'normal',
+    },
+  });
+  const decision = runClinicalDecision(patient);
+
+  check(failures, "riskCategory === 'high'",
+    decision.riskStratification.category === 'high',
+    `got ${decision.riskStratification.category}`);
+  check(failures, 'treatmentRecommended === true',
+    decision.treatmentRecommended === true);
+
+  // Parenteral entries (if any) tagged 'blocked'. With eGFR 68 there are no parenteral
+  // recipes pushed — the engine's first-line for normal eGFR is oral BPs. The assertion
+  // is vacuously true; the flag firing is the meaningful test.
+  const parenterals = decision.treatmentRecommendations.filter(isParenteralAR);
+  for (const rec of parenterals) {
+    check(failures, `${rec.agent} (parenteral) status === 'blocked'`,
+      rec.status === 'blocked');
+    check(failures, `${rec.agent} blockReason cites Vit D 42 / below 50`,
+      !!rec.blockReason && /vit d/i.test(rec.blockReason) && (/42/.test(rec.blockReason) || /below 50/i.test(rec.blockReason)));
+    check(failures, `${rec.agent} unblockAction references Vit D treatment / spec §4.3`,
+      !!rec.unblockAction && (/treat vit d/i.test(rec.unblockAction) || /loading/i.test(rec.unblockAction) || /§4\.3/.test(rec.unblockAction)));
+  }
+
+  // Oral BPs tagged 'active' (or undefined — both mean active) with Rec 17 monitoring note.
+  const oralBPs = decision.treatmentRecommendations.filter(isOralBP);
+  check(failures, 'at least one oral BP in recommendations (eGFR normal)',
+    oralBPs.length > 0);
+  for (const rec of oralBPs) {
+    check(failures, `${rec.agent} (oral BP) status active (or undefined)`,
+      rec.status === undefined || rec.status === 'active');
+    const monitoringText = rec.monitoring.join(' | ');
+    check(failures, `${rec.agent} monitoring contains NOGG Rec 17 + concurrent-supplementation note`,
+      /rec 17/i.test(monitoringText) && (/alongside/i.test(monitoringText) || /concurrent/i.test(monitoringText) || /supplement/i.test(monitoringText)));
+  }
+
+  // F3 flag fires urgent.
+  const f3Flag = decision.flags.find(f => f.id === 'vitd_parenteral_block');
+  check(failures, 'vitd_parenteral_block flag fires urgent',
+    !!f3Flag && f3Flag.severity === 'urgent');
+  check(failures, 'F3 message cites NOGG + Rec 17',
+    !!f3Flag && /NOGG/i.test(f3Flag.message) && /(rec 17|recommendation 17)/i.test(f3Flag.message));
+  check(failures, 'F3 message mentions oral BPs remain available',
+    !!f3Flag && /oral/i.test(f3Flag.message) && /(may be initiated|alongside|supplementation)/i.test(f3Flag.message));
+
+  // Other filters NOT firing.
+  check(failures, 'F1 does NOT fire (Ca replete)',
+    !hasFlag(decision, 'hypocalcaemia_antiresorptive_block'));
+  check(failures, 'F2 does NOT fire (Ca measured)',
+    !hasFlag(decision, 'calcium_unmeasured_antiresorptive_block'));
+  check(failures, 'F4 does NOT fire (Vit D measured)',
+    !hasFlag(decision, 'vitd_unmeasured_parenteral_block'));
+  check(failures, 'two_safety_blockers does NOT fire (Vit D 42 above 25 severe threshold)',
+    !hasFlag(decision, 'two_safety_blockers'));
+
+  return { name: 'TC99 — F3 Vit D <50 parenteral block: oral BPs continue active w/ Rec 17 note + urgent flag', passed: failures.length === 0, failures, decision };
+}
+
+// ─── TC100 ────────────────────────────────────────────────────────────────
+// Filter F4 — missing Vit D parenteral pending block (NOGG Rec 17 Strong).
+// 67F high-risk (LS −2.7). Vit D null, Ca normal, eGFR 72 normal. Engine pushes oral
+// BPs only. F4 flag fires; oral BPs continue 'active' with measure-and-supplement note.
+function tc100(): TCResult {
+  const failures: string[] = [];
+  const patient = basePatient({
+    age: 67,
+    sex: 'female',
+    dexaResults: { lumbarSpineTScore: -2.7, totalHipTScore: -2.6, femoralNeckTScore: -2.5, forearmTScore: null },
+    fraxMOFPercent: 19.5,
+    fraxHipPercent: 4.0,
+    fraxCalculatedWithBMD: true,
+    bloodResults: {
+      adjustedCalciumMmol: 2.32, // normal
+      vitaminDNmol: null,         // missing
+      egfr: 72,                   // normal
+      alp: 80, tshMUL: 2.0, hbGramsPerLitre: 135, esrOrCrp: 'normal',
+    },
+  });
+  const decision = runClinicalDecision(patient);
+
+  check(failures, "riskCategory === 'high'",
+    decision.riskStratification.category === 'high',
+    `got ${decision.riskStratification.category}`);
+
+  // Parenteral entries (if any) tagged 'pending'. Vacuous when no parenterals in recs.
+  const parenterals = decision.treatmentRecommendations.filter(isParenteralAR);
+  for (const rec of parenterals) {
+    check(failures, `${rec.agent} (parenteral) status === 'pending'`,
+      rec.status === 'pending');
+    check(failures, `${rec.agent} blockReason references Vit D not measured`,
+      !!rec.blockReason && (/not yet measured/i.test(rec.blockReason) || /require vit d/i.test(rec.blockReason)));
+  }
+
+  // Oral BPs active with Rec 17 measure-and-supplement note.
+  const oralBPs = decision.treatmentRecommendations.filter(isOralBP);
+  check(failures, 'at least one oral BP in recommendations',
+    oralBPs.length > 0);
+  for (const rec of oralBPs) {
+    check(failures, `${rec.agent} status active`,
+      rec.status === undefined || rec.status === 'active');
+    const monitoringText = rec.monitoring.join(' | ');
+    check(failures, `${rec.agent} monitoring contains Rec 17 + concurrent supplementation`,
+      /rec 17/i.test(monitoringText) && /(alongside|concurrent|supplement)/i.test(monitoringText));
+  }
+
+  // F4 flag fires urgent + Rec 17 attribution.
+  const f4Flag = decision.flags.find(f => f.id === 'vitd_unmeasured_parenteral_block');
+  check(failures, 'vitd_unmeasured_parenteral_block flag fires urgent',
+    !!f4Flag && f4Flag.severity === 'urgent');
+  check(failures, 'F4 message cites NOGG Recommendation 17',
+    !!f4Flag && /(rec 17|recommendation 17)/i.test(f4Flag.message));
+
+  // Tier 1 Vit D investigation entry fires (existing missing-Vit-D path).
+  const tier1VitD = decision.investigationsNeeded.find(i => i.investigation === 'vitamin_d' && i.tier === 1);
+  check(failures, 'Tier 1 vitamin_d entry fires',
+    !!tier1VitD);
+
+  // Other filters NOT firing.
+  check(failures, 'F1 does NOT fire (Ca replete)',
+    !hasFlag(decision, 'hypocalcaemia_antiresorptive_block'));
+  check(failures, 'F2 does NOT fire (Ca measured)',
+    !hasFlag(decision, 'calcium_unmeasured_antiresorptive_block'));
+  check(failures, 'F3 does NOT fire (Vit D not measured — distinct from low-measured)',
+    !hasFlag(decision, 'vitd_parenteral_block'));
+  check(failures, 'two_safety_blockers does NOT fire',
+    !hasFlag(decision, 'two_safety_blockers'));
+
+  return { name: 'TC100 — F4 missing Vit D parenteral pending block: oral BPs active w/ Rec 17 note + urgent flag', passed: failures.length === 0, failures, decision };
+}
+
 // ─── Runner ───────────────────────────────────────────────────────────────
 
 const TCs: Array<() => TCResult> = [
@@ -3105,6 +3502,8 @@ const TCs: Array<() => TCResult> = [
   tc89, tc90, tc91, tc92, tc93,
   // v1.15 (test-doc v1.15) — lock VHR classifier audit fixes B1 + B3
   tc94, tc95,
+  // v1.17 (test-doc v1.17) — lock pre-treatment safety filters F1-F5 (hypoCa + Vit D)
+  tc96, tc97, tc98, tc99, tc100,
 ];
 
 const results = TCs.map(fn => fn());
