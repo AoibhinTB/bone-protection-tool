@@ -12,7 +12,7 @@ export const SECONDARY_CAUSE_LABELS: Record<SecondaryOsteoporosisCause, string> 
   celiac_disease:           'Coeliac disease',
   cushing_syndrome:         "Cushing's syndrome",
   hyperparathyroidism:      'Hyperparathyroidism',
-  antiepileptic_use:        'Antiepileptic drugs (enzyme-inducing: phenytoin, carbamazepine, valproate)',
+  antiepileptic_use:        'Antiepileptic drugs (enzyme-inducing: phenytoin, carbamazepine)',
   copd:                     'COPD (often combined with steroid use)',
   chronic_kidney_disease:   'Chronic kidney disease (CKD 3a–5, non-dialysis)',
 };

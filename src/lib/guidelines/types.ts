@@ -44,7 +44,7 @@ export type SecondaryOsteoporosisCause =
   | 'celiac_disease'
   | 'cushing_syndrome'
   | 'hyperparathyroidism'
-  | 'antiepileptic_use'              // enzyme-inducing: phenytoin, carbamazepine, valproate
+  | 'antiepileptic_use'              // enzyme-inducing: phenytoin, carbamazepine
   | 'copd'                           // often combined with steroid use
   | 'chronic_kidney_disease';        // CKD 3a–5 / non-dialysis (NOGG Table 1)
 

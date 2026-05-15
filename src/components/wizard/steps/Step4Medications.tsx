@@ -147,12 +147,15 @@ export function Step4Medications({ data, onChange }: Props) {
         />
       </Field>
       {/* Anti-epileptics moved from Step 3 — NOGG 2024 Table 4 lists enzyme-
-          inducing AEDs (phenytoin, carbamazepine, valproate) as a medication-
-          class case-finder. Engine behaviour unchanged: still flagged via
-          secondaryOsteoporosis array membership of 'antiepileptic_use'. */}
+          inducing AEDs (phenytoin, carbamazepine) as a medication-class
+          case-finder. Valproate is NOT enzyme-inducing (it's a hepatic enzyme
+          inhibitor) and was removed from the list — see commit dropping
+          valproate from the displayed enumeration. Engine behaviour unchanged:
+          still flagged via secondaryOsteoporosis array membership of
+          'antiepileptic_use'. */}
       <Field
         label="Enzyme-inducing anti-epileptics"
-        hint="Phenytoin, carbamazepine, valproate — NOGG 2024 Table 4 medication-class case-finder for osteoporosis."
+        hint="Phenytoin, carbamazepine — NOGG 2024 Table 4 medication-class case-finder for osteoporosis."
       >
         <YesNo
           value={data.secondaryOsteoporosis.includes('antiepileptic_use')}
