@@ -107,6 +107,48 @@ function AlertCard({ flag }: { flag: ClinicalFlag }) {
   );
 }
 
+// ─── Hoisted SpecialistReferralBanner ─────────────────────────────────────
+// Visually distinct from AlertCard (full-bleed red, large heading-inline-with-
+// badge) to function as a top-of-page headline for VHR patients. Rationale
+// collapsed by default behind a "▾ show rationale" toggle matching AlertCard's
+// pattern, so the banner reads as headline + action + source at a glance.
+
+function SpecialistReferralBanner({ flag }: { flag: ClinicalFlag }) {
+  const [showRationale, setShowRationale] = useState(false);
+  return (
+    <section className="mb-2 sm:mb-3">
+      <div className="bg-red-600 text-white rounded-lg p-5 sm:p-6 shadow-lg ring-4 ring-red-200">
+        <div className="flex items-center gap-3 mb-3">
+          <span className="text-[11px] sm:text-xs font-bold uppercase tracking-wider px-2.5 py-1 rounded bg-white text-red-700">
+            Urgent
+          </span>
+          <h2 className="text-xl sm:text-2xl font-extrabold leading-tight">
+            Specialist referral required
+          </h2>
+        </div>
+        <p className="text-base sm:text-lg font-semibold leading-snug mb-3">
+          {flag.message}
+        </p>
+        <div className="flex items-center gap-3 flex-wrap">
+          <p className="text-[11px] text-red-100 opacity-80">{sourceText(flag)}</p>
+          <button
+            type="button"
+            onClick={() => setShowRationale((s) => !s)}
+            className="text-[11px] font-medium text-red-100 hover:text-white underline underline-offset-2"
+          >
+            {showRationale ? '▴ hide rationale' : '▾ show rationale'}
+          </button>
+        </div>
+        {showRationale && (
+          <div className="mt-3 pt-3 border-t border-red-300/40">
+            <p className="text-sm text-red-50 opacity-95 leading-snug">{flag.rationale}</p>
+          </div>
+        )}
+      </div>
+    </section>
+  );
+}
+
 function Disclosure({
   label,
   children,
@@ -738,28 +780,7 @@ export function ResultsView({ result, patient, onReset, onBack, onRevealNoRfFrax
         const specRefFlag = sortedFlags.find(
           (f) => f.id === 'vhr_specialist_referral',
         );
-        if (!specRefFlag) return null;
-        return (
-          <section className="mb-2 sm:mb-3">
-            <div className="bg-red-600 text-white rounded-lg p-5 sm:p-6 shadow-lg ring-4 ring-red-200">
-              <div className="flex items-center gap-3 mb-3">
-                <span className="text-[11px] sm:text-xs font-bold uppercase tracking-wider px-2.5 py-1 rounded bg-white text-red-700">
-                  Urgent
-                </span>
-                <h2 className="text-xl sm:text-2xl font-extrabold leading-tight">
-                  Specialist referral required
-                </h2>
-              </div>
-              <p className="text-base sm:text-lg font-semibold leading-snug mb-3">
-                {specRefFlag.message}
-              </p>
-              <p className="text-sm text-red-50 opacity-95 leading-snug mb-3">
-                {specRefFlag.rationale}
-              </p>
-              <p className="text-[11px] text-red-100 opacity-80">{sourceText(specRefFlag)}</p>
-            </div>
-          </section>
-        );
+        return specRefFlag ? <SpecialistReferralBanner flag={specRefFlag} /> : null;
       })()}
 
       {/* Traffic light banner */}
