@@ -424,6 +424,14 @@ export interface TreatmentRecommendation {
   blockReason?: string;
   /** What the GP needs to do to unblock the recommendation. */
   unblockAction?: string;
+  /**
+   * Role of this recommendation in the overall treatment plan.
+   *   'primary'  — definitive treatment for the patient at their risk level (default; undefined treated as 'primary')
+   *   'bridging' — interim cover while the patient awaits specialist initiation of definitive treatment
+   *                (used for oral bisphosphonates in VHR patients, where the definitive treatment is
+   *                anabolic specialist-initiated therapy surfaced via vhr_specialist_referral flag)
+   */
+  category?: 'primary' | 'bridging';
 }
 
 export interface ReferralRecommendation {

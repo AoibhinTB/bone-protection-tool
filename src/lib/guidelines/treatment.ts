@@ -1608,20 +1608,20 @@ function initiateTherapy(
       source: SRC_BMS,
     });
     if (canUse('alendronate', egfr)) {
-      recs.push(withBPInitiationContext({
+      recs.push(withBPInitiationContext(asBridgingForVHR({
         ...alendronate(),
         rationale:
           'Add alendronate alongside HRT: T-score remains ≤−2.5 despite HRT, suggesting HRT alone is insufficient bone protection. Equivalent first-line with risedronate per NOGG 2024 Rec 12.',
         priority: 'first-line',
-      }, patient));
+      }, riskCategory), patient));
     }
     if (canUse('risedronate', egfr)) {
-      recs.push(withBPInitiationContext({
+      recs.push(withBPInitiationContext(asBridgingForVHR({
         ...risedronate(),
         rationale:
           'Equivalent first-line alongside alendronate (NOGG 2024 Rec 12, Strong) — add alongside HRT where T-score remains ≤−2.5 despite HRT.',
         priority: 'first-line',
-      }, patient));
+      }, riskCategory), patient));
     }
     return recs;
   }
@@ -1643,9 +1643,9 @@ function initiateTherapy(
         source: SRC_NICE,
       });
     }
-    recs.push(withBPInitiationContext(alendronate(), patient));
+    recs.push(withBPInitiationContext(asBridgingForVHR(alendronate(), riskCategory), patient));
     if (canUse('risedronate', egfr)) {
-      recs.push(withBPInitiationContext(risedronate(), patient));
+      recs.push(withBPInitiationContext(asBridgingForVHR(risedronate(), riskCategory), patient));
     }
     return recs;
   }
@@ -1721,8 +1721,8 @@ function initiateTherapy(
     source: SRC_HSE,
   });
   // v1.33 — push both equivalent first-line oral BPs.
-  recs.push(withBPInitiationContext(alendronate(), patient));
-  recs.push(withBPInitiationContext(risedronate(), patient));
+  recs.push(withBPInitiationContext(asBridgingForVHR(alendronate(), riskCategory), patient));
+  recs.push(withBPInitiationContext(asBridgingForVHR(risedronate(), riskCategory), patient));
   return recs;
 }
 
@@ -1753,20 +1753,20 @@ function sequencing(
       source: SRC_BMS,
     });
     if (canUse('alendronate', egfr)) {
-      recs.push(withBPInitiationContext({
+      recs.push(withBPInitiationContext(asBridgingForVHR({
         ...alendronate(),
         rationale:
           'Add alendronate alongside HRT: T-score remains ≤−2.5 despite HRT, suggesting HRT alone is insufficient bone protection. Equivalent first-line with risedronate per NOGG 2024 Rec 12.',
         priority: 'first-line',
-      }, patient));
+      }, riskCategory), patient));
     }
     if (canUse('risedronate', egfr)) {
-      recs.push(withBPInitiationContext({
+      recs.push(withBPInitiationContext(asBridgingForVHR({
         ...risedronate(),
         rationale:
           'Equivalent first-line alongside alendronate (NOGG 2024 Rec 12, Strong) — add alongside HRT where T-score remains ≤−2.5 despite HRT.',
         priority: 'first-line',
-      }, patient));
+      }, riskCategory), patient));
     }
     return { recommendations: recs, flags, referrals };
   }
@@ -2904,20 +2904,20 @@ function giop(
   if (!aff && !giIntolerance && canUse('alendronate', egfr)) {
     // Oral first-line per NOGG GIOP Rec 23 (Strong) — alendronate AND risedronate
     // are equivalent first-line oral options (v1.33). Push both.
-    recs.push(withBPInitiationContext({
+    recs.push(withBPInitiationContext(asBridgingForVHR({
       ...alendronate(),
       rationale:
         'First-line oral bisphosphonate for GIOP (NOGG 2024 Rec 23 — Strong; equivalent with risedronate). ' +
         'Initiate at same time as glucocorticoid if planned duration ≥3 months. ' +
         'Calcium 1000–1500 mg/day and vitamin D ≥800 IU/day required alongside.',
-    }, patient));
+    }, riskCategory), patient));
     if (canUse('risedronate', egfr)) {
-      recs.push(withBPInitiationContext({
+      recs.push(withBPInitiationContext(asBridgingForVHR({
         ...risedronate(),
         rationale:
           'First-line oral bisphosphonate for GIOP (NOGG 2024 Rec 23 — Strong; equivalent with alendronate). ' +
           'Initiate at same time as glucocorticoid if planned duration ≥3 months.',
-      }, patient));
+      }, riskCategory), patient));
     }
   } else if (!aff && giIntolerance && !refuses && canUse('zoledronate', egfr)) {
     // Prior oral GI intolerance — IV zoledronate bypasses GI tract
@@ -3393,6 +3393,19 @@ function plannedBPDuration(patient: PatientInput, isIV: boolean): string {
   return hasExtensionCriterion
     ? 'Planned duration: at least 10 years (extension criterion at initiation: age ≥70, prior hip/vertebral fracture, or GC ≥7.5 mg/day). NOGG 2024 Section 7 Rec 1 (Strong).'
     : 'Planned duration: at least 5 years, then reassess fracture risk. NOGG 2024 Section 7 Rec 1 (Strong).';
+}
+
+// For VHR patients, oral bisphosphonate entries are bridging cover while awaiting
+// specialist anabolic initiation (vhr_specialist_referral is the definitive treatment
+// route). Non-VHR entries pass through unchanged — category is left undefined
+// (consumers treat undefined as 'primary').
+function asBridgingForVHR(
+  rec: TreatmentRecommendation,
+  riskCategory: RiskCategory,
+): TreatmentRecommendation {
+  return riskCategory === 'very_high'
+    ? { ...rec, category: 'bridging' }
+    : rec;
 }
 
 // Wraps a bisphosphonate recipe with patient-specific planned-duration monitoring entry.

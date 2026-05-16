@@ -9,6 +9,7 @@ import type {
   FlagSeverity,
   Urgency,
   PatientEducation,
+  TreatmentRecommendation,
 } from '@/lib/guidelines/types';
 import { Term } from '@/components/Tooltip';
 import { BLOOD_RANGES } from '@/lib/guidelines/thresholds';
@@ -598,6 +599,99 @@ function PatientEducationPanel({ edu }: { edu: PatientEducation }) {
   );
 }
 
+// One card layout for both primary and bridging treatment entries. Bridging variant is
+// used for VHR patients where oral BP is interim cover while awaiting specialist anabolic
+// initiation — visually de-emphasised, "First-line"/"Strong" badges dropped (misleading
+// at this risk level), but full prescribing detail preserved so the GP can safely start
+// the bridging therapy.
+function TreatmentCard({ tr, variant }: { tr: TreatmentRecommendation; variant: 'primary' | 'bridging' }) {
+  const isAlt = tr.priority === 'alternative';
+  const isBridging = variant === 'bridging';
+  return (
+    <div
+      className={`rounded-lg shadow-sm ${
+        isBridging
+          ? 'bg-slate-50 border border-slate-200 p-3.5'
+          : isAlt
+            ? 'bg-white border border-slate-200 opacity-95 p-4'
+            : 'bg-white border border-slate-300 p-4'
+      }`}
+    >
+      <div className="flex items-start justify-between gap-2 mb-1">
+        <div className="flex items-center gap-2 flex-wrap">
+          <p
+            className={`${
+              isBridging ? 'text-base' : 'text-lg sm:text-xl'
+            } font-bold text-slate-900 capitalize leading-tight`}
+          >
+            {tr.agent}
+          </p>
+          {isBridging ? (
+            <Badge className="bg-amber-100 text-amber-800">Interim cover</Badge>
+          ) : isAlt ? (
+            <Badge className="bg-slate-200 text-slate-700">Second-line alternative</Badge>
+          ) : (
+            <Badge className="bg-indigo-600 text-white">First-line</Badge>
+          )}
+        </div>
+        {!isBridging && (
+          <Badge
+            className={
+              tr.strength === 'strong'
+                ? 'bg-indigo-100 text-indigo-700'
+                : 'bg-slate-100 text-slate-600'
+            }
+          >
+            {tr.strength === 'strong' ? 'Strong' : 'Conditional'}
+          </Badge>
+        )}
+      </div>
+      <p className="text-sm font-semibold text-slate-800 mb-1">
+        {tr.dose} · {tr.frequency}
+      </p>
+      <p className="text-xs text-slate-600 mb-2 leading-snug">{tr.rationale}</p>
+
+      {tr.irishPrescribingNote && (
+        <div className="bg-indigo-50 border border-indigo-200 rounded px-3 py-2 mb-2">
+          <p className="text-[11px] font-bold text-indigo-700 uppercase tracking-wide mb-0.5">
+            Ireland prescribing
+          </p>
+          <p className="text-xs text-indigo-900 leading-snug">{tr.irishPrescribingNote}</p>
+        </div>
+      )}
+
+      {tr.contraindications.length > 0 && (
+        <div className="bg-red-50 border-l-4 border-red-500 rounded-r px-3 py-2 mb-2">
+          <p className="text-[11px] font-bold text-red-700 uppercase tracking-wide mb-1">
+            Contraindications
+          </p>
+          <ul className="text-xs text-red-900 font-medium space-y-1 list-disc list-inside leading-snug">
+            {tr.contraindications.map((c, j) => (
+              <li key={j}>{c}</li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      {tr.monitoring.length > 0 && (
+        <Disclosure label="monitoring details">
+          <ul className="text-xs text-slate-700 space-y-1 list-disc list-inside leading-snug">
+            {tr.monitoring.map((m, j) => (
+              <li key={j}>{m}</li>
+            ))}
+          </ul>
+        </Disclosure>
+      )}
+
+      <p className="text-[11px] text-slate-400 mt-2">
+        {tr.source.guideline} {tr.source.year}
+      </p>
+
+      {tr.patientEducation && <PatientEducationPanel edu={tr.patientEducation} />}
+    </div>
+  );
+}
+
 export function ResultsView({ result, patient, onReset, onBack, onRevealNoRfFrax }: Props) {
   const bloodEntries = buildBloodEntries(patient);
   const rs = result.riskStratification;
@@ -715,89 +809,67 @@ export function ResultsView({ result, patient, onReset, onBack, onRevealNoRfFrax
         </section>
       )}
 
-      {/* TREATMENT FIRST — clinician sees what to prescribe at the top */}
-      {result.treatmentRecommendations.length > 0 && (
-        <section>
-          <SectionTitle>Treatment</SectionTitle>
-          <div className="space-y-3">
-            {result.treatmentRecommendations.map((tr, i) => {
-              const isAlt = tr.priority === 'alternative';
-              return (
-                <div
-                  key={i}
-                  className={`bg-white border rounded-lg p-4 shadow-sm ${
-                    isAlt ? 'border-slate-200 opacity-95' : 'border-slate-300'
-                  }`}
-                >
-                  <div className="flex items-start justify-between gap-2 mb-1">
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <p className="text-lg sm:text-xl font-bold text-slate-900 capitalize leading-tight">
-                        {tr.agent}
-                      </p>
-                      {isAlt ? (
-                        <Badge className="bg-slate-200 text-slate-700">Second-line alternative</Badge>
-                      ) : (
-                        <Badge className="bg-indigo-600 text-white">First-line</Badge>
-                      )}
-                    </div>
-                    <Badge
-                      className={
-                        tr.strength === 'strong'
-                          ? 'bg-indigo-100 text-indigo-700'
-                          : 'bg-slate-100 text-slate-600'
-                      }
-                    >
-                      {tr.strength === 'strong' ? 'Strong' : 'Conditional'}
-                    </Badge>
+      {/* Hoisted SPECIALIST REFERRAL — for VHR patients, the urgent anabolic-specialist
+          referral is the headline. Flag stays duplicated below in Clinical alerts for
+          consistency with the unified flag rendering. */}
+      {(() => {
+        const specRefFlag = sortedFlags.find(
+          (f) => f.severity === 'urgent' && f.id === 'vhr_specialist_referral',
+        );
+        if (!specRefFlag) return null;
+        return (
+          <section>
+            <SectionTitle>Specialist referral required</SectionTitle>
+            <div className="bg-red-50 border-l-[6px] border-red-600 rounded-r-lg p-4 sm:p-5 ring-2 ring-red-300">
+              <div className="flex items-start gap-2 mb-2">
+                <Badge className="bg-red-600 text-white">Urgent</Badge>
+              </div>
+              <p className="text-base sm:text-lg font-bold text-red-950 leading-snug mb-2">
+                {specRefFlag.message}
+              </p>
+              <p className="text-xs text-red-900 opacity-90 leading-snug mb-2">
+                {specRefFlag.rationale}
+              </p>
+              <p className="text-[11px] text-slate-500">{sourceText(specRefFlag)}</p>
+            </div>
+          </section>
+        );
+      })()}
+
+      {/* TREATMENT — primary entries first; bridging entries (VHR oral-BP interim cover)
+          under a separate sub-section so they are not confused with definitive treatment. */}
+      {result.treatmentRecommendations.length > 0 &&
+        (() => {
+          const primary = result.treatmentRecommendations.filter((tr) => tr.category !== 'bridging');
+          const bridging = result.treatmentRecommendations.filter((tr) => tr.category === 'bridging');
+          return (
+            <>
+              {primary.length > 0 && (
+                <section>
+                  <SectionTitle>Treatment</SectionTitle>
+                  <div className="space-y-3">
+                    {primary.map((tr, i) => (
+                      <TreatmentCard key={`primary-${i}`} tr={tr} variant="primary" />
+                    ))}
                   </div>
-                  <p className="text-sm font-semibold text-slate-800 mb-1">
-                    {tr.dose} · {tr.frequency}
+                </section>
+              )}
+              {bridging.length > 0 && (
+                <section>
+                  <SectionTitle>Start now while awaiting specialist</SectionTitle>
+                  <p className="text-xs text-slate-600 -mt-2 mb-3 leading-snug">
+                    Interim cover until specialist initiates anabolic therapy. Full prescribing detail below.
                   </p>
-                  <p className="text-xs text-slate-600 mb-2 leading-snug">{tr.rationale}</p>
-
-                  {tr.irishPrescribingNote && (
-                    <div className="bg-indigo-50 border border-indigo-200 rounded px-3 py-2 mb-2">
-                      <p className="text-[11px] font-bold text-indigo-700 uppercase tracking-wide mb-0.5">
-                        Ireland prescribing
-                      </p>
-                      <p className="text-xs text-indigo-900 leading-snug">{tr.irishPrescribingNote}</p>
-                    </div>
-                  )}
-
-                  {tr.contraindications.length > 0 && (
-                    <div className="bg-red-50 border-l-4 border-red-500 rounded-r px-3 py-2 mb-2">
-                      <p className="text-[11px] font-bold text-red-700 uppercase tracking-wide mb-1">
-                        Contraindications
-                      </p>
-                      <ul className="text-xs text-red-900 font-medium space-y-1 list-disc list-inside leading-snug">
-                        {tr.contraindications.map((c, j) => (
-                          <li key={j}>{c}</li>
-                        ))}
-                      </ul>
-                    </div>
-                  )}
-
-                  {tr.monitoring.length > 0 && (
-                    <Disclosure label="monitoring details">
-                      <ul className="text-xs text-slate-700 space-y-1 list-disc list-inside leading-snug">
-                        {tr.monitoring.map((m, j) => (
-                          <li key={j}>{m}</li>
-                        ))}
-                      </ul>
-                    </Disclosure>
-                  )}
-
-                  <p className="text-[11px] text-slate-400 mt-2">
-                    {tr.source.guideline} {tr.source.year}
-                  </p>
-
-                  {tr.patientEducation && <PatientEducationPanel edu={tr.patientEducation} />}
-                </div>
-              );
-            })}
-          </div>
-        </section>
-      )}
+                  <div className="space-y-3">
+                    {bridging.map((tr, i) => (
+                      <TreatmentCard key={`bridging-${i}`} tr={tr} variant="bridging" />
+                    ))}
+                  </div>
+                </section>
+              )}
+            </>
+          );
+        })()}
 
       {/* Clinical alerts — single unified format for urgent / warning / info */}
       {sortedFlags.length > 0 && (
