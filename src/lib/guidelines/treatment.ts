@@ -490,19 +490,25 @@ export function generateTreatmentOutput(
     });
   }
 
-  // ── Patient refuses injections — surface flag ──
-  if (patient.refusesInjections) {
-    flags.push({
-      id: 'patient_refuses_injections',
-      severity: 'warning',
-      message:
-        'Patient refuses injections — denosumab, zoledronate, teriparatide, romosozumab cannot be offered. Oral bisphosphonate only.',
-      rationale:
-        'Document discussion of clinical risk, particularly in very high risk patients where anabolic-first or denosumab is preferred. ' +
-        'Re-engage at follow-up — preferences may change. Specialist referral remains appropriate where injection-only options are clinically indicated.',
-      source: SRC_NOGG,
-    });
-  }
+  // ── Patient refuses injections — pre-Shape-B "patient_refuses_injections"
+  // flag retired in v1.44. The retired wording (id: 'patient_refuses_injections',
+  // severity: 'warning', message: "denosumab, zoledronate, teriparatide,
+  // romosozumab cannot be offered. Oral bisphosphonate only.") was clinically
+  // wrong for VHR-GC + refusal — orals are the BRIDGING step (clinically required
+  // because of GC-driven bone loss), not the treatment endpoint; "cannot be
+  // offered" misrepresents the anabolic situation (specialist-initiated for
+  // VHR; refusal is a discussion point for the specialist consultation, not a
+  // determinant of the GP pathway).
+  //
+  // Superseding mechanism: vhr_anabolic_refusal_context flag via
+  // pushVHRRefusalContextFlag(patient, riskCategory, flags) — two variants
+  // forked on gcDrivesVHR. Called from generateTreatmentOutput below.
+  //
+  // Non-VHR + refusal: no new flag. The behavioural filter at
+  // treatment.ts:~1224 already strips injection-based agents from
+  // recommendations when refusesInjections is true — patient preference is
+  // captured behaviourally rather than via explicit messaging. Explicit flag
+  // for non-VHR refusers would be noise.
 
   // ── Dental check before IV zoledronate or denosumab ──
   // Single merged alert (replaces previous dental_check_pre_treatment + onj_dental_pre_start overlap).
@@ -764,6 +770,14 @@ export function generateTreatmentOutput(
 
   // ── Denosumab rebound / missed injection ──
   denosumabReboundFlags(patient, flags);
+
+  // v1.44 — VHR + refusal context flag (single source of truth, two variants).
+  // Called BEFORE the special-population early returns so it fires uniformly for
+  // VHR patients via every path (standard / GIOP / early-menopause). The helper
+  // internally gates on riskCategory === 'very_high' + refusesInjections, and
+  // forks the message + rationale on gcDrivesVHR. Replaces the retired
+  // pre-Shape-B patient_refuses_injections flag.
+  pushVHRRefusalContextFlag(patient, riskCategory, flags);
 
   // ── Special population overrides ──
 
@@ -1202,7 +1216,7 @@ export function generateTreatmentOutput(
   // refusing injections would not currently reach this code because giop()
   // returns early at line ~759. Documented as known edge case; out of scope
   // for v1.43 — the common live-tested case is TC22's non-GIOP profile.
-  applyPatientPreferenceFallbackIfRefuses(patient, riskCategory, recommendations, flags);
+  applyPatientPreferenceFallbackIfRefuses(patient, riskCategory, recommendations);
 
   // ── v1.36 Fix 3 (§6.2): pause-eligible suppresses current drug from recs ──
   // When bp_holiday_appropriate has fired, the patient is moving from active to paused —
@@ -3592,15 +3606,17 @@ function buildSpecialistOptions(
 
 // v1.43 Shape B — patient-preference fallback for VHR + refusesInjections.
 // See the call site in generateTreatmentOutput for the full design rationale.
-// Mutates `recommendations` and `flags` in place. No-op for any patient profile
-// that doesn't match the gate (defence-in-depth: only fires when recommendations
-// is empty, riskCategory is very_high, refusesInjections is true, and
-// gcDrivesVHR is false).
+// Mutates `recommendations` in place. No-op for any patient profile that doesn't
+// match the gate (defence-in-depth: only fires when recommendations is empty,
+// riskCategory is very_high, refusesInjections is true, and gcDrivesVHR is
+// false).
+// v1.44 — `flags` parameter removed; flag emission for VHR+refusal moved to
+// pushVHRRefusalContextFlag (single-responsibility split). This helper now
+// handles recipe pushes only.
 function applyPatientPreferenceFallbackIfRefuses(
   patient: PatientInput,
   riskCategory: RiskCategory,
   recommendations: TreatmentRecommendation[],
-  flags: ClinicalFlag[],
 ): void {
   if (riskCategory !== 'very_high') return;
   if (!patient.refusesInjections) return;
@@ -3632,20 +3648,58 @@ function applyPatientPreferenceFallbackIfRefuses(
     }, patient));
   }
 
+  // v1.44 — vhr_anabolic_refusal_context flag emission removed from this helper.
+  // The flag now lives in pushVHRRefusalContextFlag (single-responsibility split),
+  // which fires for BOTH VHR-non-GC + refusal (this helper's profile) AND VHR-GC
+  // + refusal (the case this helper does not handle but the flag must still
+  // surface for). pushVHRRefusalContextFlag is called centrally from
+  // generateTreatmentOutput so it covers all VHR + refusal patients including
+  // those handled by giop() (which returns early before this helper runs).
+}
+
+// v1.44 — single-source-of-truth helper for VHR + refusal context messaging.
+// Fired for ANY VHR + refusesInjections patient, with two render variants
+// forked on gcDrivesVHR:
+//   GC-driven VHR + refusal     → message frames the bridging step as clinically
+//                                 necessary regardless of preference; refusal is
+//                                 a specialist-conversation discussion point.
+//   Non-GC VHR + refusal        → message frames orals as documented
+//                                 patient-preference path pending specialist
+//                                 review (paired with patient-preference-fallback
+//                                 cards from applyPatientPreferenceFallbackIfRefuses).
+// Replaces the retired pre-Shape-B patient_refuses_injections flag (clinical
+// framing was wrong for both cases). Mutates `flags` in place; no-op for any
+// patient profile that doesn't match the gate.
+function pushVHRRefusalContextFlag(
+  patient: PatientInput,
+  riskCategory: RiskCategory,
+  flags: ClinicalFlag[],
+): void {
+  if (riskCategory !== 'very_high') return;
+  if (!patient.refusesInjections) return;
+  const gcDrivesVHR =
+    isOnHighDoseGC(patient) && gcDurationMonths(patient) >= GIOP.highDoseMinMonths;
   flags.push({
     id: 'vhr_anabolic_refusal_context',
     severity: 'info',
-    message:
-      'Patient not accepting injectable therapy. Oral bisphosphonates surfaced as an ' +
-      'alternative therapy option for discussion with the patient and with the specialist. ' +
-      "Document the patient's preference and the discussion in the referral letter — the " +
-      "specialist consultation may surface considerations or alternatives that affect the patient's view.",
-    rationale:
-      'Per NOGG Rec 9 (Strong) patient preference is one of four factors driving treatment choice. ' +
-      'For VHR patients refusing parenteral therapy (denosumab SC, IV zoledronate, all SC anabolics), ' +
-      'oral bisphosphonates remain available as a patient-preference option alongside the specialist ' +
-      'referral. This flag does not assert a clinical hierarchy — the specialist consultation may ' +
-      'reveal options or considerations the GP cannot.',
+    message: gcDrivesVHR
+      ? 'Patient has declined injectable therapy. This is a discussion point for the specialist consultation. ' +
+        'Bridging with oral bisphosphonate is clinically indicated for GC-driven very high risk regardless of patient preference, ' +
+        'and the specialist will assess for anabolic options. Document the refusal in the referral letter.'
+      : 'Patient not accepting injectable therapy. Oral bisphosphonates surfaced as an ' +
+        'alternative therapy option for discussion with the patient and with the specialist. ' +
+        "Document the patient's preference and the discussion in the referral letter — the " +
+        "specialist consultation may surface considerations or alternatives that affect the patient's view.",
+    rationale: gcDrivesVHR
+      ? 'Per NOGG Rec 8(g) the bridging-bisphosphonate instruction is attached to the high-dose-GC VHR criterion ' +
+        'regardless of subsequent treatment decisions. Rapid post-GC-initiation bone loss makes the bridging step ' +
+        'clinically necessary even when the patient is refusing parenteral options. Refusal is a discussion point ' +
+        'for the specialist consultation, not a determinant of the GP-level bridging action.'
+      : 'Per NOGG Rec 9 (Strong) patient preference is one of four factors driving treatment choice. ' +
+        'For VHR patients refusing parenteral therapy (denosumab SC, IV zoledronate, all SC anabolics), ' +
+        'oral bisphosphonates remain available as a patient-preference option alongside the specialist ' +
+        'referral. This flag does not assert a clinical hierarchy — the specialist consultation may ' +
+        'reveal options or considerations the GP cannot.',
     source: SRC_NOGG,
   });
 }

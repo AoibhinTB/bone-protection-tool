@@ -637,7 +637,10 @@ function tc22(): TCResult {
   });
   const decision = runClinicalDecision(patient);
   check(failures, 'risk = very_high', decision.riskStratification.category === 'very_high', `got ${decision.riskStratification.category}`);
-  check(failures, 'refuses-injections flag fires', hasFlag(decision, 'patient_refuses_injections'));
+  // v1.44 — patient_refuses_injections flag retired (stale framing). The refusal-
+  // acknowledgement is covered by the vhr_anabolic_refusal_context assertion at
+  // the end of this TC. Behavioural strip-injectables filter at treatment.ts:~1224
+  // continues to remove denosumab/zoledronate from recommendations (asserted below).
   check(failures, 'NO denosumab (refuses injections)', !hasAgent(decision, 'denosumab'));
   check(failures, 'NO zoledronate (refuses injections)', !hasAgent(decision, 'zoledronate'));
 
@@ -4056,6 +4059,73 @@ function tc109(): TCResult {
   return { name: 'TC109 — postmenopausal F GC-driven VHR: bridging recipe + specialistOptions coexistence (Shape B)', passed: failures.length === 0, failures, decision };
 }
 
+// ═══════════════════════════════════════════════════════════════════════════
+// v1.44 TEST CASE — VHR-GC + refusal coverage
+// ═══════════════════════════════════════════════════════════════════════════
+
+// ─── TC110 ─────────────────────────────────────────────────────────────────
+// Female postmenopausal GC-driven VHR + refusesInjections (66F, prednisolone
+// 10mg/day × 4mo, T-score −3.5 LS, normal bloods). v1.44 closes the coverage
+// gap on VHR-GC + refusal — TC22 covers VHR-non-GC + refusal; TC109 covers
+// VHR-GC + no-refusal. The stale patient_refuses_injections flag has been
+// retired; vhr_anabolic_refusal_context now fires with a GC-specific variant
+// for this profile (semantic anchors: "discussion point for the specialist
+// consultation" + "regardless of patient preference" + "Document the refusal
+// in the referral letter").
+function tc110(): TCResult {
+  const failures: string[] = [];
+  const patient = basePatient({
+    age: 66,
+    sex: 'female',
+    glucocorticoidStatus: 'current',
+    glucocorticoidUse: { current: true, durationMonths: 4, dose: 'medium' },
+    glucocorticoidDoseMgDay: 10,
+    dexaResults: { lumbarSpineTScore: -3.5, totalHipTScore: -2.8, femoralNeckTScore: -2.7, forearmTScore: null },
+    bloodResults: { adjustedCalciumMmol: 2.32, vitaminDNmol: 60, egfr: 75, alp: 80, tshMUL: 2.0, hbGramsPerLitre: 135, esrOrCrp: 'normal' },
+    refusesInjections: true,
+  });
+  const decision = runClinicalDecision(patient);
+
+  check(failures, 'risk = very_high',
+    decision.riskStratification.category === 'very_high',
+    `got ${decision.riskStratification.category}`);
+
+  // GC-driven VHR → URGENT specialist referral.
+  check(failures, 'vhr_specialist_referral fires URGENT (GC drives VHR)',
+    !!decision.flags.find(f => f.id === 'vhr_specialist_referral' && f.severity === 'urgent'));
+
+  // Bridging recipe — GC-driven VHR retains the bridging path even when patient
+  // refuses injections (the bridging step is clinically necessary, not preference-driven).
+  const aln = decision.treatmentRecommendations.find(r => r.agent === 'alendronate');
+  const ris = decision.treatmentRecommendations.find(r => r.agent === 'risedronate');
+  check(failures, 'alendronate present with category bridging',
+    !!aln && aln.category === 'bridging');
+  check(failures, 'risedronate present with category bridging',
+    !!ris && ris.category === 'bridging');
+
+  // v1.44 — vhr_anabolic_refusal_context fires with GC-specific variant.
+  // Three semantic anchors lock the message contract.
+  const refusalContext = decision.flags.find(f => f.id === 'vhr_anabolic_refusal_context');
+  check(failures, 'vhr_anabolic_refusal_context flag fires (VHR-GC + refusal)', !!refusalContext);
+  check(failures, 'refusal-context message anchors "discussion point for the specialist consultation"',
+    !!refusalContext && /discussion point for the specialist consultation/i.test(refusalContext.message));
+  check(failures, 'refusal-context message anchors "regardless of patient preference"',
+    !!refusalContext && /regardless of patient preference/i.test(refusalContext.message));
+  check(failures, 'refusal-context message anchors "Document the refusal in the referral letter"',
+    !!refusalContext && /Document the refusal in the referral letter/i.test(refusalContext.message));
+
+  // v1.44 — retired stale flag MUST NOT fire (negative assertion locks the retirement).
+  check(failures, 'patient_refuses_injections flag does NOT fire (v1.44 retirement)',
+    !hasFlag(decision, 'patient_refuses_injections'));
+
+  // specialistOptions still populated (postmenopausal F VHR → 3 entries).
+  check(failures, 'specialistOptions has 3 entries (postmenopausal F: teri + romo + abalo)',
+    decision.specialistOptions.length === 3,
+    `got ${decision.specialistOptions.length}`);
+
+  return { name: 'TC110 — postmenopausal F GC-driven VHR + refuses-injections: bridging recipe + GC-variant refusal-context flag (v1.44)', passed: failures.length === 0, failures, decision };
+}
+
 // ─── Runner ───────────────────────────────────────────────────────────────
 
 const TCs: Array<() => TCResult> = [
@@ -4094,6 +4164,10 @@ const TCs: Array<() => TCResult> = [
   // v1.43 Shape B — specialistOptions field + non-GC VHR push suppression + patient-
   // preference fallback (paired with TC22 update for refuses-injections semantics)
   tc107, tc108, tc109,
+  // v1.44 — VHR-GC + refusal coverage; retired stale patient_refuses_injections flag
+  // negative-asserted; GC-variant vhr_anabolic_refusal_context fires with three
+  // locked semantic anchors.
+  tc110,
 ];
 
 const results = TCs.map(fn => fn());
