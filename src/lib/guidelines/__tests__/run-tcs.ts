@@ -216,8 +216,16 @@ function tc5(): TCResult {
   });
   const decision = runClinicalDecision(patient);
   check(failures, 'risk = very_high', decision.riskStratification.category === 'very_high', `got ${decision.riskStratification.category}`);
-  check(failures, 'GIOP anabolic preferred flag', hasFlag(decision, 'giop_anabolic_preferred'));
-  check(failures, 'rheumatology referral urgent', decision.referrals.some(r => r.specialty === 'rheumatology' && r.urgency === 'urgent'));
+  // v1.40 GIOP refactor — giop_anabolic_preferred renamed to giop_specialist_context.
+  check(failures, 'GIOP specialist context flag', hasFlag(decision, 'giop_specialist_context'));
+  // v1.40 GIOP refactor — the parallel rheumatology:urgent referral push was removed.
+  // vhr_specialist_referral is now the canonical referral source for VHR-GIOP patients
+  // (medium-dose × 6mo → gcDrivesVHR=true → URGENT severity + bridging-BP wording).
+  const vhrRef = decision.flags.find(f => f.id === 'vhr_specialist_referral');
+  check(failures, 'vhr_specialist_referral fires URGENT (GC drives VHR)',
+    !!vhrRef && vhrRef.severity === 'urgent');
+  check(failures, 'vhr_specialist_referral message includes bridging-BP instruction (GC-driven)',
+    !!vhrRef && /oral bisphosphonate in the meantime/i.test(vhrRef.message));
   check(failures, 'empirical alendronate (NOGG Rec 22)', hasAgent(decision, 'alendronate'));
   return { name: 'TC5 — 77F GIOP VHR + 2 VF', passed: failures.length === 0, failures, decision };
 }
@@ -2885,9 +2893,14 @@ function tc93(): TCResult {
     !!vhrRefFlag && vhrRefFlag.severity === 'urgent');
   check(failures, 'vhr_specialist_referral message includes URGENT + bridging-BP instruction',
     hasFlagText(decision, 'URGENT') && hasFlagText(decision, 'oral bisphosphonate in the meantime'));
-  // Referral object on the rheumatology/metabolic-bone side carries urgent urgency.
-  check(failures, 'referral urgency is urgent (GC drives VHR)',
-    decision.referrals.some(r => r.urgency === 'urgent'));
+  // v1.40 GIOP refactor — the parallel rheumatology:urgent referral push that previously
+  // satisfied this assertion was removed. The urgency signal is now carried by
+  // vhr_specialist_referral.severity === 'urgent' (asserted above). For VHR-GIOP patients
+  // the GIOP override returns from giop() before reaching Site A's standard VHR block,
+  // and the Option B mirror block only pushes the flag, not a parallel referral object —
+  // so decision.referrals is expected to be empty for this patient post-refactor. The
+  // Site A/B metabolic_bone referral asymmetry is tracked as a known gap (out of scope
+  // for the v1.40 refactor).
 
   // Sequential-planning fires (Seq.2 third push gate on anabolicReferralFired).
   check(failures, 'sequential_therapy_plan_required fires',

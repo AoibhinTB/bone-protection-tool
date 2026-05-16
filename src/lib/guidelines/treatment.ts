@@ -2817,8 +2817,15 @@ function giop(
   // VHR block at :815 and the post-recipe Seq.2 push gate, so GIOP-VHR patients otherwise
   // miss vhr_specialist_referral and sequential_therapy_plan_required. Mirror both pushes
   // here when riskCategory === 'very_high' so GIOP-VHR has the same flag-ID contract as
-  // non-GIOP VHR (TC90 / TC92 / TC93). The GIOP-specific giop_anabolic_preferred + the
-  // rheumatology referral below remain as the GIOP-pathway addition; both clusters coexist.
+  // non-GIOP VHR (TC90 / TC92 / TC93).
+  //
+  // v1.40 GIOP refactor (Option C from v1.37 backlog) — vhr_specialist_referral is now the
+  // CANONICAL source of the anabolic-referral mechanism + urgent-referral framing +
+  // bridging-bisphosphonate instruction for VHR-GIOP patients. The renamed
+  // giop_specialist_context flag below (formerly giop_anabolic_preferred) carries ONLY
+  // additive teriparatide-specific clinical content (Saag NEJM 2007, HSE BVM biosimilar
+  // policy, teri CIs) that nothing else produces. The flag is now subordinate to standard
+  // VHR routing, not a parallel substitute.
   if (riskCategory === 'very_high') {
     const gcDrivesVHR = isOnHighDoseGC(patient) && gcDurationMonths(patient) >= GIOP.highDoseMinMonths;
     flags.push({
@@ -2851,30 +2858,34 @@ function giop(
     }
   }
 
-  // GIOP very high risk: multiple VF or T-score ≤-3.5 → anabolic (not just any high dose)
+  // v1.40 GIOP refactor — giop_specialist_context (formerly giop_anabolic_preferred).
+  // Repurposed to carry only ADDITIVE teriparatide-specific GIOP context for the GP. The
+  // anabolic-referral mechanism, urgent-referral framing, and bridging-BP instruction are
+  // now the sole responsibility of vhr_specialist_referral (Option B mirror block above)
+  // for VHR-GIOP patients. The parallel rheumatology:urgent referral push has been
+  // removed — vhr_specialist_referral is now the canonical referral source for these
+  // patients. Predicate (giopVHR) is unchanged from the prior implementation; the gate's
+  // overlap with standard NOGG VHR criteria is documented in the v1.40 audit (Section 8
+  // findings tracked separately).
   const giopVHR =
     (patient.priorVertebralFracture && patient.numberOfPriorFractures >= 2) ||
     (patient.dexaResults !== null && lowestDexaTScore(patient.dexaResults) <= -3.5);
 
   if (giopVHR) {
     flags.push({
-      id: 'giop_anabolic_preferred',
+      id: 'giop_specialist_context',
       severity: 'warning',
       message:
-        'Very high risk GIOP (multiple VFs or T ≤−3.5 on glucocorticoids): teriparatide biosimilar (HSE BVM policy March 2023) preferred over bisphosphonate; specialist initiation. Modest hip BMD effect — consider BP first then teriparatide if severe hip osteoporosis.',
+        'GIOP-specific anabolic context: teriparatide has direct GIOP evidence (Saag NEJM 2007; NOGG Rec 23). HSE BVM (March 2023): biosimilar over originator. Modest hip BMD effect — relevant if hip is the worse site.',
       rationale:
         'NOGG 2024 Rec 23 / BSR 2022: teriparatide shown superior to alendronate in GIOP (Saag et al. NEJM 2007). ' +
         'GIOP VHR = multiple vertebral fractures OR T-score ≤-3.5 on steroids. ' +
         'HSE Best Value Medicine policy (1 March 2023): prescribe the recommended teriparatide biosimilar; originator Forsteo not reimbursed unless biosimilar is clinically unsuitable. ' +
         'Teriparatide contraindications: unexplained raised ALP, Paget\'s disease, prior radiation to skeleton, ' +
         'renal calculi, hypercalcaemia, hyperparathyroidism, haematological malignancy, active malignancy. ' +
-        'Source: Smith et al. Br J Clin Pharmacol 2025; HSE MMP BVM policy.',
+        'Source: Smith et al. Br J Clin Pharmacol 2025; HSE MMP BVM policy. ' +
+        'v1.40 refactor: this flag is informational GIOP-context for the GP; the anabolic referral itself is carried by vhr_specialist_referral.',
       source: SRC_BSR,
-    });
-    referrals.push({
-      specialty: 'rheumatology',
-      reason: 'Very high risk GIOP — teriparatide preferred; requires specialist (High-Tech) prescription in Ireland.',
-      urgency: 'urgent',
     });
   }
 
