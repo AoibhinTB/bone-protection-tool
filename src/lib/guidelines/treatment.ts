@@ -855,13 +855,16 @@ export function generateTreatmentOutput(
         'Romosozumab HSE MAP (effective 1 Nov 2024): postmenopausal women with T ≤ −2.5 + MOF within 24 months; individual patient application via approved consultant; High Tech Hub prescription only.',
       source: SRC_ROMO_MAP,
     });
-    referrals.push({
-      specialty: 'metabolic_bone',
-      reason: gcDrivesVHR
-        ? 'Very high fracture risk driven by high-dose glucocorticoid use — urgent referral; rapid bone loss post-GC initiation. Start oral bisphosphonate in the meantime if any delay anticipated.'
-        : 'Very high fracture risk — assessment and consideration of parenteral treatment per NOGG 2024 (some may need first-line anabolic, especially with multiple vertebral fractures).',
-      urgency: gcDrivesVHR ? 'urgent' : 'soon',
-    });
+    // (v1.44 — the prior metabolic_bone Referrals-section push that duplicated
+    // the vhr_specialist_referral flag's content has been deleted. The flag
+    // above is now the sole canonical referral surface for VHR patients
+    // (rendered as the hoisted "Specialist referral required" banner at the
+    // top of the page). The Referrals section's duplicate was redundant for
+    // all VHR patients — both gc-driven and non-GC variants. Other
+    // metabolic_bone push sites elsewhere in treatment.ts remain in place
+    // (refuses-injections-no-oral-available, AFF history, treatment failure,
+    // ONJ history, GIOP-no-option, ADT) — those address distinct clinical
+    // scenarios, not VHR-specialist-referral duplication.)
 
     // ── v1.28 Step 10 — Romosozumab cardiovascular risk framing for VHR referral ──
     // For appropriate female VHR candidates (i.e. romosozumab eligible: postmenopausal,

@@ -190,7 +190,7 @@ export function Step7TreatmentHistory({ data, onChange }: Props) {
       <SectionHeading>Patient preference</SectionHeading>
       <Field
         label="Refuses all injections (subcutaneous and intravenous)"
-        hint="Filters out denosumab (SC), zoledronate (IV), teriparatide (SC), romosozumab (SC) — oral options only"
+        hint="Denosumab and IV zoledronate are not recommended; anabolic options (teriparatide / romosozumab / abaloparatide) are SC injections — flag the preference for specialist discussion."
       >
         <YesNo
           value={data.refusesInjections}

@@ -1487,7 +1487,10 @@ function tc55(): TCResult {
     !hasAgent(decision, 'romosozumab'));
   check(failures, 'male-VHR-teriparatide flag fires',
     hasFlag(decision, 'male_vhr_anabolic_teriparatide'));
-  check(failures, 'VHR specialist referral fires', hasReferral(decision, 'metabolic_bone'));
+  // v1.44 — metabolic_bone Referrals-section duplicate removed; vhr_specialist_referral
+  // flag is now the canonical referral surface (hoisted banner). Assertion swapped.
+  check(failures, 'VHR specialist referral fires (vhr_specialist_referral flag)',
+    hasFlag(decision, 'vhr_specialist_referral'));
   check(failures, 'flag notes teriparatide is the only anabolic licensed for men',
     hasFlagText(decision, 'only anabolic'));
   return { name: 'TC55 — male VHR: teriparatide referral, romosozumab excluded', passed: failures.length === 0, failures, decision };
@@ -1558,7 +1561,10 @@ function tc58(): TCResult {
   const decision = runClinicalDecision(patient);
   check(failures, 'risk = very_high',
     decision.riskStratification.category === 'very_high', `got ${decision.riskStratification.category}`);
-  check(failures, 'VHR specialist referral fires', hasReferral(decision, 'metabolic_bone'));
+  // v1.44 — metabolic_bone Referrals-section duplicate removed; canonical referral
+  // surface for VHR is now the vhr_specialist_referral flag (hoisted banner).
+  check(failures, 'VHR specialist referral fires (vhr_specialist_referral flag)',
+    hasFlag(decision, 'vhr_specialist_referral'));
   check(failures, 'BP blunting effect flag fires',
     hasFlag(decision, 'bp_blunting_effect_referral'));
   check(failures, 'message states prior alendronate AND duration',
@@ -3103,9 +3109,10 @@ function tc95(): TCResult {
   check(failures, 'vhr_specialist_referral fires', !!vhrRefFlag);
   check(failures, 'vhr_specialist_referral severity is warning (NOT urgent — GC not firing)',
     !!vhrRefFlag && vhrRefFlag.severity === 'warning');
-  // Referral object urgency should be 'soon' (non-GC VHR), not 'urgent'.
-  check(failures, 'metabolic_bone referral urgency soon (NOT urgent)',
-    decision.referrals.some(r => r.specialty === 'metabolic_bone' && r.urgency === 'soon'));
+  // v1.44 — metabolic_bone Referrals-section duplicate removed. The "NOT urgent"
+  // signal is fully covered by the flag-severity assertion immediately above
+  // (severity === 'warning' is the canonical "non-GC VHR, not urgent" signal).
+  // The standalone metabolic_bone-urgency assertion has been dropped as redundant.
 
   // anabolicReferralFired === true → full standard VHR-anabolic-referral cluster fires.
   // Seq.1 post_anabolic_antiresorptive (Rec 14 at referral time).

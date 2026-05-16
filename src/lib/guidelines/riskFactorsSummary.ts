@@ -166,13 +166,12 @@ export function generateRiskFactorsIdentified(
     });
   }
 
-  // Patient refuses injections
-  if (patient.refusesInjections) {
-    items.push({
-      factor: 'Refuses injections',
-      effect: 'Denosumab, zoledronate, teriparatide, romosozumab removed from output — oral options only',
-    });
-  }
+  // (v1.43 Shape B — pre-Shape-B "Refuses injections → oral options only"
+  // riskFactorsIdentified entry removed. The patient-preference framing now lives
+  // in the vhr_anabolic_refusal_context flag (Clinical Alerts) + the
+  // patient-preference-fallback Treatment cards. The old emitter pre-judged the
+  // specialist consultation ("removed from output") which contradicts the new
+  // wording that explicitly avoids pre-judging.)
 
   // Renal function — only material if it changed treatment
   const renalCI = decision.flags.some(f => f.id === 'renal_bp_ci' || f.id === 'denosumab_ckd_hypocalcaemia');
