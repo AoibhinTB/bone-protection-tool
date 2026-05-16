@@ -832,7 +832,7 @@ export function generateTreatmentOutput(
       severity: gcDrivesVHR ? 'urgent' : 'warning',
       message: gcDrivesVHR
         ? 'URGENT: refer to osteoporosis specialist in secondary care. Start an oral bisphosphonate in the meantime if any delay is anticipated — rapid bone loss post-glucocorticoid initiation.'
-        : 'Refer to osteoporosis specialist in secondary care for assessment and consideration of parenteral treatment. Some may need first-line anabolic drug treatment, especially those with multiple vertebral fractures.',
+        : 'Refer to osteoporosis specialist in secondary care for assessment and consideration of specialist-initiated treatment. Some may need first-line anabolic drug treatment, especially those with multiple vertebral fractures.',
       rationale:
         'NOGG 2024 (Conditional): consider referral of very high-risk patients to an osteoporosis specialist in secondary care, ' +
         'for assessment and consideration of parenteral treatment (some may need first-line anabolic drug treatment, especially those with multiple vertebral fractures). ' +
@@ -2833,7 +2833,7 @@ function giop(
       severity: gcDrivesVHR ? 'urgent' : 'warning',
       message: gcDrivesVHR
         ? 'URGENT: refer to osteoporosis specialist in secondary care. Start an oral bisphosphonate in the meantime if any delay is anticipated — rapid bone loss post-glucocorticoid initiation.'
-        : 'Refer to osteoporosis specialist in secondary care for assessment and consideration of parenteral treatment. Some may need first-line anabolic drug treatment, especially those with multiple vertebral fractures.',
+        : 'Refer to osteoporosis specialist in secondary care for assessment and consideration of specialist-initiated treatment. Some may need first-line anabolic drug treatment, especially those with multiple vertebral fractures.',
       rationale:
         'NOGG 2024 (Conditional): consider referral of very high-risk patients to an osteoporosis specialist in secondary care, ' +
         'for assessment and consideration of parenteral treatment. GIOP-VHR: GC-driven VHR ' +

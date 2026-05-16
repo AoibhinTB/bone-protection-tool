@@ -723,6 +723,38 @@ export function ResultsView({ result, patient, onReset, onBack, onRevealNoRfFrax
 
   return (
     <div className="space-y-5 sm:space-y-6">
+      {/* Hoisted SPECIALIST REFERRAL — for VHR patients, the urgent anabolic-specialist
+          referral is THE action. Rendered as the very first child so a clinician scrolling
+          the page top-to-bottom cannot miss it. Flag remains duplicated below in Clinical
+          alerts for consistency with the unified flag rendering. */}
+      {(() => {
+        const specRefFlag = sortedFlags.find(
+          (f) => f.severity === 'urgent' && f.id === 'vhr_specialist_referral',
+        );
+        if (!specRefFlag) return null;
+        return (
+          <section className="mb-2 sm:mb-3">
+            <div className="bg-red-600 text-white rounded-lg p-5 sm:p-6 shadow-lg ring-4 ring-red-200">
+              <div className="flex items-center gap-3 mb-3">
+                <span className="text-[11px] sm:text-xs font-bold uppercase tracking-wider px-2.5 py-1 rounded bg-white text-red-700">
+                  Urgent
+                </span>
+                <h2 className="text-xl sm:text-2xl font-extrabold leading-tight">
+                  Specialist referral required
+                </h2>
+              </div>
+              <p className="text-base sm:text-lg font-semibold leading-snug mb-3">
+                {specRefFlag.message}
+              </p>
+              <p className="text-sm text-red-50 opacity-95 leading-snug mb-3">
+                {specRefFlag.rationale}
+              </p>
+              <p className="text-[11px] text-red-100 opacity-80">{sourceText(specRefFlag)}</p>
+            </div>
+          </section>
+        );
+      })()}
+
       {/* Traffic light banner */}
       <div className={`${tl.bg} border-l-4 ${tl.border} rounded-r-lg p-4 sm:p-5`}>
         <div className="flex items-start justify-between gap-3">
@@ -808,33 +840,6 @@ export function ResultsView({ result, patient, onReset, onBack, onRevealNoRfFrax
           </ul>
         </section>
       )}
-
-      {/* Hoisted SPECIALIST REFERRAL — for VHR patients, the urgent anabolic-specialist
-          referral is the headline. Flag stays duplicated below in Clinical alerts for
-          consistency with the unified flag rendering. */}
-      {(() => {
-        const specRefFlag = sortedFlags.find(
-          (f) => f.severity === 'urgent' && f.id === 'vhr_specialist_referral',
-        );
-        if (!specRefFlag) return null;
-        return (
-          <section>
-            <SectionTitle>Specialist referral required</SectionTitle>
-            <div className="bg-red-50 border-l-[6px] border-red-600 rounded-r-lg p-4 sm:p-5 ring-2 ring-red-300">
-              <div className="flex items-start gap-2 mb-2">
-                <Badge className="bg-red-600 text-white">Urgent</Badge>
-              </div>
-              <p className="text-base sm:text-lg font-bold text-red-950 leading-snug mb-2">
-                {specRefFlag.message}
-              </p>
-              <p className="text-xs text-red-900 opacity-90 leading-snug mb-2">
-                {specRefFlag.rationale}
-              </p>
-              <p className="text-[11px] text-slate-500">{sourceText(specRefFlag)}</p>
-            </div>
-          </section>
-        );
-      })()}
 
       {/* TREATMENT — primary entries first; bridging entries (VHR oral-BP interim cover)
           under a separate sub-section so they are not confused with definitive treatment. */}
