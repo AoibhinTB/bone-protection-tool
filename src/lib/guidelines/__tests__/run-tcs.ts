@@ -650,8 +650,13 @@ function tc22(): TCResult {
     !!aln && aln.category === 'patient_preference_fallback');
   check(failures, 'risedronate present as patient-preference fallback',
     !!ris && ris.category === 'patient_preference_fallback');
-  check(failures, 'alendronate rationale frames patient-preference (not clinical recommendation)',
-    !!aln && /not accepting injectable therapy/i.test(aln.rationale));
+  // v1.44 — engine fallbackRationale reworded. Assertion updated to match the new
+  // wording. Semantic anchor: rationale frames patient-preference (does not pre-judge
+  // specialist consultation) AND carries the do-not-initiate-before-specialist gate.
+  check(failures, 'alendronate rationale frames patient-preference (do not wish to receive injectable therapy)',
+    !!aln && /do not wish to receive injectable therapy/i.test(aln.rationale));
+  check(failures, 'alendronate rationale carries do-not-initiate-before-specialist gate',
+    !!aln && /do not initiate before specialist review/i.test(aln.rationale));
 
   // v1.43 Shape B — vhr_specialist_referral hoist still fires (referral is the first action).
   check(failures, 'vhr_specialist_referral flag fires', hasFlag(decision, 'vhr_specialist_referral'));

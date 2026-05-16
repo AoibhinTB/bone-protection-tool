@@ -3611,9 +3611,11 @@ function applyPatientPreferenceFallbackIfRefuses(
 
   const egfr = resolveEGFR(patient);
   const fallbackRationale =
-    'Patient not accepting injectable therapy. Document patient preference and ' +
-    'the discussion in the referral letter. Oral bisphosphonates are an ' +
-    'alternative therapy option, for further discussion with specialist.';
+    'Patient has indicated they do not wish to receive injectable therapy. ' +
+    'Document this preference in the specialist referral letter. If, following ' +
+    'specialist consultation, the patient continues to decline injectable options, ' +
+    'oral bisphosphonates are the documented patient-preference path. Do not ' +
+    'initiate before specialist review.';
 
   if (canUse('alendronate', egfr) && (egfr === null || egfr > RENAL_LIMITS.alendronate.ci)) {
     recommendations.push(withBPInitiationContext({

@@ -688,7 +688,16 @@ function TreatmentCard({ tr, variant }: { tr: TreatmentRecommendation; variant: 
           {isBridging ? (
             <Badge className="bg-amber-100 text-amber-800">Interim cover</Badge>
           ) : isPatientPref ? (
-            <Badge className="bg-amber-100 text-amber-800">Patient-preference option</Badge>
+            // v1.44 — badge flipped from "Patient-preference option" to "Pending specialist
+            // review" for the VHR-non-GC + refusal variant. Section title at the parent
+            // section (ResultsView Treatment block) still reads "Patient-preference option"
+            // — the concept stays; the badge carries the gate signal ("do not initiate
+            // before specialist consultation"). Engine entries' rich content (dose,
+            // contraindications, monitoring, patient education) is preserved on the
+            // TreatmentRecommendation but suppressed from the patient-preference card
+            // render below — these cards are documentation/handoff notes for the
+            // specialist referral, not prescribing cards.
+            <Badge className="bg-amber-100 text-amber-800">Pending specialist review</Badge>
           ) : isAlt ? (
             <Badge className="bg-slate-200 text-slate-700">Second-line alternative</Badge>
           ) : (
@@ -707,12 +716,14 @@ function TreatmentCard({ tr, variant }: { tr: TreatmentRecommendation; variant: 
           </Badge>
         )}
       </div>
-      <p className="text-sm font-semibold text-slate-800 mb-1">
-        {tr.dose} · {tr.frequency}
-      </p>
+      {!isPatientPref && (
+        <p className="text-sm font-semibold text-slate-800 mb-1">
+          {tr.dose} · {tr.frequency}
+        </p>
+      )}
       <p className="text-xs text-slate-600 mb-2 leading-snug">{tr.rationale}</p>
 
-      {tr.irishPrescribingNote && (
+      {!isPatientPref && tr.irishPrescribingNote && (
         <div className="bg-indigo-50 border border-indigo-200 rounded px-3 py-2 mb-2">
           <p className="text-[11px] font-bold text-indigo-700 uppercase tracking-wide mb-0.5">
             Ireland prescribing
@@ -721,7 +732,7 @@ function TreatmentCard({ tr, variant }: { tr: TreatmentRecommendation; variant: 
         </div>
       )}
 
-      {tr.contraindications.length > 0 && (
+      {!isPatientPref && tr.contraindications.length > 0 && (
         <div className="bg-red-50 border-l-4 border-red-500 rounded-r px-3 py-2 mb-2">
           <p className="text-[11px] font-bold text-red-700 uppercase tracking-wide mb-1">
             Contraindications
@@ -734,7 +745,7 @@ function TreatmentCard({ tr, variant }: { tr: TreatmentRecommendation; variant: 
         </div>
       )}
 
-      {tr.monitoring.length > 0 && (
+      {!isPatientPref && tr.monitoring.length > 0 && (
         <Disclosure label="monitoring details">
           <ul className="text-xs text-slate-700 space-y-1 list-disc list-inside leading-snug">
             {tr.monitoring.map((m, j) => (
@@ -748,7 +759,7 @@ function TreatmentCard({ tr, variant }: { tr: TreatmentRecommendation; variant: 
         {tr.source.guideline} {tr.source.year}
       </p>
 
-      {tr.patientEducation && <PatientEducationPanel edu={tr.patientEducation} />}
+      {!isPatientPref && tr.patientEducation && <PatientEducationPanel edu={tr.patientEducation} />}
     </div>
   );
 }
@@ -794,6 +805,45 @@ function SpecialistOptionCard({ opt }: { opt: SpecialistOption }) {
       )}
       <p className="text-[11px] text-slate-500 mt-2">{opt.reference}</p>
     </div>
+  );
+}
+
+// v1.43 Shape B — "Specialist may consider" section, extracted as a top-level
+// component so the Treatment-block render can position it conditionally. For most
+// VHR profiles it renders below the Treatment block as a standalone section. For
+// VHR-non-GC + refusal patients (fallback is the only Treatment-block content), it
+// renders ABOVE the Patient-preference fallback cards — the specialist menu is
+// the clinically primary surface, fallback cards are documentation/handoff only.
+function SpecialistMayConsiderSection({ options }: { options: SpecialistOption[] }) {
+  if (options.length === 0) return null;
+  const firstLine = options.filter((o) => o.tier === 'first_line');
+  const further = options.filter((o) => o.tier === 'further_option');
+  return (
+    <section>
+      <SectionTitle>Specialist may consider</SectionTitle>
+      <p className="text-xs text-slate-600 -mt-2 mb-3 leading-snug">
+        Options the specialist may consider after your referral. GP does not prescribe these in primary care.
+      </p>
+      {firstLine.length > 0 && (
+        <div className="space-y-3">
+          {firstLine.map((opt, i) => (
+            <SpecialistOptionCard key={`first-${i}`} opt={opt} />
+          ))}
+        </div>
+      )}
+      {further.length > 0 && (
+        <>
+          <p className="text-[11px] font-bold uppercase tracking-wide text-violet-700 mt-4 mb-2">
+            Further options
+          </p>
+          <div className="space-y-3">
+            {further.map((opt, i) => (
+              <SpecialistOptionCard key={`further-${i}`} opt={opt} />
+            ))}
+          </div>
+        </>
+      )}
+    </section>
   );
 }
 
@@ -932,11 +982,16 @@ export function ResultsView({ result, patient, onReset, onBack, onRevealNoRfFrax
         </section>
       )}
 
-      {/* TREATMENT — primary entries first; bridging entries (GC-driven VHR oral-BP
-          interim cover); patient-preference-fallback entries (VHR refuses-injections
-          oral-BP alternative — v1.43 Shape B). Empty Treatment section placeholder
-          rendered when VHR-non-GC-non-fallback patient has no recipes (specialist
-          initiates after referral). */}
+      {/* TREATMENT block + SPECIALIST MAY CONSIDER — coordinated render. The
+          Treatment block contains: primary entries (GP-prescribable); bridging
+          entries (GC-driven VHR oral-BP interim cover, v1.43 Shape B);
+          patient-preference-fallback entries (VHR-non-GC + refusal oral-BP
+          documentation, v1.43 Shape B + v1.44 content variant). The Specialist
+          may consider section renders BELOW Treatment in the standard case;
+          for VHR-non-GC + refusal patients (fallback is the only Treatment-block
+          content, v1.44 §2c ordering), it renders ABOVE the fallback section
+          because anabolic-referral is the clinically primary surface — fallback
+          cards are documentation/handoff for the specialist letter. */}
       {(() => {
         const recs = result.treatmentRecommendations;
         const primary = recs.filter((tr) => tr.category !== 'bridging' && tr.category !== 'patient_preference_fallback');
@@ -949,6 +1004,10 @@ export function ResultsView({ result, patient, onReset, onBack, onRevealNoRfFrax
         // consider" below.
         const showEmptyTreatmentPlaceholder =
           recs.length === 0 && hasAnyVHRSpecialistOptions;
+        // v1.44 §2c — when fallback is the only Treatment-block content, the
+        // Specialist may consider section renders ABOVE the fallback section.
+        const fallbackOnly =
+          fallback.length > 0 && primary.length === 0 && bridging.length === 0;
         return (
           <>
             {primary.length > 0 && (
@@ -974,11 +1033,14 @@ export function ResultsView({ result, patient, onReset, onBack, onRevealNoRfFrax
                 </div>
               </section>
             )}
+            {fallbackOnly && (
+              <SpecialistMayConsiderSection options={result.specialistOptions} />
+            )}
             {fallback.length > 0 && (
               <section>
                 <SectionTitle>Patient-preference option</SectionTitle>
                 <p className="text-xs text-slate-600 -mt-2 mb-3 leading-snug">
-                  Patient not accepting injectable therapy. Oral bisphosphonates surfaced as an alternative for GP/patient discussion alongside the specialist referral.
+                  Patient has declined injectable therapy. Oral bisphosphonates are the documented patient-preference path pending specialist review. GP does not initiate before specialist consultation.
                 </p>
                 <div className="space-y-3">
                   {fallback.map((tr, i) => (
@@ -997,46 +1059,12 @@ export function ResultsView({ result, patient, onReset, onBack, onRevealNoRfFrax
                 </div>
               </section>
             )}
+            {!fallbackOnly && (
+              <SpecialistMayConsiderSection options={result.specialistOptions} />
+            )}
           </>
         );
       })()}
-
-      {/* SPECIALIST MAY CONSIDER — v1.43 Shape B. Renders for any VHR patient (any
-          trigger, GC-driven or not). Tier sub-grouping: first-line entries above,
-          "Further options" below. Distinct violet accent + "Specialist option"
-          badge make clear these are NOT GP-prescribable. */}
-      {result.specialistOptions.length > 0 &&
-        (() => {
-          const firstLine = result.specialistOptions.filter((o) => o.tier === 'first_line');
-          const further = result.specialistOptions.filter((o) => o.tier === 'further_option');
-          return (
-            <section>
-              <SectionTitle>Specialist may consider</SectionTitle>
-              <p className="text-xs text-slate-600 -mt-2 mb-3 leading-snug">
-                Options the specialist may consider after your referral. GP does not prescribe these in primary care.
-              </p>
-              {firstLine.length > 0 && (
-                <div className="space-y-3">
-                  {firstLine.map((opt, i) => (
-                    <SpecialistOptionCard key={`first-${i}`} opt={opt} />
-                  ))}
-                </div>
-              )}
-              {further.length > 0 && (
-                <>
-                  <p className="text-[11px] font-bold uppercase tracking-wide text-violet-700 mt-4 mb-2">
-                    Further options
-                  </p>
-                  <div className="space-y-3">
-                    {further.map((opt, i) => (
-                      <SpecialistOptionCard key={`further-${i}`} opt={opt} />
-                    ))}
-                  </div>
-                </>
-              )}
-            </section>
-          );
-        })()}
 
       {/* Clinical alerts — single unified format for urgent / warning / info */}
       {sortedFlags.length > 0 && (
