@@ -3643,6 +3643,198 @@ function tc102(): TCResult {
   return { name: 'TC102 — F4 parenteral pending at eGFR 25: denosumab tagged pending + Rec 17 flag + Tier 1 vitamin_d', passed: failures.length === 0, failures, decision };
 }
 
+// ═══════════════════════════════════════════════════════════════════════════
+// v1.19 TCs — TC103–TC106 — Lock engine Round 3 behaviours (v1.39 alignment)
+// ═══════════════════════════════════════════════════════════════════════════
+
+// ─── TC103 ────────────────────────────────────────────────────────────────
+// T1DM ×1.2 MOF uplift, alone (T1DM=true, T2DM=false). Locks the T1DM-only branch
+// at thresholds.ts:215-225 per NOGG body para y / Leslie 2018 / Evidence IV.
+function tc103(): TCResult {
+  const failures: string[] = [];
+  const patient = basePatient({
+    age: 65,
+    sex: 'female',
+    type1Diabetes: true,
+    type2Diabetes: false,
+    dexaResults: { lumbarSpineTScore: -2.7, totalHipTScore: -2.5, femoralNeckTScore: -2.6, forearmTScore: null },
+    fraxMOFPercent: 20.0,
+    fraxHipPercent: 3.5,
+    fraxCalculatedWithBMD: true,
+    bloodResults: { adjustedCalciumMmol: 2.32, vitaminDNmol: 70, egfr: 75, alp: 80, tshMUL: 2.0, hbGramsPerLitre: 135, esrOrCrp: 'normal' },
+  });
+  const decision = runClinicalDecision(patient);
+
+  const t1Adj = decision.riskStratification.fraxAdjustments.find(
+    a => a.factor === 'Type 1 diabetes' && a.appliedTo === 'MOF',
+  );
+  check(failures, 'Type 1 diabetes ×1.2 MOF adjustment present',
+    !!t1Adj && t1Adj.multiplier === 1.2);
+
+  // T2DM attribution NOT present (since T2DM is false).
+  check(failures, 'NO Type 2 diabetes adjustment (T2DM is false)',
+    !decision.riskStratification.fraxAdjustments.some(a => a.factor === 'Type 2 diabetes'));
+
+  // Adjusted MOF == 20 * 1.2 = 24.
+  check(failures, 'adjustedFraxMOFPercent === 24 (20 × 1.2)',
+    decision.riskStratification.adjustedFraxMOFPercent === 24,
+    `got ${decision.riskStratification.adjustedFraxMOFPercent}`);
+
+  // Hip unchanged (T1DM only uplifts MOF, not hip).
+  check(failures, 'adjustedFraxHipPercent === fraxHipPercent (hip unchanged by T1DM)',
+    decision.riskStratification.adjustedFraxHipPercent === decision.riskStratification.fraxHipPercent);
+
+  return { name: 'TC103 — T1DM-only ×1.2 MOF (NOGG body para y / Leslie 2018 / Evidence IV)', passed: failures.length === 0, failures, decision };
+}
+
+// ─── TC104 ────────────────────────────────────────────────────────────────
+// Both T1DM AND T2DM — single-application gate. ×1.2 once (T2DM precedence in
+// attribution); NOT compounded to ×1.44. Regression guard against future
+// changes that might let both blocks fire.
+function tc104(): TCResult {
+  const failures: string[] = [];
+  const patient = basePatient({
+    age: 65,
+    sex: 'female',
+    type1Diabetes: true,
+    type2Diabetes: true,
+    dexaResults: { lumbarSpineTScore: -2.7, totalHipTScore: -2.5, femoralNeckTScore: -2.6, forearmTScore: null },
+    fraxMOFPercent: 20.0,
+    fraxHipPercent: 3.5,
+    fraxCalculatedWithBMD: true,
+    bloodResults: { adjustedCalciumMmol: 2.32, vitaminDNmol: 70, egfr: 75, alp: 80, tshMUL: 2.0, hbGramsPerLitre: 135, esrOrCrp: 'normal' },
+  });
+  const decision = runClinicalDecision(patient);
+
+  // T2DM branch fires first → its attribution wins per implementation precedence.
+  const t2Adj = decision.riskStratification.fraxAdjustments.find(
+    a => a.factor === 'Type 2 diabetes' && a.appliedTo === 'MOF',
+  );
+  check(failures, 'Type 2 diabetes ×1.2 MOF adjustment present (T2DM precedence)',
+    !!t2Adj && t2Adj.multiplier === 1.2);
+
+  // T1DM-only branch suppressed when T2DM also true (single-application gate).
+  check(failures, 'NO Type 1 diabetes adjustment (single-application gate — T2DM fires first)',
+    !decision.riskStratification.fraxAdjustments.some(a => a.factor === 'Type 1 diabetes'));
+
+  // CRITICAL REGRESSION GUARD: adjusted MOF == 24 (×1.2 ONCE), NOT 28.8 (×1.44).
+  // If the gate ever regresses and both blocks fire, this assertion catches it.
+  check(failures, 'adjustedFraxMOFPercent === 24 (single ×1.2, NOT compound ×1.44 = 28.8)',
+    decision.riskStratification.adjustedFraxMOFPercent === 24,
+    `got ${decision.riskStratification.adjustedFraxMOFPercent} — if 28.8, single-application gate is broken`);
+
+  return { name: 'TC104 — T1DM + T2DM single-application gate (×1.2 once, NOT ×1.44)', passed: failures.length === 0, failures, decision };
+}
+
+// ─── TC105 ────────────────────────────────────────────────────────────────
+// Recent MOF imminent-risk caveat flag. 70F with low-trauma distal radius fx
+// 8 months ago, high-risk, manual FRAX MOF 25%. Locks recent_mof_imminent_risk_caveat
+// at index.ts:82-114; severity=info; NOGG §4h + Kanis 2020 + FRAXplus attribution.
+function tc105(): TCResult {
+  const failures: string[] = [];
+  const patient = basePatient({
+    age: 70,
+    sex: 'female',
+    priorFragilityFracture: true,        // distal radius wrist fx
+    recentFractureWithin2Years: true,    // 8 months ago → within 24mo
+    numberOfPriorFractures: 1,
+    dexaResults: { lumbarSpineTScore: -2.6, totalHipTScore: -2.5, femoralNeckTScore: -2.5, forearmTScore: null },
+    fraxMOFPercent: 25.0,
+    fraxHipPercent: 5.0,
+    fraxCalculatedWithBMD: true,
+    bloodResults: { adjustedCalciumMmol: 2.32, vitaminDNmol: 70, egfr: 70, alp: 80, tshMUL: 2.0, hbGramsPerLitre: 135, esrOrCrp: 'normal' },
+  });
+  const decision = runClinicalDecision(patient);
+
+  const caveatFlag = decision.flags.find(f => f.id === 'recent_mof_imminent_risk_caveat');
+  check(failures, 'recent_mof_imminent_risk_caveat flag present',
+    !!caveatFlag);
+  check(failures, 'caveat severity === info',
+    caveatFlag?.severity === 'info');
+
+  // Content attribution.
+  check(failures, 'message cites NOGG §4h',
+    !!caveatFlag && /§4h/.test(caveatFlag.message));
+  check(failures, 'message cites Kanis 2020',
+    !!caveatFlag && /Kanis 2020/i.test(caveatFlag.message));
+  check(failures, 'message refers clinician to FRAXplus',
+    !!caveatFlag && /FRAXplus/i.test(caveatFlag.message));
+
+  // The clinical assertion that the patient is high-risk (FRAX MOF 25% at age 70 is
+  // intermediate; with prior fragility fx the engine routes to high via Rec 8 path,
+  // even though FRAX itself sits between IT 20.3% and UAT 24.4% — actually MOF 25%
+  // is above UAT at age 70, so FRAX path would also give high. Either way: high.)
+  check(failures, 'riskCategory high',
+    decision.riskStratification.category === 'high',
+    `got ${decision.riskStratification.category}`);
+
+  return { name: 'TC105 — recent_mof_imminent_risk_caveat: NOGG §4h + Kanis 2020 + FRAXplus', passed: failures.length === 0, failures, decision };
+}
+
+// ─── TC106 ────────────────────────────────────────────────────────────────
+// Abaloparatide shared-care continuation. 65F VHR currently on abaloparatide
+// (PTHrP analogue anabolic). Locks the v1.39 widening of treatment.ts:1024 gate
+// + the abaloparatide branch of sharedCareDetail. Differentiated text vs teri/romo.
+function tc106(): TCResult {
+  const failures: string[] = [];
+  const patient = basePatient({
+    age: 65,
+    sex: 'female',
+    priorFragilityFracture: true,
+    priorVertebralFracture: true,
+    recentVertebralFractureYears: 1,
+    recentFractureWithin2Years: false, // pre-treatment vert fx; not in last 24mo for imminent-risk
+    numberOfPriorFractures: 1,
+    numberOfVertebralFractures: 1,
+    dexaResults: { lumbarSpineTScore: -3.6, totalHipTScore: -2.7, femoralNeckTScore: -2.6, forearmTScore: null },
+    fraxMOFPercent: 28.0,
+    fraxHipPercent: 6.5,
+    fraxCalculatedWithBMD: true,
+    bloodResults: { adjustedCalciumMmol: 2.32, vitaminDNmol: 70, egfr: 70, alp: 80, tshMUL: 2.0, hbGramsPerLitre: 135, esrOrCrp: 'normal' },
+    currentTreatment: {
+      agent: 'abaloparatide',
+      durationMonths: 6,
+      reasonStopped: null,
+      currentlyOn: true,
+      monthsSinceLastDose: 0,
+      ageAtStart: 64,
+      fractureOnCurrentTreatment: false,
+      adherenceAdequate: true,
+    },
+  });
+  const decision = runClinicalDecision(patient);
+
+  // VHR fires (LS −3.6 ≤ −3.5 AND recent vert fx within 2y).
+  check(failures, 'riskCategory very_high',
+    decision.riskStratification.category === 'very_high');
+
+  // Shared-care continuation flag fires for abaloparatide (Round 3 widening).
+  const sharedFlag = decision.flags.find(f => f.id === 'anabolic_gp_shared_care_continue');
+  check(failures, 'anabolic_gp_shared_care_continue flag present',
+    !!sharedFlag);
+  check(failures, 'flag severity === info',
+    sharedFlag?.severity === 'info');
+
+  // Abaloparatide-specific text (differentiated from teri/romo branches).
+  check(failures, 'message names abaloparatide',
+    !!sharedFlag && /abaloparatide/i.test(sharedFlag.message));
+  check(failures, 'message references PTHrP class mechanism',
+    !!sharedFlag && /PTHrP/i.test(sharedFlag.message));
+  check(failures, 'message mentions sequential antiresorptive mandate',
+    !!sharedFlag && /sequential/i.test(sharedFlag.message) && /antiresorptive/i.test(sharedFlag.message));
+  check(failures, 'message mentions Irish reimbursement caveat',
+    !!sharedFlag &&
+    (/not currently reimbursed/i.test(sharedFlag.message) || /High-Tech listing/i.test(sharedFlag.message) ||
+     /private pay/i.test(sharedFlag.message)));
+
+  // Cross-check: the existing abaloparatide_not_reimbursed_ireland flag (separate from
+  // the shared-care flag) also fires for any currentTreatment.agent='abaloparatide' patient.
+  check(failures, 'abaloparatide_not_reimbursed_ireland fires alongside (reimbursement context)',
+    hasFlag(decision, 'abaloparatide_not_reimbursed_ireland'));
+
+  return { name: 'TC106 — abaloparatide shared-care continuation: PTHrP + sequential + reimbursement caveat', passed: failures.length === 0, failures, decision };
+}
+
 // ─── Runner ───────────────────────────────────────────────────────────────
 
 const TCs: Array<() => TCResult> = [
@@ -3675,6 +3867,9 @@ const TCs: Array<() => TCResult> = [
   tc96, tc97, tc98, tc99, tc100,
   // v1.18 (test-doc v1.18) — close F3/F4 vacuous-assertion gap from v1.17 via eGFR 25
   tc101, tc102,
+  // v1.19 (test-doc v1.19) — lock engine Round 3 behaviours (T1DM, recent-MOF caveat,
+  // abaloparatide shared-care continuation)
+  tc103, tc104, tc105, tc106,
 ];
 
 const results = TCs.map(fn => fn());
