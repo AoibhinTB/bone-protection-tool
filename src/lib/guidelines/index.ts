@@ -39,7 +39,7 @@ export function runClinicalDecision(patient: PatientInput): ClinicalDecision {
     }
   }
 
-  const { recommendations, flags, referrals, supplements } =
+  const { recommendations, flags, referrals, supplements, specialistOptions } =
     generateTreatmentOutput(patient, riskCategory, riskStratification);
 
   // v1.37 Filters 1-5 — structural pre-treatment safety filters (hypoCa + Vit D).
@@ -181,9 +181,17 @@ export function runClinicalDecision(patient: PatientInput): ClinicalDecision {
   //    even when no new drug is being recommended (the patient is already on therapy and
   //    needs secondary-cause workup before any classification decision). Bypass the
   //    treatmentRecommended gate when the §6.3 pathway flag is present.
+  // v1.43 Shape B: non-GC VHR patients have empty treatmentRecommendations (GP refers
+  //    rather than prescribes) but still need Tier 1 pre-referral bloods (corrected
+  //    calcium for romosozumab, eGFR + PTH for teriparatide) — specialistOptions
+  //    presence is the equivalent "drug is being considered" signal at the specialist
+  //    layer, so Tier 1/2 bloods stay surfaced for these patients.
   const onTxFracturePath = flags.some(f => f.id === 'on_treatment_fracture_pathway');
+  const specialistConsidering = specialistOptions.length > 0;
   const gatedInvestigations = investigationsNeeded.filter(inv => {
-    if (inv.tier === 1 || inv.tier === 2) return treatmentRecommended || onTxFracturePath;
+    if (inv.tier === 1 || inv.tier === 2) {
+      return treatmentRecommended || onTxFracturePath || specialistConsidering;
+    }
     return true;
   });
 
@@ -263,6 +271,7 @@ export function runClinicalDecision(patient: PatientInput): ClinicalDecision {
     investigationsNeeded:     gatedInvestigations,
     flags:                    gatedFlags,
     treatmentRecommendations: recommendations,
+    specialistOptions,
     referrals:                deduplicatedReferrals,
     supplements:              gatedSupplements,
     lifestyleAdvice:          lifestyleAdvice(patient),
@@ -380,6 +389,7 @@ function buildOutOfScopeDecision(
       source: GUIDELINE_VERSIONS.nogg,
     }],
     treatmentRecommendations: [],
+    specialistOptions: [],
     referrals,
     supplements: [],
     lifestyleAdvice: [],

@@ -443,12 +443,49 @@ export interface TreatmentRecommendation {
   unblockAction?: string;
   /**
    * Role of this recommendation in the overall treatment plan.
-   *   'primary'  — definitive treatment for the patient at their risk level (default; undefined treated as 'primary')
-   *   'bridging' — interim cover while the patient awaits specialist initiation of definitive treatment
-   *                (used for oral bisphosphonates in VHR patients, where the definitive treatment is
-   *                anabolic specialist-initiated therapy surfaced via vhr_specialist_referral flag)
+   *   'primary'                     — definitive treatment for the patient at their risk level (default; undefined treated as 'primary')
+   *   'bridging'                    — interim cover while the patient awaits specialist initiation of definitive treatment
+   *                                   (used for oral bisphosphonates in GC-driven VHR patients, where the definitive
+   *                                   treatment is anabolic specialist-initiated therapy surfaced via vhr_specialist_referral
+   *                                   flag; gated on isOnHighDoseGC && gcDurationMonths >= 3 per NOGG Rec 8(g))
+   *   'patient_preference_fallback' — oral bisphosphonate re-emitted for a VHR patient who is refusing all parenteral
+   *                                   therapy (refusesInjections === true) — the patient cannot accept any anabolic
+   *                                   (all SC) or any injectable antiresorptive (denosumab SC, zoledronate IV), so oral
+   *                                   bisphosphonate is surfaced as a patient-preference option for GP/patient discussion
+   *                                   alongside the specialist referral. This is NOT a clinical hierarchy decision; the
+   *                                   specialist consultation may reveal considerations or alternatives. Paired with
+   *                                   vhr_anabolic_refusal_context info flag.
    */
-  category?: 'primary' | 'bridging';
+  category?: 'primary' | 'bridging' | 'patient_preference_fallback';
+}
+
+/**
+ * v1.43 Shape B — specialist-menu options surfaced for VHR patients after referral.
+ * Distinct from TreatmentRecommendation: these are drugs the SPECIALIST may consider
+ * after the GP's referral, not drugs the GP prescribes in primary care. UI renders
+ * them in a separate "Specialist may consider" section with tier-based sub-grouping.
+ *
+ * Per NOGG 2024 Rec 11 + spec §5.5 + §7.1:
+ *   - Teriparatide: first-line anabolic for any VHR patient (sex-independent;
+ *     only anabolic licensed for men in Ireland).
+ *   - Romosozumab: further option for postmenopausal women VHR only (HSE MAP gated;
+ *     not licensed in men).
+ *   - Abaloparatide: further option for postmenopausal women VHR only; carries
+ *     reimbursement caveat (not HSE-reimbursed; self-funded only).
+ *
+ * `tier` is required — drives UI's first-line-vs-further-options sub-grouping.
+ * `reimbursementNote` populated for abaloparatide (Irish-specific caveat).
+ * `preReferralChecks` describes GP-side prep before the referral letter goes out.
+ * `contextNotes` is reserved for future per-patient context; not populated in v1.43.
+ */
+export interface SpecialistOption {
+  drug: 'teriparatide' | 'romosozumab' | 'abaloparatide';
+  tier: 'first_line' | 'further_option';
+  rationale: string;
+  reference: string;
+  preReferralChecks?: string;
+  reimbursementNote?: string;
+  contextNotes?: string;
 }
 
 export interface ReferralRecommendation {
@@ -506,6 +543,13 @@ export interface ClinicalDecision {
   investigationsNeeded: InvestigationRecommendation[];
   flags: ClinicalFlag[];
   treatmentRecommendations: TreatmentRecommendation[];
+  /**
+   * v1.43 Shape B — drugs the specialist may consider after the GP's referral.
+   * Always present; empty array for non-VHR patients (UI doesn't render the
+   * "Specialist may consider" section when empty). Populated per Section 7.1 +
+   * Section 17.6 selection logic — see SpecialistOption interface.
+   */
+  specialistOptions: SpecialistOption[];
   referrals: ReferralRecommendation[];
   supplements: SupplementRecommendation[];
   lifestyleAdvice: string[];

@@ -11,6 +11,7 @@ import type {
   ClinicalFlag,
   ReferralRecommendation,
   SupplementRecommendation,
+  SpecialistOption,
   GuidelineSource,
 } from './types';
 import {
@@ -51,6 +52,13 @@ export interface TreatmentOutput {
   flags: ClinicalFlag[];
   referrals: ReferralRecommendation[];
   supplements: SupplementRecommendation[];
+  /**
+   * v1.43 Shape B — populated by buildSpecialistOptions() for VHR patients (any
+   * trigger, GC-driven or not). Always present; empty array for non-VHR patients.
+   * Surfaced separately from `recommendations` because these are drugs the
+   * specialist may consider after the GP's referral, not drugs the GP prescribes.
+   */
+  specialistOptions: SpecialistOption[];
 }
 
 export function generateTreatmentOutput(
@@ -61,6 +69,10 @@ export function generateTreatmentOutput(
   const flags: ClinicalFlag[]               = [];
   const referrals: ReferralRecommendation[] = [];
   const supplements                         = getSupplements(patient);
+  // v1.43 Shape B — specialist menu for VHR patients (any trigger, GC-driven
+  // or not). Empty array for non-VHR. Computed once here; all return paths
+  // include it via the object spread below.
+  const specialistOptions                   = buildSpecialistOptions(patient, riskCategory);
 
   // v1.36 A2-impl — derived referral signals. Used by:
   //   Seq.1: post_anabolic_antiresorptive (Rec 14) — fires at referral time, not just after course
@@ -71,7 +83,7 @@ export function generateTreatmentOutput(
 
   // Out-of-scope patients should not receive treatment logic
   if (riskCategory === 'out_of_scope') {
-    return { recommendations: [], flags, referrals, supplements };
+    return { recommendations: [], flags, referrals, supplements, specialistOptions };
   }
 
   // ── Safety gate: severe Vit D deficiency + hypocalcaemia together blocks all antiresorptive ──
@@ -92,7 +104,7 @@ export function generateTreatmentOutput(
         'at 6–8 weeks. Consider PTH given hypocalcaemia. Once Vit D ≥50 and Ca ≥2.10, start alendronate (or other antiresorptive).',
       source: SRC_NOGG,
     });
-    return { recommendations: [], flags, referrals, supplements };
+    return { recommendations: [], flags, referrals, supplements, specialistOptions };
   }
 
   // ── v1.34 — BMD unavailable + prior fragility fracture (NOGG Rec 6 + Rec 8) ──
@@ -599,7 +611,7 @@ export function generateTreatmentOutput(
   // Bypass: recent fracture within 24 months (imminent risk → treat immediately without waiting for FRAX)
   // Bypass: AI therapy with T-score ≤-1.5 (CTIBL threshold is independent of FRAX)
   if (riskCategory === 'low' && !patient.recentFractureWithin2Years && !aiLowerThresholdMet) {
-    return { recommendations: [], flags, referrals, supplements };
+    return { recommendations: [], flags, referrals, supplements, specialistOptions };
   }
 
   // Intermediate risk without DEXA — branch on whether BMD is unavailable per NOGG 2024 Rec 6.
@@ -660,7 +672,7 @@ export function generateTreatmentOutput(
             'fragility fracture is present OR FRAX exceeds the intervention threshold. Otherwise lifestyle advice and reassessment.',
           source: SRC_NOGG,
         });
-        return { recommendations: [], flags, referrals, supplements };
+        return { recommendations: [], flags, referrals, supplements, specialistOptions };
       }
     } else {
       // BMD is available / appropriate — refer for DEXA, withhold treatment until result
@@ -675,7 +687,7 @@ export function generateTreatmentOutput(
           'If BMD is unavailable, contraindicated, or impractical, indicate this on the investigations step to apply NOGG Rec 6.',
         source: SRC_NOGG,
       });
-      return { recommendations: [], flags, referrals, supplements };
+      return { recommendations: [], flags, referrals, supplements, specialistOptions };
     }
   }
 
@@ -719,7 +731,7 @@ export function generateTreatmentOutput(
       // dental hygiene, etc.) still need to fire, so we push contextual flags before returning.
       adtFlags(patient, riskCategory, riskStratification, flags, referrals);
       aiFlags(patient, riskCategory, riskStratification, flags);
-      return { recommendations: [], flags, referrals, supplements };
+      return { recommendations: [], flags, referrals, supplements, specialistOptions };
     }
   }
 
@@ -756,11 +768,11 @@ export function generateTreatmentOutput(
   // ── Special population overrides ──
 
   if (isEarlyMenopausePre50(patient)) {
-    return { ...earlyMenopause(patient, flags, referrals), supplements };
+    return { ...earlyMenopause(patient, flags, referrals), supplements, specialistOptions };
   }
 
   if (isGIOP(patient)) {
-    return { ...giop(patient, riskCategory, riskStratification, flags, referrals), supplements };
+    return { ...giop(patient, riskCategory, riskStratification, flags, referrals), supplements, specialistOptions };
   }
 
   // ── Contextual flags ──
@@ -975,12 +987,12 @@ export function generateTreatmentOutput(
 
   // ── Active adverse event pathways (override sequencing) ──
   if (patient.thighOrGroinPain && isCurrentlyOnBisphosphonate(patient)) {
-    return { ...affProdrome(patient, flags, referrals), supplements };
+    return { ...affProdrome(patient, flags, referrals), supplements, specialistOptions };
   }
 
   // ONJ history — covers both current AND previous treatments
   if (hasONJHistory(patient)) {
-    return { ...onjHistory(flags, referrals), supplements };
+    return { ...onjHistory(flags, referrals), supplements, specialistOptions };
   }
 
   // AFF history — permanent bisphosphonate CI; push flag here so it appears in all subsequent paths
@@ -1169,6 +1181,26 @@ export function generateTreatmentOutput(
     recommendations = initiateTherapy(patient, riskCategory, flags, referrals);
   }
 
+  // ── v1.43 Shape B — patient-preference fallback for VHR + refusesInjections ──
+  // For a non-GC-driven VHR patient who is refusing all injectable therapy
+  // (denosumab SC, zoledronate IV, teriparatide SC, romosozumab SC, abaloparatide SC),
+  // the v1.43 Shape B suppression at bridgingTagOrNullForVHR has left
+  // treatmentRecommendations empty. The hoist + specialistOptions menu still surface
+  // the referral as the first action, but the patient cannot accept any of the
+  // injectable options the specialist would consider. Re-emit alendronate +
+  // risedronate as patient-preference fallback — NOT a clinical recommendation
+  // but an alternative therapy option for GP/patient discussion alongside the
+  // specialist referral. Tagged category: 'patient_preference_fallback' so UI
+  // renders distinctly from primary recipe + bridging cards. Paired info flag
+  // vhr_anabolic_refusal_context carries the framing for downstream reviewers.
+  //
+  // Scope: this fallback handles the non-GIOP path. A VHR-GIOP patient who is
+  // non-GC-driven (e.g. medium-dose GC <3mo but T ≤−3.5 driving VHR-3) AND
+  // refusing injections would not currently reach this code because giop()
+  // returns early at line ~759. Documented as known edge case; out of scope
+  // for v1.43 — the common live-tested case is TC22's non-GIOP profile.
+  applyPatientPreferenceFallbackIfRefuses(patient, riskCategory, recommendations, flags);
+
   // ── v1.36 Fix 3 (§6.2): pause-eligible suppresses current drug from recs ──
   // When bp_holiday_appropriate has fired, the patient is moving from active to paused —
   // the current drug should not appear in the recommendation list. Defence-in-depth filter:
@@ -1321,8 +1353,7 @@ export function generateTreatmentOutput(
          patient.currentTreatment.agent === 'romosozumab' ||
          patient.currentTreatment.agent === 'abaloparatide'));
 
-    const postmenopausalFemale =
-      patient.sex === 'female' && (patient.age >= 50 || patient.earlyMenopause);
+    const postmenopausalFemale = isPostmenopausalFemale(patient);
 
     const egfrForRalox = resolveEGFR(patient);
     const bpContraindicated =
@@ -1428,7 +1459,7 @@ export function generateTreatmentOutput(
     }
   }
 
-  return { recommendations, flags, referrals, supplements };
+  return { recommendations, flags, referrals, supplements, specialistOptions };
 }
 
 // ─── New treatment initiation ─────────────────────────────────────────────
@@ -1615,20 +1646,22 @@ function initiateTherapy(
       source: SRC_BMS,
     });
     if (canUse('alendronate', egfr)) {
-      recs.push(withBPInitiationContext(asBridgingForGCDrivenVHR({
+      const tagged = bridgingTagOrNullForVHR({
         ...alendronate(),
         rationale:
           'Add alendronate alongside HRT: T-score remains ≤−2.5 despite HRT, suggesting HRT alone is insufficient bone protection. Equivalent first-line with risedronate per NOGG 2024 Rec 12.',
         priority: 'first-line',
-      }, patient), patient));
+      }, riskCategory, patient);
+      if (tagged) recs.push(withBPInitiationContext(tagged, patient));
     }
     if (canUse('risedronate', egfr)) {
-      recs.push(withBPInitiationContext(asBridgingForGCDrivenVHR({
+      const tagged = bridgingTagOrNullForVHR({
         ...risedronate(),
         rationale:
           'Equivalent first-line alongside alendronate (NOGG 2024 Rec 12, Strong) — add alongside HRT where T-score remains ≤−2.5 despite HRT.',
         priority: 'first-line',
-      }, patient), patient));
+      }, riskCategory, patient);
+      if (tagged) recs.push(withBPInitiationContext(tagged, patient));
     }
     return recs;
   }
@@ -1650,9 +1683,13 @@ function initiateTherapy(
         source: SRC_NICE,
       });
     }
-    recs.push(withBPInitiationContext(asBridgingForGCDrivenVHR(alendronate(), patient), patient));
+    {
+      const tagged = bridgingTagOrNullForVHR(alendronate(), riskCategory, patient);
+      if (tagged) recs.push(withBPInitiationContext(tagged, patient));
+    }
     if (canUse('risedronate', egfr)) {
-      recs.push(withBPInitiationContext(asBridgingForGCDrivenVHR(risedronate(), patient), patient));
+      const tagged = bridgingTagOrNullForVHR(risedronate(), riskCategory, patient);
+      if (tagged) recs.push(withBPInitiationContext(tagged, patient));
     }
     return recs;
   }
@@ -1728,8 +1765,14 @@ function initiateTherapy(
     source: SRC_HSE,
   });
   // v1.33 — push both equivalent first-line oral BPs.
-  recs.push(withBPInitiationContext(asBridgingForGCDrivenVHR(alendronate(), patient), patient));
-  recs.push(withBPInitiationContext(asBridgingForGCDrivenVHR(risedronate(), patient), patient));
+  {
+    const tagged = bridgingTagOrNullForVHR(alendronate(), riskCategory, patient);
+    if (tagged) recs.push(withBPInitiationContext(tagged, patient));
+  }
+  {
+    const tagged = bridgingTagOrNullForVHR(risedronate(), riskCategory, patient);
+    if (tagged) recs.push(withBPInitiationContext(tagged, patient));
+  }
   return recs;
 }
 
@@ -1741,7 +1784,7 @@ function sequencing(
   riskStratification: RiskStratification,
   flags: ClinicalFlag[],
   referrals: ReferralRecommendation[],
-): Omit<TreatmentOutput, 'supplements'> {
+): Omit<TreatmentOutput, 'supplements' | 'specialistOptions'> {
   const current = patient.currentTreatment!;
   const egfr = resolveEGFR(patient);
   const recs: TreatmentRecommendation[] = [];
@@ -1760,20 +1803,22 @@ function sequencing(
       source: SRC_BMS,
     });
     if (canUse('alendronate', egfr)) {
-      recs.push(withBPInitiationContext(asBridgingForGCDrivenVHR({
+      const tagged = bridgingTagOrNullForVHR({
         ...alendronate(),
         rationale:
           'Add alendronate alongside HRT: T-score remains ≤−2.5 despite HRT, suggesting HRT alone is insufficient bone protection. Equivalent first-line with risedronate per NOGG 2024 Rec 12.',
         priority: 'first-line',
-      }, patient), patient));
+      }, riskCategory, patient);
+      if (tagged) recs.push(withBPInitiationContext(tagged, patient));
     }
     if (canUse('risedronate', egfr)) {
-      recs.push(withBPInitiationContext(asBridgingForGCDrivenVHR({
+      const tagged = bridgingTagOrNullForVHR({
         ...risedronate(),
         rationale:
           'Equivalent first-line alongside alendronate (NOGG 2024 Rec 12, Strong) — add alongside HRT where T-score remains ≤−2.5 despite HRT.',
         priority: 'first-line',
-      }, patient), patient));
+      }, riskCategory, patient);
+      if (tagged) recs.push(withBPInitiationContext(tagged, patient));
     }
     return { recommendations: recs, flags, referrals };
   }
@@ -2178,7 +2223,7 @@ function giSwitch(
   stoppedAgent: TreatmentAgent,
   egfr: number | null,
   flags: ClinicalFlag[],
-): Omit<TreatmentOutput, 'supplements' | 'referrals'> {
+): Omit<TreatmentOutput, 'supplements' | 'referrals' | 'specialistOptions'> {
   const recs: TreatmentRecommendation[] = [];
 
   const affCI = hasAFFHistory(patient);
@@ -2240,7 +2285,7 @@ function affProdrome(
   patient: PatientInput,
   flags: ClinicalFlag[],
   referrals: ReferralRecommendation[],
-): Omit<TreatmentOutput, 'supplements'> {
+): Omit<TreatmentOutput, 'supplements' | 'specialistOptions'> {
   flags.push({
     id: 'aff_prodrome_urgent',
     severity: 'urgent',
@@ -2276,7 +2321,7 @@ function affProdrome(
 function onjHistory(
   flags: ClinicalFlag[],
   referrals: ReferralRecommendation[],
-): Omit<TreatmentOutput, 'supplements'> {
+): Omit<TreatmentOutput, 'supplements' | 'specialistOptions'> {
   flags.push({
     id: 'onj_avoid_antiresorptive',
     severity: 'warning',
@@ -2462,7 +2507,7 @@ function earlyMenopause(
   patient: PatientInput,
   flags: ClinicalFlag[],
   referrals: ReferralRecommendation[],
-): Omit<TreatmentOutput, 'supplements'> {
+): Omit<TreatmentOutput, 'supplements' | 'specialistOptions'> {
   flags.push({
     id: 'poi_hrt_first_line',
     severity: 'info',
@@ -2706,7 +2751,7 @@ function giop(
   riskStratification: RiskStratification,
   flags: ClinicalFlag[],
   referrals: ReferralRecommendation[],
-): Omit<TreatmentOutput, 'supplements'> {
+): Omit<TreatmentOutput, 'supplements' | 'specialistOptions'> {
   const egfr = resolveEGFR(patient);
   const recs: TreatmentRecommendation[] = [];
   const gcDose = effectiveGCDoseMgDay(patient);
@@ -2913,20 +2958,24 @@ function giop(
   if (!aff && !giIntolerance && canUse('alendronate', egfr)) {
     // Oral first-line per NOGG GIOP Rec 23 (Strong) — alendronate AND risedronate
     // are equivalent first-line oral options (v1.33). Push both.
-    recs.push(withBPInitiationContext(asBridgingForGCDrivenVHR({
-      ...alendronate(),
-      rationale:
-        'First-line oral bisphosphonate for GIOP (NOGG 2024 Rec 23 — Strong; equivalent with risedronate). ' +
-        'Initiate at same time as glucocorticoid if planned duration ≥3 months. ' +
-        'Calcium 1000–1500 mg/day and vitamin D ≥800 IU/day required alongside.',
-    }, patient), patient));
+    {
+      const tagged = bridgingTagOrNullForVHR({
+        ...alendronate(),
+        rationale:
+          'First-line oral bisphosphonate for GIOP (NOGG 2024 Rec 23 — Strong; equivalent with risedronate). ' +
+          'Initiate at same time as glucocorticoid if planned duration ≥3 months. ' +
+          'Calcium 1000–1500 mg/day and vitamin D ≥800 IU/day required alongside.',
+      }, riskCategory, patient);
+      if (tagged) recs.push(withBPInitiationContext(tagged, patient));
+    }
     if (canUse('risedronate', egfr)) {
-      recs.push(withBPInitiationContext(asBridgingForGCDrivenVHR({
+      const tagged = bridgingTagOrNullForVHR({
         ...risedronate(),
         rationale:
           'First-line oral bisphosphonate for GIOP (NOGG 2024 Rec 23 — Strong; equivalent with alendronate). ' +
           'Initiate at same time as glucocorticoid if planned duration ≥3 months.',
-      }, patient), patient));
+      }, riskCategory, patient);
+      if (tagged) recs.push(withBPInitiationContext(tagged, patient));
     }
   } else if (!aff && giIntolerance && !refuses && canUse('zoledronate', egfr)) {
     // Prior oral GI intolerance — IV zoledronate bypasses GI tract
@@ -3404,35 +3453,196 @@ function plannedBPDuration(patient: PatientInput, isIV: boolean): string {
     : 'Planned duration: at least 5 years, then reassess fracture risk. NOGG 2024 Section 7 Rec 1 (Strong).';
 }
 
-// (formerly asBridgingForVHR — narrowed from VHR-any to GC-driven VHR per NOGG Rec 8(g),
-// paired with spec v1.42 §5.5 correction. The bridging-bisphosphonate instruction in
-// NOGG Rec 8 is attached only to the high-dose-GC VHR criterion ("if any delay is
-// anticipated, start an oral bisphosphonate in the meantime"); other VHR triggers
-// (T-score ≤ −3.5, recent vert fx, ≥2 vert fx, multi-RF + recent fx, FRAX-VHR) do not
-// carry the bridging instruction — prior oral BP attenuates subsequent anabolic BMD
-// response per NOGG 2024 Evidence IIb.
+// (formerly asBridgingForGCDrivenVHR / originally asBridgingForVHR — v1.43 Shape B
+// extension: three-state return distinguishing GC-driven VHR / non-GC VHR / non-VHR.
+// Paired with spec v1.43 §17.6 architecture; supersedes the dd7ef05 / v1.42 §5.5 scope
+// narrowing.
 //
-// For GC-driven VHR patients only, oral bisphosphonate entries are bridging cover while
-// awaiting specialist anabolic initiation. Non-GC-driven entries (whether VHR via other
-// criteria or non-VHR) pass through unchanged — category is left undefined (consumers
-// treat undefined as 'primary').
+// State table:
+//   GC-driven VHR  → { ...rec, category: 'bridging' }
+//                    (gcDrivesVHR true; bridging-BP per NOGG Rec 8(g) — the
+//                     "start oral BP in the meantime" instruction attaches only to
+//                     the high-dose-GC VHR criterion)
+//   Non-GC VHR     → null
+//                    (caller skips the push entirely; oral BP not indicated for
+//                     other VHR triggers per NOGG Rec 11 + Evidence IIb blunting
+//                     of subsequent anabolic response. The patient-preference-fallback
+//                     path at v1.43 §7.1.refusesInjections re-emits the BP separately
+//                     via a different code path — not via this helper.)
+//   Non-VHR        → rec unchanged
+//                    (category left undefined; consumers treat undefined as 'primary')
 //
-// Transitivity: gcDrivesVHR === true implies riskCategory === 'very_high' because the
-// same condition fires VHR-4 in risk.ts:307. The previous outer guard
-// (riskCategory === 'very_high') is preserved by transitivity, so no separate VHR
-// check is needed here. If a future change ever decouples VHR-4 from the
-// bridging-instruction GC threshold (e.g. lowers VHR threshold while keeping bridging at
-// 7.5 mg/day × 3 months), this transitivity breaks and an explicit riskCategory check
-// must be reintroduced. No current risk; flagging for future readers.
-function asBridgingForGCDrivenVHR(
+// The dd7ef05 transitivity argument (gcDrivesVHR ⇒ VHR-4 ⇒ riskCategory==='very_high')
+// is no longer sufficient on its own — the helper now needs to distinguish
+// "any VHR vs non-VHR" to decide between the bridging tag and the null suppression.
+// So riskCategory is back as an explicit argument. If a future change ever decouples
+// VHR-4 from the bridging-instruction GC threshold, the gcDrivesVHR branch's behaviour
+// will need rechecking, but the three-state structure stays valid.
+function bridgingTagOrNullForVHR(
   rec: TreatmentRecommendation,
+  riskCategory: RiskCategory,
   patient: PatientInput,
-): TreatmentRecommendation {
+): TreatmentRecommendation | null {
+  if (riskCategory !== 'very_high') {
+    return rec;
+  }
   const gcDrivesVHR =
     isOnHighDoseGC(patient) && gcDurationMonths(patient) >= GIOP.highDoseMinMonths;
-  return gcDrivesVHR
-    ? { ...rec, category: 'bridging' }
-    : rec;
+  if (gcDrivesVHR) {
+    return { ...rec, category: 'bridging' };
+  }
+  return null;
+}
+
+// Postmenopausal-female derivation — single source of truth used by Shape B
+// specialistOptions logic AND the existing raloxifene-follow-on logic at
+// treatment.ts:~1324. Matches the inline derivation that was at that site since
+// v1.36. Hoisting avoids duplicate definitions drifting independently.
+function isPostmenopausalFemale(patient: PatientInput): boolean {
+  return patient.sex === 'female' && (patient.age >= 50 || patient.earlyMenopause);
+}
+
+// v1.43 Shape B — specialistOptions builder. Returns the per-patient anabolic
+// menu the specialist may consider after the GP's referral. Empty array for
+// non-VHR patients. Per NOGG 2024 Rec 11 + spec v1.43 §5.5 / §7.1 / §17.6:
+//   Postmenopausal female VHR → teri (first_line) + romo (further_option) + abalo (further_option, reimbursement caveat)
+//   Male ≥50 VHR              → teri only (first_line); romo and abalo not licensed in men
+//   Non-VHR                   → []
+function buildSpecialistOptions(
+  patient: PatientInput,
+  riskCategory: RiskCategory,
+): SpecialistOption[] {
+  if (riskCategory !== 'very_high') return [];
+
+  const options: SpecialistOption[] = [];
+  const postmenopausal = isPostmenopausalFemale(patient);
+  const male = patient.sex === 'male';
+
+  if (postmenopausal) {
+    options.push({
+      drug: 'teriparatide',
+      tier: 'first_line',
+      rationale:
+        'Teriparatide is the first-line anabolic option for postmenopausal women at very high fracture risk ' +
+        '(NOGG 2024 Rec 11, Conditional). Particularly indicated where multiple vertebral fractures are present. ' +
+        'Evidence Ib (VERO study): 56% fewer new vertebral fractures and 52% fewer clinical fractures at 2 years ' +
+        'vs risedronate. 24-month maximum course (lifetime limit; cannot be repeated); sequential antiresorptive ' +
+        'mandatory at end of course.',
+      reference: 'NOGG 2024 Rec 11; spec §5.5 + §7.1; HSE BVM policy (biosimilar required since March 2023).',
+      preReferralChecks:
+        'Trigger eGFR + PTH before referral — both must be available and within normal range before specialist ' +
+        'initiation (severe renal impairment is a contraindication; raised PTH is a contraindication and must be ' +
+        'investigated as secondary cause). Document the values in the referral letter.',
+    });
+    options.push({
+      drug: 'romosozumab',
+      tier: 'further_option',
+      rationale:
+        'Romosozumab is a further anabolic option for postmenopausal women at very high fracture risk ' +
+        '(NOGG 2024 Rec 11). Evidence Ib (FRAME trial): 48% reduction in new vertebral fractures, 19% non-vertebral, ' +
+        '27% clinical, 38% hip vs alendronate at 24 months. 12-month course (no lifetime limit). Two SC injections ' +
+        'of 105 mg monthly. HSE Managed Access Protocol (Nov 2024): T-score ≤−2.5 + major fracture within 24 months. ' +
+        'NOT licensed for use in men.',
+      reference:
+        'NOGG 2024 Rec 11; spec §5.5 + §7.1; HSE Managed Access Protocol — Romosozumab (Evenity) 2024.',
+      preReferralChecks:
+        'Trigger corrected serum calcium before referral — must be within normal range before specialist initiation ' +
+        '(transient hypocalcaemia observed; absolute CI per NOGG p.34). Flag any CV risk factors explicitly in ' +
+        'referral letter (CV safety signal per FRAME — history of MI/stroke is contraindication).',
+    });
+    options.push({
+      drug: 'abaloparatide',
+      tier: 'further_option',
+      rationale:
+        'Abaloparatide is a further anabolic option for postmenopausal women at very high fracture risk ' +
+        '(NOGG 2024 Rec 11). 18-month maximum course; sequential antiresorptive (e.g. alendronate) required ' +
+        'following the course to maintain BMD gains and fracture reduction (NOGG 2024 Evidence IIb). NOT ' +
+        'licensed for use in men.',
+      reimbursementNote:
+        'Not currently HSE-reimbursed in Ireland. Patients may be self-funded in specialist consultation.',
+      reference: 'NOGG 2024 Rec 11; spec §5.5 + §7.1.',
+      preReferralChecks:
+        'Specialist will assess fitness for anabolic therapy and reimbursement pathway. GP role: identify VHR, ' +
+        'refer, and flag if patient has discussed private-pay anabolic options.',
+    });
+    return options;
+  }
+
+  if (male && patient.age >= 50) {
+    options.push({
+      drug: 'teriparatide',
+      tier: 'first_line',
+      rationale:
+        'Teriparatide is the only anabolic agent licensed for men in Ireland (NOGG 2024 Rec 11; spec §5.5). ' +
+        'Particularly indicated where multiple vertebral fractures are present. 24-month maximum course ' +
+        '(lifetime limit); sequential antiresorptive mandatory at end of course.',
+      reference: 'NOGG 2024 Rec 11; spec §5.5 + §7.1; HSE BVM policy.',
+      preReferralChecks:
+        'Trigger eGFR + PTH before referral — both must be available and within normal range before specialist ' +
+        'initiation. Document in referral letter.',
+    });
+    return options;
+  }
+
+  return options;
+}
+
+// v1.43 Shape B — patient-preference fallback for VHR + refusesInjections.
+// See the call site in generateTreatmentOutput for the full design rationale.
+// Mutates `recommendations` and `flags` in place. No-op for any patient profile
+// that doesn't match the gate (defence-in-depth: only fires when recommendations
+// is empty, riskCategory is very_high, refusesInjections is true, and
+// gcDrivesVHR is false).
+function applyPatientPreferenceFallbackIfRefuses(
+  patient: PatientInput,
+  riskCategory: RiskCategory,
+  recommendations: TreatmentRecommendation[],
+  flags: ClinicalFlag[],
+): void {
+  if (riskCategory !== 'very_high') return;
+  if (!patient.refusesInjections) return;
+  const gcDrivesVHR =
+    isOnHighDoseGC(patient) && gcDurationMonths(patient) >= GIOP.highDoseMinMonths;
+  if (gcDrivesVHR) return;
+  if (recommendations.length > 0) return;
+
+  const egfr = resolveEGFR(patient);
+  const fallbackRationale =
+    'Patient not accepting injectable therapy. Document patient preference and ' +
+    'the discussion in the referral letter. Oral bisphosphonates are an ' +
+    'alternative therapy option, for further discussion with specialist.';
+
+  if (canUse('alendronate', egfr) && (egfr === null || egfr > RENAL_LIMITS.alendronate.ci)) {
+    recommendations.push(withBPInitiationContext({
+      ...alendronate(),
+      rationale: fallbackRationale,
+      category: 'patient_preference_fallback',
+    }, patient));
+  }
+  if (canUse('risedronate', egfr)) {
+    recommendations.push(withBPInitiationContext({
+      ...risedronate(),
+      rationale: fallbackRationale,
+      category: 'patient_preference_fallback',
+    }, patient));
+  }
+
+  flags.push({
+    id: 'vhr_anabolic_refusal_context',
+    severity: 'info',
+    message:
+      'Patient not accepting injectable therapy. Oral bisphosphonates surfaced as an ' +
+      'alternative therapy option for discussion with the patient and with the specialist. ' +
+      "Document the patient's preference and the discussion in the referral letter — the " +
+      "specialist consultation may surface considerations or alternatives that affect the patient's view.",
+    rationale:
+      'Per NOGG Rec 9 (Strong) patient preference is one of four factors driving treatment choice. ' +
+      'For VHR patients refusing parenteral therapy (denosumab SC, IV zoledronate, all SC anabolics), ' +
+      'oral bisphosphonates remain available as a patient-preference option alongside the specialist ' +
+      'referral. This flag does not assert a clinical hierarchy — the specialist consultation may ' +
+      'reveal options or considerations the GP cannot.',
+    source: SRC_NOGG,
+  });
 }
 
 // Wraps a bisphosphonate recipe with patient-specific planned-duration monitoring entry.

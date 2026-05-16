@@ -614,7 +614,14 @@ function tc21(): TCResult {
 }
 
 // ─── TC22 ─────────────────────────────────────────────────────────────────
-// 78F VHR (T -3.6 + 2 VFs + recent VF 10mo), refuses injections
+// 78F VHR (T -3.6 + 2 VFs + recent VF 10mo), refuses injections — v1.43 Shape B
+// updated semantics. Non-GC VHR patient refusing injectable therapy. Shape B
+// suppresses the standard alendronate/risedronate primary recipe (oral BP not
+// indicated for non-GC VHR triggers per NOGG Rec 11). Patient-preference
+// fallback re-emits both oral BPs with category 'patient_preference_fallback'
+// for GP/patient discussion alongside the specialist referral. specialistOptions
+// menu remains populated (specialist consultation may surface considerations
+// the GP cannot pre-judge).
 function tc22(): TCResult {
   const failures: string[] = [];
   const patient = basePatient({
@@ -633,9 +640,38 @@ function tc22(): TCResult {
   check(failures, 'refuses-injections flag fires', hasFlag(decision, 'patient_refuses_injections'));
   check(failures, 'NO denosumab (refuses injections)', !hasAgent(decision, 'denosumab'));
   check(failures, 'NO zoledronate (refuses injections)', !hasAgent(decision, 'zoledronate'));
-  check(failures, 'recommends alendronate (oral)', hasAgent(decision, 'alendronate'));
-  check(failures, 'recommends risedronate (equivalent first-line per NOGG 2024 Rec 12)', hasAgent(decision, 'risedronate'));
-  return { name: 'TC22 — 78F VHR refuses injections', passed: failures.length === 0, failures, decision };
+
+  // v1.43 Shape B — alendronate + risedronate re-emitted as patient-preference fallback
+  // (NOT primary or bridging). Entries present in treatmentRecommendations but tagged
+  // category: 'patient_preference_fallback' so UI renders distinctly.
+  const aln = decision.treatmentRecommendations.find(r => r.agent === 'alendronate');
+  const ris = decision.treatmentRecommendations.find(r => r.agent === 'risedronate');
+  check(failures, 'alendronate present as patient-preference fallback',
+    !!aln && aln.category === 'patient_preference_fallback');
+  check(failures, 'risedronate present as patient-preference fallback',
+    !!ris && ris.category === 'patient_preference_fallback');
+  check(failures, 'alendronate rationale frames patient-preference (not clinical recommendation)',
+    !!aln && /not accepting injectable therapy/i.test(aln.rationale));
+
+  // v1.43 Shape B — vhr_specialist_referral hoist still fires (referral is the first action).
+  check(failures, 'vhr_specialist_referral flag fires', hasFlag(decision, 'vhr_specialist_referral'));
+
+  // v1.43 Shape B — context flag for the refusal scenario.
+  check(failures, 'vhr_anabolic_refusal_context flag fires',
+    hasFlag(decision, 'vhr_anabolic_refusal_context'));
+
+  // v1.43 Shape B — specialistOptions still populated (postmenopausal F VHR → 3 entries).
+  // Specialist consultation may surface considerations the GP cannot pre-judge.
+  check(failures, 'specialistOptions has 3 entries (postmenopausal F: teri + romo + abalo)',
+    decision.specialistOptions.length === 3);
+  check(failures, 'specialistOptions includes teriparatide as first_line',
+    decision.specialistOptions.some(o => o.drug === 'teriparatide' && o.tier === 'first_line'));
+  check(failures, 'specialistOptions includes romosozumab as further_option',
+    decision.specialistOptions.some(o => o.drug === 'romosozumab' && o.tier === 'further_option'));
+  check(failures, 'specialistOptions includes abaloparatide as further_option with reimbursementNote',
+    decision.specialistOptions.some(o => o.drug === 'abaloparatide' && o.tier === 'further_option' && !!o.reimbursementNote));
+
+  return { name: 'TC22 — 78F VHR refuses injections (v1.43 Shape B patient-preference fallback)', passed: failures.length === 0, failures, decision };
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -3858,6 +3894,156 @@ function tc106(): TCResult {
   return { name: 'TC106 — abaloparatide shared-care continuation: PTHrP + sequential + reimbursement caveat', passed: failures.length === 0, failures, decision };
 }
 
+// ═══════════════════════════════════════════════════════════════════════════
+// v1.43 Shape B TEST CASES (TC107–TC109)
+// ═══════════════════════════════════════════════════════════════════════════
+
+// ─── TC107 ─────────────────────────────────────────────────────────────────
+// Female postmenopausal non-GC VHR (e.g. 65F, T-score −3.6 LS, no GC):
+// treatmentRecommendations empty (GP refers, doesn't prescribe);
+// specialistOptions has 3 entries — teri first_line + romo further_option +
+// abalo further_option (with reimbursementNote). Hoist + flag both fire.
+function tc107(): TCResult {
+  const failures: string[] = [];
+  const patient = basePatient({
+    age: 65,
+    sex: 'female',
+    dexaResults: { lumbarSpineTScore: -3.6, totalHipTScore: -2.8, femoralNeckTScore: -2.7, forearmTScore: null },
+    bloodResults: { adjustedCalciumMmol: 2.32, vitaminDNmol: 60, egfr: 75, alp: 80, tshMUL: 2.0, hbGramsPerLitre: 135, esrOrCrp: 'normal' },
+  });
+  const decision = runClinicalDecision(patient);
+
+  check(failures, 'risk = very_high (T ≤ −3.5)',
+    decision.riskStratification.category === 'very_high',
+    `got ${decision.riskStratification.category}`);
+  check(failures, 'vhr_specialist_referral fires',
+    hasFlag(decision, 'vhr_specialist_referral'));
+
+  // Shape B suppression: BPs not pushed for non-GC VHR.
+  check(failures, 'treatmentRecommendations empty (Shape B suppression)',
+    decision.treatmentRecommendations.length === 0);
+  check(failures, 'NO alendronate (Shape B: non-GC VHR refers, not prescribes)',
+    !hasAgent(decision, 'alendronate'));
+  check(failures, 'NO risedronate (Shape B: non-GC VHR refers, not prescribes)',
+    !hasAgent(decision, 'risedronate'));
+
+  // specialistOptions populated with 3 entries.
+  check(failures, 'specialistOptions has 3 entries (postmenopausal F VHR)',
+    decision.specialistOptions.length === 3,
+    `got ${decision.specialistOptions.length}`);
+
+  const teri = decision.specialistOptions.find(o => o.drug === 'teriparatide');
+  const romo = decision.specialistOptions.find(o => o.drug === 'romosozumab');
+  const abalo = decision.specialistOptions.find(o => o.drug === 'abaloparatide');
+
+  check(failures, 'teriparatide present as first_line', !!teri && teri.tier === 'first_line');
+  check(failures, 'teriparatide rationale references VERO Evidence Ib',
+    !!teri && /VERO/i.test(teri.rationale));
+  check(failures, 'teriparatide preReferralChecks includes eGFR + PTH',
+    !!teri?.preReferralChecks && /eGFR/i.test(teri.preReferralChecks) && /PTH/i.test(teri.preReferralChecks));
+
+  check(failures, 'romosozumab present as further_option', !!romo && romo.tier === 'further_option');
+  check(failures, 'romosozumab references HSE MAP', !!romo && /HSE Managed Access Protocol/i.test(romo.reference));
+  check(failures, 'romosozumab preReferralChecks includes corrected serum calcium',
+    !!romo?.preReferralChecks && /corrected serum calcium/i.test(romo.preReferralChecks));
+
+  check(failures, 'abaloparatide present as further_option', !!abalo && abalo.tier === 'further_option');
+  check(failures, 'abaloparatide carries reimbursementNote (HSE not-reimbursed)',
+    !!abalo?.reimbursementNote && /not currently HSE-reimbursed/i.test(abalo.reimbursementNote));
+
+  return { name: 'TC107 — postmenopausal F non-GC VHR: empty recipe + specialistOptions {teri/romo/abalo} (Shape B)', passed: failures.length === 0, failures, decision };
+}
+
+// ─── TC108 ─────────────────────────────────────────────────────────────────
+// Male ≥50 non-GC VHR (e.g. 60M, T-score −3.6 LS, prior fragility fx, no GC):
+// treatmentRecommendations empty (GP refers); specialistOptions has ONE entry —
+// teriparatide first_line ONLY (romo + abalo NOT licensed for men). Hoist + flag both fire.
+function tc108(): TCResult {
+  const failures: string[] = [];
+  const patient = basePatient({
+    age: 60,
+    sex: 'male',
+    priorFragilityFracture: true,
+    dexaResults: { lumbarSpineTScore: -3.6, totalHipTScore: -2.8, femoralNeckTScore: -2.7, forearmTScore: null },
+    bloodResults: { adjustedCalciumMmol: 2.32, vitaminDNmol: 60, egfr: 75, alp: 80, tshMUL: 2.0, hbGramsPerLitre: 140, esrOrCrp: 'normal' },
+  });
+  const decision = runClinicalDecision(patient);
+
+  check(failures, 'risk = very_high (T ≤ −3.5)',
+    decision.riskStratification.category === 'very_high',
+    `got ${decision.riskStratification.category}`);
+  check(failures, 'vhr_specialist_referral fires',
+    hasFlag(decision, 'vhr_specialist_referral'));
+
+  check(failures, 'treatmentRecommendations empty (Shape B suppression)',
+    decision.treatmentRecommendations.length === 0);
+  check(failures, 'NO alendronate (Shape B: non-GC VHR refers, not prescribes)',
+    !hasAgent(decision, 'alendronate'));
+
+  // specialistOptions has teri ONLY for male — romo + abalo not licensed in men.
+  check(failures, 'specialistOptions has 1 entry (male VHR: teri only)',
+    decision.specialistOptions.length === 1,
+    `got ${decision.specialistOptions.length}`);
+  check(failures, 'specialistOptions includes teriparatide as first_line',
+    decision.specialistOptions.some(o => o.drug === 'teriparatide' && o.tier === 'first_line'));
+  check(failures, 'NO romosozumab in specialistOptions (not licensed in men)',
+    !decision.specialistOptions.some(o => o.drug === 'romosozumab'));
+  check(failures, 'NO abaloparatide in specialistOptions (not licensed in men)',
+    !decision.specialistOptions.some(o => o.drug === 'abaloparatide'));
+
+  const teri = decision.specialistOptions.find(o => o.drug === 'teriparatide')!;
+  check(failures, 'male teri rationale notes "only anabolic licensed for men"',
+    /only anabolic/i.test(teri.rationale) && /men/i.test(teri.rationale));
+
+  return { name: 'TC108 — M ≥50 non-GC VHR: empty recipe + specialistOptions {teri only}', passed: failures.length === 0, failures, decision };
+}
+
+// ─── TC109 ─────────────────────────────────────────────────────────────────
+// Female postmenopausal GC-driven VHR (66F, prednisolone 10mg/day × 3+ months,
+// T-score −3.5 LS): treatmentRecommendations has bridging alendronate + risedronate
+// (Shape B coexistence — GC-driven bridging cards STILL render per NOGG Rec 8(g));
+// specialistOptions ALSO populated with 3 entries (postmenopausal F VHR menu).
+// This is the v1.43 coexistence-of-paths case: bridging + specialistOptions both present.
+function tc109(): TCResult {
+  const failures: string[] = [];
+  const patient = basePatient({
+    age: 66,
+    sex: 'female',
+    glucocorticoidStatus: 'current',
+    glucocorticoidUse: { current: true, durationMonths: 4, dose: 'medium' },
+    glucocorticoidDoseMgDay: 10,
+    dexaResults: { lumbarSpineTScore: -3.5, totalHipTScore: -2.8, femoralNeckTScore: -2.7, forearmTScore: null },
+    bloodResults: { adjustedCalciumMmol: 2.32, vitaminDNmol: 60, egfr: 75, alp: 80, tshMUL: 2.0, hbGramsPerLitre: 135, esrOrCrp: 'normal' },
+  });
+  const decision = runClinicalDecision(patient);
+
+  check(failures, 'risk = very_high', decision.riskStratification.category === 'very_high',
+    `got ${decision.riskStratification.category}`);
+  check(failures, 'vhr_specialist_referral fires URGENT (GC drives VHR)',
+    !!decision.flags.find(f => f.id === 'vhr_specialist_referral' && f.severity === 'urgent'));
+
+  // Bridging entries present — coexistence path under Shape B.
+  const aln = decision.treatmentRecommendations.find(r => r.agent === 'alendronate');
+  const ris = decision.treatmentRecommendations.find(r => r.agent === 'risedronate');
+  check(failures, 'alendronate present with category bridging',
+    !!aln && aln.category === 'bridging');
+  check(failures, 'risedronate present with category bridging',
+    !!ris && ris.category === 'bridging');
+
+  // specialistOptions ALSO populated.
+  check(failures, 'specialistOptions has 3 entries (postmenopausal F: teri + romo + abalo)',
+    decision.specialistOptions.length === 3,
+    `got ${decision.specialistOptions.length}`);
+  check(failures, 'specialistOptions teriparatide first_line',
+    decision.specialistOptions.some(o => o.drug === 'teriparatide' && o.tier === 'first_line'));
+  check(failures, 'specialistOptions romosozumab further_option',
+    decision.specialistOptions.some(o => o.drug === 'romosozumab' && o.tier === 'further_option'));
+  check(failures, 'specialistOptions abaloparatide further_option with reimbursementNote',
+    decision.specialistOptions.some(o => o.drug === 'abaloparatide' && o.tier === 'further_option' && !!o.reimbursementNote));
+
+  return { name: 'TC109 — postmenopausal F GC-driven VHR: bridging recipe + specialistOptions coexistence (Shape B)', passed: failures.length === 0, failures, decision };
+}
+
 // ─── Runner ───────────────────────────────────────────────────────────────
 
 const TCs: Array<() => TCResult> = [
@@ -3893,6 +4079,9 @@ const TCs: Array<() => TCResult> = [
   // v1.19 (test-doc v1.19) — lock engine Round 3 behaviours (T1DM, recent-MOF caveat,
   // abaloparatide shared-care continuation)
   tc103, tc104, tc105, tc106,
+  // v1.43 Shape B — specialistOptions field + non-GC VHR push suppression + patient-
+  // preference fallback (paired with TC22 update for refuses-injections semantics)
+  tc107, tc108, tc109,
 ];
 
 const results = TCs.map(fn => fn());

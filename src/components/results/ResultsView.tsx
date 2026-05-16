@@ -10,6 +10,7 @@ import type {
   Urgency,
   PatientEducation,
   TreatmentRecommendation,
+  SpecialistOption,
 } from '@/lib/guidelines/types';
 import { Term } from '@/components/Tooltip';
 import { BLOOD_RANGES } from '@/lib/guidelines/thresholds';
@@ -660,13 +661,15 @@ function PatientEducationPanel({ edu }: { edu: PatientEducation }) {
 // initiation — visually de-emphasised, "First-line"/"Strong" badges dropped (misleading
 // at this risk level), but full prescribing detail preserved so the GP can safely start
 // the bridging therapy.
-function TreatmentCard({ tr, variant }: { tr: TreatmentRecommendation; variant: 'primary' | 'bridging' }) {
+function TreatmentCard({ tr, variant }: { tr: TreatmentRecommendation; variant: 'primary' | 'bridging' | 'patient_preference_fallback' }) {
   const isAlt = tr.priority === 'alternative';
   const isBridging = variant === 'bridging';
+  const isPatientPref = variant === 'patient_preference_fallback';
+  const muted = isBridging || isPatientPref;
   return (
     <div
       className={`rounded-lg shadow-sm ${
-        isBridging
+        muted
           ? 'bg-slate-50 border border-slate-200 p-3.5'
           : isAlt
             ? 'bg-white border border-slate-200 opacity-95 p-4'
@@ -677,20 +680,22 @@ function TreatmentCard({ tr, variant }: { tr: TreatmentRecommendation; variant: 
         <div className="flex items-center gap-2 flex-wrap">
           <p
             className={`${
-              isBridging ? 'text-base' : 'text-lg sm:text-xl'
+              muted ? 'text-base' : 'text-lg sm:text-xl'
             } font-bold text-slate-900 capitalize leading-tight`}
           >
             {tr.agent}
           </p>
           {isBridging ? (
             <Badge className="bg-amber-100 text-amber-800">Interim cover</Badge>
+          ) : isPatientPref ? (
+            <Badge className="bg-amber-100 text-amber-800">Patient-preference option</Badge>
           ) : isAlt ? (
             <Badge className="bg-slate-200 text-slate-700">Second-line alternative</Badge>
           ) : (
             <Badge className="bg-indigo-600 text-white">First-line</Badge>
           )}
         </div>
-        {!isBridging && (
+        {!muted && (
           <Badge
             className={
               tr.strength === 'strong'
@@ -744,6 +749,50 @@ function TreatmentCard({ tr, variant }: { tr: TreatmentRecommendation; variant: 
       </p>
 
       {tr.patientEducation && <PatientEducationPanel edu={tr.patientEducation} />}
+    </div>
+  );
+}
+
+// v1.43 Shape B — specialist-menu card. Visually distinct from TreatmentCard
+// (indigo/violet accent vs neutral white) to make clear these are NOT
+// GP-prescribable. Abaloparatide's reimbursementNote surfaces in an amber
+// tint so the reimbursement caveat is unmissable. preReferralChecks render
+// collapsibly via the existing Disclosure pattern.
+function SpecialistOptionCard({ opt }: { opt: SpecialistOption }) {
+  const isFirstLine = opt.tier === 'first_line';
+  return (
+    <div className="rounded-lg shadow-sm bg-violet-50 border border-violet-200 p-4">
+      <div className="flex items-start justify-between gap-2 mb-1 flex-wrap">
+        <div className="flex items-center gap-2 flex-wrap">
+          <p className="text-lg font-bold text-violet-900 capitalize leading-tight">
+            {opt.drug}
+          </p>
+          <Badge className="bg-violet-600 text-white">Specialist option</Badge>
+        </div>
+        {isFirstLine && (
+          <Badge className="bg-violet-200 text-violet-900">First-line anabolic</Badge>
+        )}
+      </div>
+      <p className="text-xs text-slate-700 mb-2 leading-snug">{opt.rationale}</p>
+      {opt.reimbursementNote && (
+        <div className="bg-amber-50 border-l-4 border-amber-500 rounded-r px-3 py-2 mb-2">
+          <p className="text-[11px] font-bold text-amber-700 uppercase tracking-wide mb-0.5">
+            Reimbursement
+          </p>
+          <p className="text-xs text-amber-950 font-medium leading-snug">
+            {opt.reimbursementNote}
+          </p>
+        </div>
+      )}
+      {opt.preReferralChecks && (
+        <Disclosure label="pre-referral checks (GP)">
+          <p className="text-xs text-slate-700 leading-snug">{opt.preReferralChecks}</p>
+        </Disclosure>
+      )}
+      {opt.contextNotes && (
+        <p className="text-xs text-slate-600 italic mt-1.5 leading-snug">{opt.contextNotes}</p>
+      )}
+      <p className="text-[11px] text-slate-500 mt-2">{opt.reference}</p>
     </div>
   );
 }
@@ -883,38 +932,109 @@ export function ResultsView({ result, patient, onReset, onBack, onRevealNoRfFrax
         </section>
       )}
 
-      {/* TREATMENT — primary entries first; bridging entries (VHR oral-BP interim cover)
-          under a separate sub-section so they are not confused with definitive treatment. */}
-      {result.treatmentRecommendations.length > 0 &&
+      {/* TREATMENT — primary entries first; bridging entries (GC-driven VHR oral-BP
+          interim cover); patient-preference-fallback entries (VHR refuses-injections
+          oral-BP alternative — v1.43 Shape B). Empty Treatment section placeholder
+          rendered when VHR-non-GC-non-fallback patient has no recipes (specialist
+          initiates after referral). */}
+      {(() => {
+        const recs = result.treatmentRecommendations;
+        const primary = recs.filter((tr) => tr.category !== 'bridging' && tr.category !== 'patient_preference_fallback');
+        const bridging = recs.filter((tr) => tr.category === 'bridging');
+        const fallback = recs.filter((tr) => tr.category === 'patient_preference_fallback');
+        const hasAnyVHRSpecialistOptions = result.specialistOptions.length > 0;
+        // Empty Treatment + specialistOptions populated → render placeholder. The hoist
+        // banner above already states "Specialist referral required"; this placeholder
+        // keeps the page narrative intact between Risk factors and "Specialist may
+        // consider" below.
+        const showEmptyTreatmentPlaceholder =
+          recs.length === 0 && hasAnyVHRSpecialistOptions;
+        return (
+          <>
+            {primary.length > 0 && (
+              <section>
+                <SectionTitle>Treatment</SectionTitle>
+                <div className="space-y-3">
+                  {primary.map((tr, i) => (
+                    <TreatmentCard key={`primary-${i}`} tr={tr} variant="primary" />
+                  ))}
+                </div>
+              </section>
+            )}
+            {bridging.length > 0 && (
+              <section>
+                <SectionTitle>Start now while awaiting specialist</SectionTitle>
+                <p className="text-xs text-slate-600 -mt-2 mb-3 leading-snug">
+                  Interim cover until specialist initiates anabolic therapy. Full prescribing detail below.
+                </p>
+                <div className="space-y-3">
+                  {bridging.map((tr, i) => (
+                    <TreatmentCard key={`bridging-${i}`} tr={tr} variant="bridging" />
+                  ))}
+                </div>
+              </section>
+            )}
+            {fallback.length > 0 && (
+              <section>
+                <SectionTitle>Patient-preference option</SectionTitle>
+                <p className="text-xs text-slate-600 -mt-2 mb-3 leading-snug">
+                  Patient not accepting injectable therapy. Oral bisphosphonates surfaced as an alternative for GP/patient discussion alongside the specialist referral.
+                </p>
+                <div className="space-y-3">
+                  {fallback.map((tr, i) => (
+                    <TreatmentCard key={`fallback-${i}`} tr={tr} variant="patient_preference_fallback" />
+                  ))}
+                </div>
+              </section>
+            )}
+            {showEmptyTreatmentPlaceholder && (
+              <section>
+                <SectionTitle>Treatment</SectionTitle>
+                <div className="bg-slate-50 border border-slate-200 rounded-lg p-4">
+                  <p className="text-sm text-slate-700 leading-snug">
+                    Treatment will be initiated by the specialist after referral — see specialist options below.
+                  </p>
+                </div>
+              </section>
+            )}
+          </>
+        );
+      })()}
+
+      {/* SPECIALIST MAY CONSIDER — v1.43 Shape B. Renders for any VHR patient (any
+          trigger, GC-driven or not). Tier sub-grouping: first-line entries above,
+          "Further options" below. Distinct violet accent + "Specialist option"
+          badge make clear these are NOT GP-prescribable. */}
+      {result.specialistOptions.length > 0 &&
         (() => {
-          const primary = result.treatmentRecommendations.filter((tr) => tr.category !== 'bridging');
-          const bridging = result.treatmentRecommendations.filter((tr) => tr.category === 'bridging');
+          const firstLine = result.specialistOptions.filter((o) => o.tier === 'first_line');
+          const further = result.specialistOptions.filter((o) => o.tier === 'further_option');
           return (
-            <>
-              {primary.length > 0 && (
-                <section>
-                  <SectionTitle>Treatment</SectionTitle>
-                  <div className="space-y-3">
-                    {primary.map((tr, i) => (
-                      <TreatmentCard key={`primary-${i}`} tr={tr} variant="primary" />
-                    ))}
-                  </div>
-                </section>
+            <section>
+              <SectionTitle>Specialist may consider</SectionTitle>
+              <p className="text-xs text-slate-600 -mt-2 mb-3 leading-snug">
+                Options the specialist may consider after your referral. GP does not prescribe these in primary care.
+              </p>
+              {firstLine.length > 0 && (
+                <div className="space-y-3">
+                  {firstLine.map((opt, i) => (
+                    <SpecialistOptionCard key={`first-${i}`} opt={opt} />
+                  ))}
+                </div>
               )}
-              {bridging.length > 0 && (
-                <section>
-                  <SectionTitle>Start now while awaiting specialist</SectionTitle>
-                  <p className="text-xs text-slate-600 -mt-2 mb-3 leading-snug">
-                    Interim cover until specialist initiates anabolic therapy. Full prescribing detail below.
+              {further.length > 0 && (
+                <>
+                  <p className="text-[11px] font-bold uppercase tracking-wide text-violet-700 mt-4 mb-2">
+                    Further options
                   </p>
                   <div className="space-y-3">
-                    {bridging.map((tr, i) => (
-                      <TreatmentCard key={`bridging-${i}`} tr={tr} variant="bridging" />
+                    {further.map((opt, i) => (
+                      <SpecialistOptionCard key={`further-${i}`} opt={opt} />
                     ))}
                   </div>
-                </section>
+                </>
               )}
-            </>
+            </section>
           );
         })()}
 
