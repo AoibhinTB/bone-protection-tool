@@ -198,7 +198,7 @@ export function generateTreatmentOutput(
       rationale:
         'NOGG 2024 Table 2: individuals retain the risk characteristics of their country of origin. ' +
         'Use the FRAX model for the country of birth — Irish baselines (country code 49) are not appropriate for non-Irish-born patients. ' +
-        'Source: Johansson et al. 2015; Wändell et al. 2021.',
+        'Primary literature: Johansson et al. 2015; Wändell et al. 2021.',
       source: SRC_NOGG,
     });
   }
@@ -243,7 +243,7 @@ export function generateTreatmentOutput(
         rationale:
           `Triggered by: ${vfImagingTriggers.join('; ')}. ` +
           'Many vertebral fractures are silent and only identifiable on imaging — they reclassify risk and ' +
-          'are independently sufficient for clinical diagnosis of osteoporosis. Source: NOGG 2024 Rec 4.',
+          'are independently sufficient for clinical diagnosis of osteoporosis (NOGG 2024 Rec 4).',
         source: SRC_NOGG,
       });
     }
@@ -285,7 +285,7 @@ export function generateTreatmentOutput(
           'Falls drive most fragility fractures. The falls assessment trigger is a property of the patient population ' +
           '(osteoporosis OR any fragility fracture), not a sub-stratification of "those at risk" — every patient meeting ' +
           'this criterion should be assessed. Exercise programmes that improve balance and muscle strength ' +
-          '(e.g. Otago, tai chi) reduce fall and fracture risk in older adults. Source: NOGG 2024 Rec 7 (Strong).',
+          '(e.g. Otago, tai chi) reduce fall and fracture risk in older adults (NOGG 2024 Rec 7, Strong).',
         source: SRC_NOGG,
       });
     }
@@ -840,8 +840,7 @@ export function generateTreatmentOutput(
         'high-dose glucocorticoids ≥7.5 mg/day for ≥3 months — refer urgently given rapid post-initiation bone loss), multiple clinical risk factors with a recent fragility fracture, ' +
         'or other indicators (FRAX-defined VHR). ' +
         'GP cannot initiate High-Tech anabolic drugs (teriparatide biosimilar, romosozumab) — these require specialist initiation. ' +
-        'Romosozumab HSE MAP (effective 1 Nov 2024): postmenopausal women with T ≤ −2.5 + MOF within 24 months; individual patient application via approved consultant; High Tech Hub prescription only. ' +
-        'Source: HSE Managed Access Protocol — Romosozumab (Evenity), available at assets.hse.ie/media/documents/HSE_Managed_Access_Protocol_Romosozumab.pdf',
+        'Romosozumab HSE MAP (effective 1 Nov 2024): postmenopausal women with T ≤ −2.5 + MOF within 24 months; individual patient application via approved consultant; High Tech Hub prescription only.',
       source: SRC_ROMO_MAP,
     });
     referrals.push({
@@ -2883,7 +2882,7 @@ function giop(
         'HSE Best Value Medicine policy (1 March 2023): prescribe the recommended teriparatide biosimilar; originator Forsteo not reimbursed unless biosimilar is clinically unsuitable. ' +
         'Teriparatide contraindications: unexplained raised ALP, Paget\'s disease, prior radiation to skeleton, ' +
         'renal calculi, hypercalcaemia, hyperparathyroidism, haematological malignancy, active malignancy. ' +
-        'Source: Smith et al. Br J Clin Pharmacol 2025; HSE MMP BVM policy. ' +
+        'Primary literature: Smith et al. Br J Clin Pharmacol 2025; HSE MMP BVM policy. ' +
         'v1.40 refactor: this flag is informational GIOP-context for the GP; the anabolic referral itself is carried by vhr_specialist_referral.',
       source: SRC_BSR,
     });

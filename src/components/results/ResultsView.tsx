@@ -79,7 +79,7 @@ function AlertCard({ flag }: { flag: ClinicalFlag }) {
         <Badge className={fc.badge}>{fc.label}</Badge>
       </div>
       <p
-        className={`${isUrgent ? 'text-base font-bold' : 'text-sm font-semibold'} ${fc.text} leading-snug line-clamp-3`}
+        className={`${isUrgent ? 'text-base font-bold' : 'text-sm font-semibold'} ${fc.text} leading-snug`}
       >
         {flag.message}
       </p>
@@ -96,11 +96,6 @@ function AlertCard({ flag }: { flag: ClinicalFlag }) {
       {showRationale && (
         <div className="mt-2 pt-2 border-t border-slate-200/60">
           <p className={`text-xs ${fc.text} opacity-90 leading-snug`}>{flag.rationale}</p>
-          {/* If the message was clamped, still allow access to the full text in the same expansion */}
-          <p className={`text-xs ${fc.text} opacity-70 mt-1.5 leading-snug`}>
-            <span className="font-semibold">Full alert: </span>
-            {flag.message}
-          </p>
         </div>
       )}
     </div>
