@@ -60,11 +60,21 @@ export function assessInvestigationsNeeded(
   // v1.36 A2-impl Pre.2 — Tier 1 calcium check (missing) with romo-specific suffix when
   // romoRef fires. Note: ca === 0 is treated as a real value, so we use explicit null/undefined
   // checks rather than truthiness.
+  //
+  // v1.43 calcium consolidation: when caMissing AND romoRef both fire, the previous
+  // implementation pushed a separate Tier 3 "pre-referral specialist context" entry in
+  // addition to the Tier 1 entry below. That dual-push surfaced as a same-analyte
+  // duplicate in the UI (same analyte appearing under both 'Mandatory' and 'Clinically
+  // indicated' tier headers). Consolidated here: the Tier 3 entry's documentation
+  // instruction ("Document the corrected value in the referral letter") is merged into
+  // the Tier 1 romoSuffix; the caMissing branch of the Tier 3 push is dropped. The
+  // caOutOfRange branch of the Tier 3 push is preserved unchanged (Tier 1 doesn't fire
+  // when a value is present, so caOutOfRange remains a single-entry path).
   const caRaw = patient.bloodResults?.adjustedCalciumMmol;
   const caMissing = caRaw === null || caRaw === undefined;
   if (caMissing) {
     const romoSuffix = referralSignals.romosozumabReferralFired
-      ? ' Romosozumab: hypocalcaemia must be corrected before initiation — confirm corrected calcium before referral.'
+      ? ' Romosozumab: hypocalcaemia must be corrected before initiation — confirm corrected calcium before referral and document the corrected value in the referral letter.'
       : '';
     needed.push({
       investigation: 'calcium',
@@ -77,29 +87,25 @@ export function assessInvestigationsNeeded(
     });
   }
 
-  // v1.36 (TC90) — Tier 3 romo-specific corrected-calcium entry. Fires when romoRef is
-  // active AND the calcium value is EITHER missing OR present-and-out-of-range. Distinct
-  // from the Tier 1 baseline check above (which only fires on missing); this entry is the
-  // pre-referral structured prompt the specialist needs in the referral letter. Both
-  // entries can coexist when calcium is missing — that's intentional (Tier 1 = baseline
-  // pre-treatment; Tier 3 = pre-referral specialist context).
-  if (referralSignals.romosozumabReferralFired) {
+  // v1.36 (TC90) — Tier 3 romo-specific corrected-calcium entry, caOutOfRange path only
+  // post-v1.43 consolidation. Fires when romoRef is active AND the calcium value is
+  // present-and-out-of-range. The caMissing path was merged into the Tier 1 push above
+  // (see v1.43 note) to remove the UI duplication. When a value is present, the Tier 1
+  // baseline push above doesn't fire (caMissing is false), so this remains a single-entry
+  // path.
+  if (referralSignals.romosozumabReferralFired && !caMissing) {
     const ca = caRaw;
     const calciumOutOfRange =
-      !caMissing && (
-        ca! < BLOOD_RANGES.adjustedCalcium.low ||
-        ca! > BLOOD_RANGES.adjustedCalcium.high
-      );
-    if (caMissing || calciumOutOfRange) {
-      const reasonContext = caMissing
-        ? 'Corrected serum calcium not recorded.'
-        : `Corrected serum calcium ${ca} mmol/L is outside the normal range ` +
-          `(${BLOOD_RANGES.adjustedCalcium.low}–${BLOOD_RANGES.adjustedCalcium.high} mmol/L).`;
+      ca! < BLOOD_RANGES.adjustedCalcium.low ||
+      ca! > BLOOD_RANGES.adjustedCalcium.high;
+    if (calciumOutOfRange) {
       needed.push({
         investigation: 'calcium',
         tier: 3,
         reason:
-          `${reasonContext} Romosozumab referral active — hypocalcaemia must be corrected before initiation; ` +
+          `Corrected serum calcium ${ca} mmol/L is outside the normal range ` +
+          `(${BLOOD_RANGES.adjustedCalcium.low}–${BLOOD_RANGES.adjustedCalcium.high} mmol/L). ` +
+          'Romosozumab referral active — hypocalcaemia must be corrected before initiation; ' +
           'hypercalcaemia warrants investigation (primary hyperparathyroidism, malignancy) before referral. ' +
           'Document the corrected value in the referral letter.',
         urgency: 'soon',

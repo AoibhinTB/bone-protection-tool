@@ -961,24 +961,29 @@ export function ResultsView({ result, patient, onReset, onBack, onRevealNoRfFrax
             }
           }
 
+          // Analytes that get a CollapsibleCard with the engine's `reason` rendered as a
+          // paragraph inside the collapse (rather than curated bullets). Used for entries
+          // where the engine's reason is already multi-sentence clinical content but no
+          // curated bullets exist in INVESTIGATION_BULLETS. Keeps the collapsible UX
+          // consistent with the bullets-based pattern without inventing new content.
+          const COLLAPSIBLE_PARAGRAPH_ANALYTES = new Set(['pth', 'phosphate', 'lfts']);
+
           function InvCard({ inv }: { inv: typeof sortedInvestigations[0] }) {
             const uc = URGENCY_CONFIG[inv.urgency];
             const bullets = INVESTIGATION_BULLETS[inv.investigation];
+            const summary = (
+              <span className="flex items-center gap-2 flex-wrap">
+                <span className="font-bold text-slate-900">
+                  {formatInvestigationName(inv.investigation)}
+                </span>
+                {inv.urgency !== 'routine' && <Badge className={uc.color}>{uc.label}</Badge>}
+              </span>
+            );
 
             // Tier 1 / Tier 2 blood tests with curated bullet content render as collapsibles
             if (bullets) {
               return (
-                <CollapsibleCard
-                  summary={
-                    <span className="flex items-center gap-2 flex-wrap">
-                      <span className="font-bold text-slate-900">
-                        {formatInvestigationName(inv.investigation)}
-                      </span>
-                      {inv.urgency !== 'routine' && <Badge className={uc.color}>{uc.label}</Badge>}
-                    </span>
-                  }
-                  defaultOpen={false}
-                >
+                <CollapsibleCard summary={summary} defaultOpen={false}>
                   <ul className="space-y-1 mt-1">
                     {bullets.map((b, j) => (
                       <li key={j} className="flex items-start gap-2 text-xs text-slate-700 leading-snug">
@@ -991,7 +996,20 @@ export function ResultsView({ result, patient, onReset, onBack, onRevealNoRfFrax
               );
             }
 
-            // Other investigations (DEXA, VFA, FRAX, PTH, testosterone, etc.) keep the flat card
+            // PTH / phosphate / LFTs — engine `reason` rendered as paragraph inside a
+            // CollapsibleCard. No curated bullets, no string-splitting; the multi-sentence
+            // reason text is preserved verbatim behind the collapse toggle.
+            if (COLLAPSIBLE_PARAGRAPH_ANALYTES.has(inv.investigation)) {
+              return (
+                <CollapsibleCard summary={summary} defaultOpen={false}>
+                  <p className="text-xs text-slate-700 leading-snug mt-1">{inv.reason}</p>
+                </CollapsibleCard>
+              );
+            }
+
+            // Other investigations (DEXA, VFA, FRAX, testosterone, lh_fsh, thyroid, spep_upep)
+            // keep the flat card. Not yet surfaced in live testing as problematic; cheap to
+            // route through CollapsibleCard later if any do.
             return (
               <div className="bg-white border border-slate-200 rounded-lg px-4 py-3">
                 <div className="flex items-center gap-2 mb-1 flex-wrap">

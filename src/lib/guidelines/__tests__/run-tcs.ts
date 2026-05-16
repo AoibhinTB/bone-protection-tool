@@ -2703,26 +2703,32 @@ function tc90(): TCResult {
   // teri-PTH entry is present.
 
   // Pre.2 — Tier 1 calcium entry (missing) with romo-specific reason appended.
+  // v1.43 calcium consolidation: the prior dual-push (Tier 1 + Tier 3) for caMissing+romoRef
+  // was consolidated into a single Tier 1 entry. The Tier 3 entry's "document in referral
+  // letter" instruction is now merged into the Tier 1 romoSuffix. Assertions updated to
+  // verify the merged documentation prose is present on the Tier 1 entry, and that no Tier 3
+  // calcium entry fires for the caMissing path (the caOutOfRange Tier 3 path is unchanged
+  // but doesn't apply here because Ca is missing, not present-and-abnormal).
   const calciumTier1 = decision.investigationsNeeded.find(i => i.investigation === 'calcium' && i.tier === 1);
   check(failures, 'Tier 1 calcium entry fires (calcium missing)', !!calciumTier1);
   check(failures, 'Tier 1 calcium entry has romosozumab-specific reason',
     !!calciumTier1 && /romosozumab/i.test(calciumTier1.reason));
-
-  // Pre.2 — Tier 3 corrected-calcium entry fires (missing + romoRef).
+  check(failures, 'Tier 1 calcium entry includes documentation instruction (v1.43 consolidation)',
+    !!calciumTier1 && /document the corrected value in the referral letter/i.test(calciumTier1.reason));
   const calciumTier3 = decision.investigationsNeeded.find(i => i.investigation === 'calcium' && i.tier === 3);
-  check(failures, 'Tier 3 corrected-calcium entry fires', !!calciumTier3);
-  check(failures, 'Tier 3 corrected-calcium entry references romosozumab referral',
-    !!calciumTier3 && /romosozumab/i.test(calciumTier3.reason));
+  check(failures, 'No Tier 3 calcium entry for caMissing path (v1.43 consolidation — was dual-push pre-v1.43)',
+    !calciumTier3);
 
   // Both teriparatide and romosozumab pass gates — proxy: teri triggers Pre.1 PTH (✓ above);
-  // romo triggers Pre.2 calcium Tier 3 (✓ above) AND romosozumab_cv_risk_framing fires
-  // (rather than the exclusion variant, since no MI/stroke history).
+  // romo triggers Pre.2 calcium consolidated Tier 1 entry (✓ above with documentation prose)
+  // AND romosozumab_cv_risk_framing fires (rather than the exclusion variant, since no
+  // MI/stroke history).
   check(failures, 'romosozumab_cv_risk_framing fires (romo passes gate, female VHR, no CV CI)',
     hasFlag(decision, 'romosozumab_cv_risk_framing'));
   check(failures, 'romosozumab_excluded_mi_stroke_history does NOT fire (no MI/stroke)',
     !hasFlag(decision, 'romosozumab_excluded_mi_stroke_history'));
 
-  return { name: 'TC90 — VHR anabolic cluster: Seq.1 + Seq.2 + Pre.1 PTH + Pre.2 Ca Tier1+Tier3', passed: failures.length === 0, failures, decision };
+  return { name: 'TC90 — VHR anabolic cluster: Seq.1 + Seq.2 + Pre.1 PTH + Pre.2 Ca Tier1 (with romo+documentation suffix, v1.43)', passed: failures.length === 0, failures, decision };
 }
 
 // ─── TC91 ─────────────────────────────────────────────────────────────────
@@ -2917,14 +2923,18 @@ function tc93(): TCResult {
     !!egfrEntry && /teriparatide/i.test(egfrEntry.reason));
 
   // Pre.2 Ca Tier 1 with romo-specific suffix (Ca missing).
+  // v1.43 calcium consolidation: the prior Tier 3 corrected-calcium entry for the
+  // caMissing+romoRef case was dropped; the documentation instruction is now merged into
+  // the Tier 1 romoSuffix. Assertions updated to verify the merged prose on Tier 1 and
+  // absence of Tier 3 calcium entry for this caMissing path.
   const calciumTier1 = decision.investigationsNeeded.find(i => i.investigation === 'calcium' && i.tier === 1);
   check(failures, 'Tier 1 calcium entry fires (calcium missing) with romosozumab suffix',
     !!calciumTier1 && /romosozumab/i.test(calciumTier1.reason));
-
-  // Pre.2 Tier 3 corrected-calcium fires (missing + romoReferralFired).
+  check(failures, 'Tier 1 calcium entry includes documentation instruction (v1.43 consolidation)',
+    !!calciumTier1 && /document the corrected value in the referral letter/i.test(calciumTier1.reason));
   const calciumTier3 = decision.investigationsNeeded.find(i => i.investigation === 'calcium' && i.tier === 3);
-  check(failures, 'Tier 3 corrected-calcium entry fires (missing + romoRef)',
-    !!calciumTier3 && /romosozumab/i.test(calciumTier3.reason));
+  check(failures, 'No Tier 3 calcium entry for caMissing path (v1.43 consolidation — was dual-push pre-v1.43)',
+    !calciumTier3);
 
   // giop_monitoring fires with A2-impl-corrected text.
   check(failures, 'giop_monitoring flag fires',
