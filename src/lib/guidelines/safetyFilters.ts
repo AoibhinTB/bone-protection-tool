@@ -172,8 +172,7 @@ export function applyPreTreatmentSafetyFilters(
       id: 'vitd_parenteral_block',
       severity: 'urgent',
       message:
-        `Parenteral antiresorptives (denosumab, IV bisphosphonates, romosozumab) contraindicated — Vit D ${vitD} nmol/L below 50 ` +
-        '(NOGG 2024 Recommendation 17 — Strong: treat Vit D deficiency/insufficiency prior to parenteral initiation). ' +
+        `Parenteral antiresorptives (denosumab, IV bisphosphonates, romosozumab) contraindicated — Vit D ${vitD} nmol/L below 50 (NOGG 2024 Rec 17). ` +
         'Treat Vit D first, recheck, then reassess parenteral options. Oral bisphosphonates may be initiated with concurrent Vit D supplementation.',
       rationale:
         'NOGG 2024 Recommendation 17 (Strong): "Treat vitamin D deficiency and insufficiency prior to initiation of ' +
@@ -208,7 +207,7 @@ export function applyPreTreatmentSafetyFilters(
       id: 'vitd_unmeasured_parenteral_block',
       severity: 'urgent',
       message:
-        'Parenteral antiresorptives require pre-treatment Vit D measurement (NOGG 2024 Recommendation 17 — Strong). ' +
+        'Parenteral antiresorptives require pre-treatment Vit D measurement (NOGG 2024 Rec 17). ' +
         'Measure as part of Tier 1 bloods. Oral bisphosphonates may be initiated with concurrent supplementation.',
       rationale:
         'NOGG 2024 Recommendation 17 (Strong): Vit D status must be established before parenteral initiation. ' +

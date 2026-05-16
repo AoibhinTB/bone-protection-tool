@@ -278,9 +278,7 @@ export function generateTreatmentOutput(
         severity: 'info',
         message:
           `Falls assessment indicated — ${trigger} present. NOGG 2024 Rec 7 (Strong): a falls assessment should be ` +
-          'undertaken in ALL patients with osteoporosis and ALL patients with fragility fractures. ' +
-          'Offer exercise programmes to improve balance (tai chi, Otago) and/or a combined exercise protocol to those at risk. ' +
-          'Practical measures: home hazard assessment, medication review (sedatives, antihypertensives), vision check, footwear review.',
+          'undertaken in ALL patients with osteoporosis and ALL patients with fragility fractures.',
         rationale:
           'Falls drive most fragility fractures. The falls assessment trigger is a property of the patient population ' +
           '(osteoporosis OR any fragility fracture), not a sub-stratification of "those at risk" — every patient meeting ' +
@@ -501,6 +499,8 @@ export function generateTreatmentOutput(
     flags.push({
       id: 'dental_check_pre_treatment',
       severity: 'info',
+      collapsedByDefault: true,
+      summary: 'Ask about outstanding invasive dental work before first IV zoledronate or denosumab dose.',
       message:
         'Before starting IV zoledronate or denosumab: ask about outstanding invasive dental work. ' +
         'Complete before first dose if clinically feasible. Advise patient to inform dentist of antiresorptive use before any future invasive procedure.',
@@ -878,6 +878,8 @@ export function generateTreatmentOutput(
         flags.push({
           id: 'romosozumab_cv_risk_framing',
           severity: 'info',
+          collapsedByDefault: true,
+          summary: 'Romosozumab specialist review: assess CV risk and flag explicit CV history in the referral.',
           message:
             'If romosozumab is being considered at specialist review: both 1-year fracture risk AND 1-year cardiovascular risk must be assessed. ' +
             'Flag explicit CV risk factors in the referral letter (prior MI / stroke / unstable angina / heart failure / uncontrolled hypertension / CV risk score) — the specialist needs this to decide whether romosozumab is appropriate. ' +
@@ -1116,6 +1118,8 @@ export function generateTreatmentOutput(
     flags.push({
       id: 'sequential_therapy_plan_required',
       severity: 'info',
+      collapsedByDefault: true,
+      summary: 'Plan sequential antiresorptive at initiation, not retrospectively. Document the follow-on plan in the referral.',
       message:
         'Plan the sequential therapy strategy at the time of initiation — not retrospectively. ' +
         'For denosumab: IV zoledronate 5 mg at 6 months after the final injection is the NOGG 2024 Strong sequential agent (alendronate is a secondary option only). ' +
@@ -1267,6 +1271,8 @@ export function generateTreatmentOutput(
     flags.push({
       id: 'sequential_therapy_plan_required',
       severity: 'info',
+      collapsedByDefault: true,
+      summary: 'Plan sequential antiresorptive at initiation, not retrospectively. Document the follow-on plan in the referral.',
       message:
         'Plan the sequential therapy strategy at the time of initiation — not retrospectively. ' +
         'For denosumab: IV zoledronate 5 mg at 6 months after the final injection is the NOGG 2024 Strong sequential agent (alendronate is a secondary option only). ' +
@@ -1289,6 +1295,8 @@ export function generateTreatmentOutput(
     flags.push({
       id: 'sequential_therapy_plan_required',
       severity: 'info',
+      collapsedByDefault: true,
+      summary: 'Plan sequential antiresorptive at initiation, not retrospectively. Document the follow-on plan in the referral.',
       message:
         'Plan the sequential therapy strategy at the time of initiation — not retrospectively. ' +
         'For teriparatide / romosozumab / abaloparatide being considered at specialist review: an antiresorptive must follow the course ' +
@@ -2845,6 +2853,8 @@ function giop(
       flags.push({
         id: 'sequential_therapy_plan_required',
         severity: 'info',
+        collapsedByDefault: true,
+        summary: 'Plan sequential antiresorptive at initiation, not retrospectively. Document the follow-on plan in the referral.',
         message:
           'Plan the sequential therapy strategy at the time of initiation — not retrospectively. ' +
           'For teriparatide / romosozumab / abaloparatide being considered at specialist review: an antiresorptive must follow the course ' +

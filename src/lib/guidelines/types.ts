@@ -365,6 +365,23 @@ export interface ClinicalFlag {
   message: string;
   rationale: string;
   source: GuidelineSource;
+  /**
+   * When true, UI renders `summary` (one-line preview) + a "▾ show details" toggle
+   * that expands the full `message` inline. Used for specialist-aimed info flags
+   * where the dense referral-letter prose is useful for audit / specialist review
+   * but should not dominate the GP's view at the point of care. Existing
+   * "▾ show rationale" toggle remains independent.
+   * Defaults to undefined; consumers treat undefined as `false` (existing
+   * behaviour — full message renders inline, only rationale toggle present).
+   */
+  collapsedByDefault?: boolean;
+  /**
+   * One-line preview rendered in place of `message` when `collapsedByDefault === true`.
+   * Author-controlled (not auto-extracted) so the preview can be more action-oriented
+   * than the message's first sentence. Required in practice when collapsedByDefault
+   * is true; left optional in the type for additive backwards-compatibility.
+   */
+  summary?: string;
 }
 
 export interface InvestigationRecommendation {

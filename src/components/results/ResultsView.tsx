@@ -70,8 +70,15 @@ function sourceText(flag: ClinicalFlag): string {
 
 function AlertCard({ flag }: { flag: ClinicalFlag }) {
   const [showRationale, setShowRationale] = useState(false);
+  const [showDetails, setShowDetails] = useState(false);
   const fc = FLAG_CONFIG[flag.severity];
   const isUrgent = flag.severity === 'urgent';
+  // When collapsedByDefault is set with a summary, render the summary as the main
+  // card body and surface the full message behind a "▾ show details" toggle. Used
+  // for specialist-aimed info flags whose dense referral-letter prose should not
+  // dominate the GP's view (dental_check_pre_treatment, romosozumab_cv_risk_framing,
+  // sequential_therapy_plan_required). The rationale toggle remains independent.
+  const collapsed = flag.collapsedByDefault === true && typeof flag.summary === 'string';
 
   return (
     <div className={`${fc.bg} border-l-[6px] ${fc.border} rounded-r-lg p-3 sm:p-4 ${fc.ring}`}>
@@ -81,10 +88,22 @@ function AlertCard({ flag }: { flag: ClinicalFlag }) {
       <p
         className={`${isUrgent ? 'text-base font-bold' : 'text-sm font-semibold'} ${fc.text} leading-snug`}
       >
-        {flag.message}
+        {collapsed ? flag.summary : flag.message}
       </p>
+      {collapsed && showDetails && (
+        <p className={`text-sm ${fc.text} leading-snug mt-2`}>{flag.message}</p>
+      )}
       <div className="mt-2 flex items-center gap-3 flex-wrap">
         <p className="text-[11px] text-slate-500">{sourceText(flag)}</p>
+        {collapsed && (
+          <button
+            type="button"
+            onClick={() => setShowDetails((s) => !s)}
+            className="text-[11px] font-medium text-slate-500 hover:text-slate-800 underline underline-offset-2"
+          >
+            {showDetails ? '▴ hide details' : '▾ show details'}
+          </button>
+        )}
         <button
           type="button"
           onClick={() => setShowRationale((s) => !s)}
