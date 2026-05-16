@@ -1607,20 +1607,20 @@ function initiateTherapy(
       source: SRC_BMS,
     });
     if (canUse('alendronate', egfr)) {
-      recs.push(withBPInitiationContext(asBridgingForVHR({
+      recs.push(withBPInitiationContext(asBridgingForGCDrivenVHR({
         ...alendronate(),
         rationale:
           'Add alendronate alongside HRT: T-score remains ≤−2.5 despite HRT, suggesting HRT alone is insufficient bone protection. Equivalent first-line with risedronate per NOGG 2024 Rec 12.',
         priority: 'first-line',
-      }, riskCategory), patient));
+      }, patient), patient));
     }
     if (canUse('risedronate', egfr)) {
-      recs.push(withBPInitiationContext(asBridgingForVHR({
+      recs.push(withBPInitiationContext(asBridgingForGCDrivenVHR({
         ...risedronate(),
         rationale:
           'Equivalent first-line alongside alendronate (NOGG 2024 Rec 12, Strong) — add alongside HRT where T-score remains ≤−2.5 despite HRT.',
         priority: 'first-line',
-      }, riskCategory), patient));
+      }, patient), patient));
     }
     return recs;
   }
@@ -1642,9 +1642,9 @@ function initiateTherapy(
         source: SRC_NICE,
       });
     }
-    recs.push(withBPInitiationContext(asBridgingForVHR(alendronate(), riskCategory), patient));
+    recs.push(withBPInitiationContext(asBridgingForGCDrivenVHR(alendronate(), patient), patient));
     if (canUse('risedronate', egfr)) {
-      recs.push(withBPInitiationContext(asBridgingForVHR(risedronate(), riskCategory), patient));
+      recs.push(withBPInitiationContext(asBridgingForGCDrivenVHR(risedronate(), patient), patient));
     }
     return recs;
   }
@@ -1720,8 +1720,8 @@ function initiateTherapy(
     source: SRC_HSE,
   });
   // v1.33 — push both equivalent first-line oral BPs.
-  recs.push(withBPInitiationContext(asBridgingForVHR(alendronate(), riskCategory), patient));
-  recs.push(withBPInitiationContext(asBridgingForVHR(risedronate(), riskCategory), patient));
+  recs.push(withBPInitiationContext(asBridgingForGCDrivenVHR(alendronate(), patient), patient));
+  recs.push(withBPInitiationContext(asBridgingForGCDrivenVHR(risedronate(), patient), patient));
   return recs;
 }
 
@@ -1752,20 +1752,20 @@ function sequencing(
       source: SRC_BMS,
     });
     if (canUse('alendronate', egfr)) {
-      recs.push(withBPInitiationContext(asBridgingForVHR({
+      recs.push(withBPInitiationContext(asBridgingForGCDrivenVHR({
         ...alendronate(),
         rationale:
           'Add alendronate alongside HRT: T-score remains ≤−2.5 despite HRT, suggesting HRT alone is insufficient bone protection. Equivalent first-line with risedronate per NOGG 2024 Rec 12.',
         priority: 'first-line',
-      }, riskCategory), patient));
+      }, patient), patient));
     }
     if (canUse('risedronate', egfr)) {
-      recs.push(withBPInitiationContext(asBridgingForVHR({
+      recs.push(withBPInitiationContext(asBridgingForGCDrivenVHR({
         ...risedronate(),
         rationale:
           'Equivalent first-line alongside alendronate (NOGG 2024 Rec 12, Strong) — add alongside HRT where T-score remains ≤−2.5 despite HRT.',
         priority: 'first-line',
-      }, riskCategory), patient));
+      }, patient), patient));
     }
     return { recommendations: recs, flags, referrals };
   }
@@ -2903,20 +2903,20 @@ function giop(
   if (!aff && !giIntolerance && canUse('alendronate', egfr)) {
     // Oral first-line per NOGG GIOP Rec 23 (Strong) — alendronate AND risedronate
     // are equivalent first-line oral options (v1.33). Push both.
-    recs.push(withBPInitiationContext(asBridgingForVHR({
+    recs.push(withBPInitiationContext(asBridgingForGCDrivenVHR({
       ...alendronate(),
       rationale:
         'First-line oral bisphosphonate for GIOP (NOGG 2024 Rec 23 — Strong; equivalent with risedronate). ' +
         'Initiate at same time as glucocorticoid if planned duration ≥3 months. ' +
         'Calcium 1000–1500 mg/day and vitamin D ≥800 IU/day required alongside.',
-    }, riskCategory), patient));
+    }, patient), patient));
     if (canUse('risedronate', egfr)) {
-      recs.push(withBPInitiationContext(asBridgingForVHR({
+      recs.push(withBPInitiationContext(asBridgingForGCDrivenVHR({
         ...risedronate(),
         rationale:
           'First-line oral bisphosphonate for GIOP (NOGG 2024 Rec 23 — Strong; equivalent with alendronate). ' +
           'Initiate at same time as glucocorticoid if planned duration ≥3 months.',
-      }, riskCategory), patient));
+      }, patient), patient));
     }
   } else if (!aff && giIntolerance && !refuses && canUse('zoledronate', egfr)) {
     // Prior oral GI intolerance — IV zoledronate bypasses GI tract
@@ -3394,15 +3394,33 @@ function plannedBPDuration(patient: PatientInput, isIV: boolean): string {
     : 'Planned duration: at least 5 years, then reassess fracture risk. NOGG 2024 Section 7 Rec 1 (Strong).';
 }
 
-// For VHR patients, oral bisphosphonate entries are bridging cover while awaiting
-// specialist anabolic initiation (vhr_specialist_referral is the definitive treatment
-// route). Non-VHR entries pass through unchanged — category is left undefined
-// (consumers treat undefined as 'primary').
-function asBridgingForVHR(
+// (formerly asBridgingForVHR — narrowed from VHR-any to GC-driven VHR per NOGG Rec 8(g),
+// paired with spec v1.42 §5.5 correction. The bridging-bisphosphonate instruction in
+// NOGG Rec 8 is attached only to the high-dose-GC VHR criterion ("if any delay is
+// anticipated, start an oral bisphosphonate in the meantime"); other VHR triggers
+// (T-score ≤ −3.5, recent vert fx, ≥2 vert fx, multi-RF + recent fx, FRAX-VHR) do not
+// carry the bridging instruction — prior oral BP attenuates subsequent anabolic BMD
+// response per NOGG 2024 Evidence IIb.
+//
+// For GC-driven VHR patients only, oral bisphosphonate entries are bridging cover while
+// awaiting specialist anabolic initiation. Non-GC-driven entries (whether VHR via other
+// criteria or non-VHR) pass through unchanged — category is left undefined (consumers
+// treat undefined as 'primary').
+//
+// Transitivity: gcDrivesVHR === true implies riskCategory === 'very_high' because the
+// same condition fires VHR-4 in risk.ts:307. The previous outer guard
+// (riskCategory === 'very_high') is preserved by transitivity, so no separate VHR
+// check is needed here. If a future change ever decouples VHR-4 from the
+// bridging-instruction GC threshold (e.g. lowers VHR threshold while keeping bridging at
+// 7.5 mg/day × 3 months), this transitivity breaks and an explicit riskCategory check
+// must be reintroduced. No current risk; flagging for future readers.
+function asBridgingForGCDrivenVHR(
   rec: TreatmentRecommendation,
-  riskCategory: RiskCategory,
+  patient: PatientInput,
 ): TreatmentRecommendation {
-  return riskCategory === 'very_high'
+  const gcDrivesVHR =
+    isOnHighDoseGC(patient) && gcDurationMonths(patient) >= GIOP.highDoseMinMonths;
+  return gcDrivesVHR
     ? { ...rec, category: 'bridging' }
     : rec;
 }
