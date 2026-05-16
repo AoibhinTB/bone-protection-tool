@@ -15,6 +15,18 @@ const GC_DOSE_OPTIONS: { value: GlucocorticoidDose; label: string }[] = [
   { value: 'high', label: '>20 mg/day' },
 ];
 
+// Representative numeric mg/day values for each band. Engine logic
+// (isOnHighDoseGC, isOnLowDoseGC, FRAX Table 8 correction) reads
+// `glucocorticoidDoseMgDay` via threshold comparisons (<2.5, ≥7.5, etc.) so
+// any value within a band gives identical routing. Values mirror the
+// LEGACY_GC_DOSE_MG fallback in thresholds.ts.
+const REPRESENTATIVE_MG_FOR_BAND: Record<GlucocorticoidDose, number> = {
+  very_low: 1,
+  low: 5,
+  medium: 10,
+  high: 25,
+};
+
 // v1.19 — single 4-option GC status field. The dose fields below stay
 // orthogonal because they describe the *current* course (only meaningful
 // when status === 'current').
@@ -24,16 +36,6 @@ const GC_STATUS_OPTIONS: { value: GlucocorticoidStatus; label: string }[] = [
   { value: 'stopped_over_12m_ago', label: 'Stopped >12m' },
   { value: 'never',                label: 'Never' },
 ];
-
-// v1.13 — derive the legacy categorical bucket from the numeric mg/day so both
-// fields stay in sync. Engine prefers numeric, but categorical is kept for
-// backwards compatibility with persisted/loaded patient data.
-function bucketFromMgDay(mg: number): GlucocorticoidDose {
-  if (mg < 2.5) return 'very_low';
-  if (mg < 7.5) return 'low';
-  if (mg <= 20) return 'medium';
-  return 'high';
-}
 
 export function Step4Medications({ data, onChange }: Props) {
   const status = data.glucocorticoidStatus ?? 'never';
@@ -60,7 +62,7 @@ export function Step4Medications({ data, onChange }: Props) {
                 ? (data.glucocorticoidUse ?? { current: true, durationMonths: 3, dose: 'low' })
                 : null,
               glucocorticoidDoseMgDay: becomingCurrent
-                ? (data.glucocorticoidDoseMgDay ?? 5)
+                ? (data.glucocorticoidDoseMgDay ?? REPRESENTATIVE_MG_FOR_BAND.low)
                 : (wasCurrent ? null : data.glucocorticoidDoseMgDay),
             });
           }}
@@ -91,32 +93,16 @@ export function Step4Medications({ data, onChange }: Props) {
           </Field>
           <Field
             label="Daily dose (prednisolone equivalent)"
-            hint="Enter the exact dose in mg/day — drives Table 8 FRAX correction (low <2.5 ↓; medium 2.5–7.5 none; high ≥7.5 ↑)"
+            hint="Select the dose band. Exact mg value not required — the tool uses the band for risk calculation (Table 8 FRAX correction: <2.5 mg/day ↓; 2.5–7.5 mg/day none; ≥7.5 mg/day ↑)."
             indent
           >
-            <NumInput
-              value={data.glucocorticoidDoseMgDay}
-              onChange={v =>
-                onChange({
-                  glucocorticoidDoseMgDay: v,
-                  // Keep legacy categorical in sync for backwards compatibility.
-                  glucocorticoidUse: data.glucocorticoidUse
-                    ? { ...data.glucocorticoidUse, dose: v != null && v > 0 ? bucketFromMgDay(v) : data.glucocorticoidUse.dose }
-                    : data.glucocorticoidUse,
-                })
-              }
-              min={0}
-              max={120}
-              step={0.5}
-              unit="mg/day"
-              width="w-24"
-            />
-          </Field>
-          <Field label="Or pick a dose band" hint="Optional shortcut — only used if mg/day is left blank" indent>
             <Segmented<GlucocorticoidDose>
               value={data.glucocorticoidUse.dose}
               onChange={v =>
-                onChange({ glucocorticoidUse: { ...data.glucocorticoidUse!, dose: v } })
+                onChange({
+                  glucocorticoidUse: { ...data.glucocorticoidUse!, dose: v },
+                  glucocorticoidDoseMgDay: REPRESENTATIVE_MG_FOR_BAND[v],
+                })
               }
               options={GC_DOSE_OPTIONS}
             />

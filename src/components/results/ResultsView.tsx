@@ -723,13 +723,20 @@ export function ResultsView({ result, patient, onReset, onBack, onRevealNoRfFrax
 
   return (
     <div className="space-y-5 sm:space-y-6">
-      {/* Hoisted SPECIALIST REFERRAL — for VHR patients, the urgent anabolic-specialist
-          referral is THE action. Rendered as the very first child so a clinician scrolling
-          the page top-to-bottom cannot miss it. Flag remains duplicated below in Clinical
-          alerts for consistency with the unified flag rendering. */}
+      {/* Hoisted SPECIALIST REFERRAL — for ALL VHR patients, the specialist referral is
+          THE action. Rendered as the very first child so a clinician scrolling the page
+          top-to-bottom cannot miss it. Flag remains duplicated below in Clinical alerts
+          for consistency with the unified flag rendering.
+          Severity check intentionally absent: the flag is gated engine-side on
+          riskCategory === 'very_high' at both push sites (standard VHR block +
+          GIOP Option B mirror), so it ONLY fires for VHR patients. Severity is
+          'urgent' for GC-driven VHR and 'warning' otherwise — the GP action
+          (specialist referral now) is the same in both cases, so visual treatment
+          is unified. The GC-driven bridging-bisphosphonate instruction is carried
+          in the flag message text itself, not by severity styling. */}
       {(() => {
         const specRefFlag = sortedFlags.find(
-          (f) => f.severity === 'urgent' && f.id === 'vhr_specialist_referral',
+          (f) => f.id === 'vhr_specialist_referral',
         );
         if (!specRefFlag) return null;
         return (
