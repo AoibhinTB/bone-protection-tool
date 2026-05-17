@@ -4246,6 +4246,89 @@ function tc111(): TCResult {
   return { name: 'TC111 — non-VHR + prior hip fx: IV zol primary + orals alternative (v1.46 Rule 2)', passed: failures.length === 0, failures, decision };
 }
 
+// ═══════════════════════════════════════════════════════════════════════════
+// v1.46.2 TEST CASE — F2 + F4 dedup contract lock
+// ═══════════════════════════════════════════════════════════════════════════
+
+// ─── TC112 ─────────────────────────────────────────────────────────────────
+// Non-VHR + prior hip fracture + no bloods entered. Locks the v1.45 F2+F4
+// dedup contract that was previously verified by Vercel eyeball only ("lean
+// coverage" trade-off per the v1.45 round commit). This TC closes that gap.
+//
+// Profile: 65F + prior hip fracture (recent within 24mo) + T-2.0 osteopenia
+// + NO bloods entered (bloodResults: null — so calcium, Vit D, eGFR all
+// null). Patient routes to 'high' via prior-fx-high path (priorHipFracture
+// true → engine routes to high regardless of FRAX).
+//
+// Both caMissing AND vitDMissing are true. Without the dedup, BOTH F2
+// (calcium_unmeasured_antiresorptive_block) AND F4 (vitd_unmeasured_
+// parenteral_block) would fire as URGENT — two alerts both prompting Vit D
+// measurement, with F2's broader message already covering F4's narrower
+// guidance. Dedup suppresses F4 emission when F2 fires.
+//
+// v1.46.2 refactored the dedup guard from `flags.some(...)` runtime
+// introspection to deterministic `f2WouldFire = caMissing` boolean check
+// — same behavioural contract, decoupled from source-order ordering.
+// This TC locks the contract structurally so future filter-chain
+// refactors can't silently regress it.
+function tc112(): TCResult {
+  const failures: string[] = [];
+  const patient = basePatient({
+    age: 65,
+    sex: 'female',
+    priorFragilityFracture: true,
+    priorHipFracture: true,
+    recentFractureWithin2Years: true,
+    dexaResults: { lumbarSpineTScore: -2.0, totalHipTScore: -2.0, femoralNeckTScore: -2.0, forearmTScore: null },
+    bloodResults: null,
+  });
+  const decision = runClinicalDecision(patient);
+
+  // Profile lands in 'high' via prior-fx-high route.
+  check(failures, "riskCategory === 'high'",
+    decision.riskStratification.category === 'high',
+    `got ${decision.riskStratification.category}`);
+
+  // All three primary BPs present (Rule 1 / Rule 2 push at the standard
+  // primary site fires for this profile). Status-mutation expected.
+  check(failures, 'alendronate in recommendations', hasAgent(decision, 'alendronate'));
+  check(failures, 'risedronate in recommendations', hasAgent(decision, 'risedronate'));
+  check(failures, 'IV zoledronate in recommendations', hasAgent(decision, 'zoledronate'));
+
+  // F2 missing-calcium recipe-status mutation: every antiresorptive in
+  // recommendations gets tagged status='pending' (the F2 contract independent
+  // of the flag emission). Locks the behavioural side of F2's filter.
+  const antiresorptives = decision.treatmentRecommendations.filter(
+    r => r.agent === 'alendronate' || r.agent === 'risedronate' || r.agent === 'zoledronate',
+  );
+  for (const rec of antiresorptives) {
+    check(failures, `${rec.agent} status === 'pending' (F2 status mutation)`,
+      rec.status === 'pending', `got status=${rec.status}`);
+  }
+
+  // POSITIVE: F2 fires URGENT (the broad calcium-led message that covers
+  // Ca + Vit D + eGFR Tier 1 bloods guidance).
+  const f2Flag = decision.flags.find(f => f.id === 'calcium_unmeasured_antiresorptive_block');
+  check(failures, 'F2 (calcium_unmeasured_antiresorptive_block) fires URGENT',
+    !!f2Flag && f2Flag.severity === 'urgent', `got severity=${f2Flag?.severity}`);
+  check(failures, 'F2 message anchors "Measure Ca, Vit D, and eGFR"',
+    !!f2Flag && /measure ca, vit d, and egfr/i.test(f2Flag.message));
+
+  // NEGATIVE: F4 (vitd_unmeasured_parenteral_block) does NOT fire — dedup
+  // contract. F2's broader message subsumes F4's guidance; emitting both
+  // would surface two URGENT alerts both prompting Vit D measurement.
+  check(failures, 'F4 (vitd_unmeasured_parenteral_block) does NOT fire — dedup contract',
+    !decision.flags.some(f => f.id === 'vitd_unmeasured_parenteral_block'));
+
+  // NEGATIVE: F3 (vitd_parenteral_block) does NOT fire — Vit D is MISSING
+  // (vitDMissing branch), not measured + low (vitDLow branch). F3 scope
+  // is unaffected by the F2/F4 dedup.
+  check(failures, 'F3 (vitd_parenteral_block) does NOT fire — Vit D missing, not low',
+    !decision.flags.some(f => f.id === 'vitd_parenteral_block'));
+
+  return { name: 'TC112 — F2+F4 dedup contract lock: 65F + hip fx + no bloods (v1.46.2)', passed: failures.length === 0, failures, decision };
+}
+
 // ─── Runner ───────────────────────────────────────────────────────────────
 
 const TCs: Array<() => TCResult> = [
@@ -4292,6 +4375,10 @@ const TCs: Array<() => TCResult> = [
   // post_hip_fracture_zoledronate_first_line flag negative-asserted; Rule 1
   // co-equal first-line locked separately via TC1's added hasAgent(zoledronate).
   tc111,
+  // v1.46.2 — F2+F4 dedup contract lock (65F + hip fx + no bloods); closes the
+  // v1.45 lean-coverage gap; deterministic `f2WouldFire = caMissing` guard
+  // refactor at safetyFilters.ts:218 (was: `flags.some(...)` runtime introspection).
+  tc112,
 ];
 
 const results = TCs.map(fn => fn());

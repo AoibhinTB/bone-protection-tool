@@ -215,7 +215,16 @@ export function applyPreTreatmentSafetyFilters(
     // under F2. F3 (vitd_parenteral_block, Vit D measured + LOW) is NOT
     // affected by this dedup — F3 carries distinct "Treat Vit D first"
     // actionable guidance that F2 does not duplicate.
-    if (!flags.some(f => f.id === 'calcium_unmeasured_antiresorptive_block')) {
+    //
+    // v1.46.2 — refactored from `flags.some(f => f.id === '...')` runtime
+    // introspection to deterministic boolean check on the precondition
+    // (caMissing) that gates F2. F2's emission is unconditional inside
+    // its `if (caMissing)` block, so caMissing ⇔ F2 fires. Using the
+    // boolean directly decouples the dedup from source order — even if
+    // a future refactor moves F4 above F2, the guard remains correct.
+    // Locked structurally by TC112 (F2+F4 dedup contract).
+    const f2WouldFire = caMissing;
+    if (!f2WouldFire) {
       flags.push({
         id: 'vitd_unmeasured_parenteral_block',
         severity: 'urgent',
