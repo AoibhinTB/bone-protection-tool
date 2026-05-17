@@ -384,7 +384,9 @@ function tc11(): TCResult {
   check(failures, 'recommends zoledronate', hasAgent(decision, 'zoledronate'));
   check(failures, 'NO alendronate (GI intolerance)', !hasAgent(decision, 'alendronate'));
   check(failures, 'NO risedronate (GI intolerance)', !hasAgent(decision, 'risedronate'));
-  check(failures, 'GC high-dose surface flag', hasFlag(decision, 'gc_high_dose_giop_surface'));
+  // v1.45 — gc_high_dose_giop_surface flag retired (engine-internal "pathway
+  // applied / Table 8 correction" framing leaked to user). The clinically
+  // actionable NOGG Rec 22 content is preserved by giop_immediate_start.
   return { name: 'TC11 — 66M GIOP + prior oral BP GI intolerance', passed: failures.length === 0, failures, decision };
 }
 

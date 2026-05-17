@@ -334,21 +334,20 @@ export function generateTreatmentOutput(
     });
   }
 
-  // ── Glucocorticoids ≥7.5 mg/day surface flag — GIOP pathway, FRAX adjusted ──
-  // Fires on current high-dose use regardless of elapsed duration (planned ≥3 mo per Rec 22).
-  if (isOnHighDoseGC(patient)) {
-    const _gcDose = effectiveGCDoseMgDay(patient);
-    flags.push({
-      id: 'gc_high_dose_giop_surface',
-      severity: 'warning',
-      message:
-        `Glucocorticoids ${_gcDose} mg/day (≥7.5) — GIOP pathway applied; Table 8 FRAX correction MOF ×1.15 / hip ×1.20.`,
-      rationale:
-        'NOGG 2024 Rec 22 (Strong): start bone protection at the same time as glucocorticoids; do not wait for DEXA. ' +
-        'Table 8 high-dose adjustment compensates for FRAX underestimation at ≥7.5 mg/day.',
-      source: SRC_NOGG,
-    });
-  }
+  // ── v1.45 retirement: gc_high_dose_giop_surface flag retired ──
+  // The pre-retirement emitter pushed a warning-severity flag for every
+  // high-dose-GC patient reading:
+  //   "Glucocorticoids ${dose} mg/day (≥7.5) — GIOP pathway applied;
+  //    Table 8 FRAX correction MOF ×1.15 / hip ×1.20."
+  // This was engine-internal information (which pathway the tool applied,
+  // what FRAX correction was used) surfaced as a user-facing alert. It tells
+  // the GP what the tool did, not what the GP should do — debug/audit content
+  // that escaped into the clinical-alerts surface. The clinically actionable
+  // content this used to carry (NOGG Rec 22 "start bone protection at the
+  // same time as glucocorticoids") is preserved by the GIOP immediate-start
+  // flag (giop_immediate_start) that fires for the same patient population.
+  // Companion cleanup: the matching riskFactorsSummary.ts entries for
+  // ≥7.5 mg/day + <2.5 mg/day have been reworded / stripped respectively.
 
   // ── BTM / BMD restart signal during a bisphosphonate pause (v1.13 Step 9; NOGG Section 6.6, Conditional) ──
   // v1.19 — onPause now spans three patient shapes the wizard can produce:
@@ -2941,7 +2940,11 @@ function giop(
       id: 'giop_specialist_context',
       severity: 'warning',
       message:
-        'GIOP-specific anabolic context: teriparatide has direct GIOP evidence (Saag NEJM 2007; NOGG Rec 23). HSE BVM (March 2023): biosimilar over originator. Modest hip BMD effect — relevant if hip is the worse site.',
+        // v1.45 — message reworded. Citations (Saag NEJM 2007 + NOGG Rec 23 +
+        // HSE BVM March 2023) stripped from the message; rationale field below
+        // continues to carry all three citations + the source: SRC_BSR footer.
+        // Reads as clinical guidance rather than referenced-prose.
+        'GIOP-specific anabolic context: teriparatide has direct GIOP evidence. Modest hip BMD effect; relevant if hip is the worse site.',
       rationale:
         'NOGG 2024 Rec 23 / BSR 2022: teriparatide shown superior to alendronate in GIOP (Saag et al. NEJM 2007). ' +
         'GIOP VHR = multiple vertebral fractures OR T-score ≤-3.5 on steroids. ' +

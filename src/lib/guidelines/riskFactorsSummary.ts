@@ -43,15 +43,23 @@ export function generateRiskFactorsIdentified(
         : null;
     if (gcDose !== null) {
       if (gcDose >= 7.5) {
+        // v1.45 cleanup: effect wording reworded to clinical framing —
+        // engine-internal "Table 8 FRAX correction MOF ×1.15, hip ×1.20"
+        // multiplier framing stripped (companion to treatment.ts
+        // gc_high_dose_giop_surface flag retirement). Reads as clinical
+        // guidance rather than tool diagnostics.
         items.push({
           factor: `Glucocorticoids ${gcDose} mg/day (≥7.5)`,
-          effect: 'Table 8 FRAX correction: MOF ×1.15, hip ×1.20. GIOP immediate-start criterion (c).',
+          effect: 'High-dose glucocorticoid: significant fracture risk increase.',
         });
       } else if (gcDose < 2.5) {
-        items.push({
-          factor: `Glucocorticoids ${gcDose} mg/day (<2.5)`,
-          effect: 'Table 8 downward FRAX correction: MOF ×0.80, hip ×0.65 (FRAX overestimates at very low dose).',
-        });
+        // v1.45 cleanup: <2.5 mg/day entry retired entirely. Pre-retirement
+        // effect read "Table 8 downward FRAX correction: MOF ×0.80, hip ×0.65
+        // (FRAX overestimates at very low dose)." — engine-internal multiplier
+        // framing carrying minimal clinical actionability. The risk-factor
+        // surface should communicate what the clinician needs to know about
+        // the patient's risk profile, not what the tool did internally.
+        // No replacement entry pushed.
       } else {
         items.push({
           factor: `Glucocorticoids ${gcDose} mg/day (2.5–7.5)`,

@@ -203,17 +203,31 @@ export function applyPreTreatmentSafetyFilters(
         'NOGG Rec 17: Vit D not yet measured. Check Vit D; supplement alongside oral bisphosphonate; recheck at 8–12 weeks.',
       ];
     }
-    flags.push({
-      id: 'vitd_unmeasured_parenteral_block',
-      severity: 'urgent',
-      message:
-        'Parenteral antiresorptives require pre-treatment Vit D measurement (NOGG 2024 Rec 17). ' +
-        'Measure as part of Tier 1 bloods. Oral bisphosphonates may be initiated with concurrent supplementation.',
-      rationale:
-        'NOGG 2024 Recommendation 17 (Strong): Vit D status must be established before parenteral initiation. ' +
-        'Without measurement, the Rec 17 precondition cannot be verified.',
-      source: SRC_NOGG,
-    });
+    // v1.45 dedup — suppress F4 flag emission when F2
+    // (calcium_unmeasured_antiresorptive_block) is already firing. F2's
+    // message explicitly says "Measure Ca, Vit D, and eGFR as Tier 1 bloods"
+    // — the parenteral-specific Vit D message below duplicates that
+    // guidance, producing two URGENT alerts both prompting Vit D
+    // measurement. The recipe-status mutation block above (pending +
+    // blockReason on parenteral entries; Rec 17 monitoring note on oral
+    // BPs) is preserved regardless — parenteral entries should still be
+    // tagged 'pending' even when the user-facing message is consolidated
+    // under F2. F3 (vitd_parenteral_block, Vit D measured + LOW) is NOT
+    // affected by this dedup — F3 carries distinct "Treat Vit D first"
+    // actionable guidance that F2 does not duplicate.
+    if (!flags.some(f => f.id === 'calcium_unmeasured_antiresorptive_block')) {
+      flags.push({
+        id: 'vitd_unmeasured_parenteral_block',
+        severity: 'urgent',
+        message:
+          'Parenteral antiresorptives require pre-treatment Vit D measurement (NOGG 2024 Rec 17). ' +
+          'Measure as part of Tier 1 bloods. Oral bisphosphonates may be initiated with concurrent supplementation.',
+        rationale:
+          'NOGG 2024 Recommendation 17 (Strong): Vit D status must be established before parenteral initiation. ' +
+          'Without measurement, the Rec 17 precondition cannot be verified.',
+        source: SRC_NOGG,
+      });
+    }
   }
 
   // ─── Filter 5: Continuation-context hypocalcaemia for on-denosumab patients ──
