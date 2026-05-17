@@ -1028,7 +1028,19 @@ export function ResultsView({ result, patient, onReset, onBack, onRevealNoRfFrax
           cards are documentation/handoff for the specialist letter. */}
       {(() => {
         const recs = result.treatmentRecommendations;
-        const primary = recs.filter((tr) => tr.category !== 'bridging' && tr.category !== 'patient_preference_fallback');
+        // v1.46.1 — sort primary cards by priority so first-line renders above
+        // alternative. Stable sort (ES2019) preserves within-priority-group
+        // order: for Rule 1 (all priority undefined → rank 0) the original
+        // engine push order is preserved; for Rule 2 hip-fx context the IV zol
+        // first-line card moves above the orals' alternative cards. Affects
+        // only the primary array — bridging + fallback render paths have
+        // category-uniform arrays with no priority mixing.
+        const priorityRank = (tr: TreatmentRecommendation): number =>
+          tr.priority === 'alternative' ? 1 : 0;
+        const primary = recs
+          .filter((tr) => tr.category !== 'bridging' && tr.category !== 'patient_preference_fallback')
+          .slice()
+          .sort((a, b) => priorityRank(a) - priorityRank(b));
         const bridging = recs.filter((tr) => tr.category === 'bridging');
         const fallback = recs.filter((tr) => tr.category === 'patient_preference_fallback');
         const hasAnyVHRSpecialistOptions = result.specialistOptions.length > 0;
