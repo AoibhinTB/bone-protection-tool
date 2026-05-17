@@ -1552,49 +1552,28 @@ function initiateTherapy(
     return recs;
   }
 
-  // v1.19 Step 4 — Post-hip-fracture: IV zoledronate first-line (NOGG 2024
-  // Strong; HORIZON-Recurrent Fractures trial — fracture AND mortality
-  // reduction). Fires regardless of FRAX category. Gated on a recent hip
-  // fracture (priorHipFracture + recentFractureWithin2Years), matching the
-  // HORIZON-RF enrolment population (hip fx within 90 days). eGFR <35
-  // contraindicates zoledronate — fall back to denosumab in that case.
-  if (
-    patient.priorHipFracture &&
-    patient.recentFractureWithin2Years &&
-    !hasPreviousGIIntoleranceToBP(patient)
-  ) {
-    flags.push({
-      id: 'post_hip_fracture_zoledronate_first_line',
-      severity: 'info',
-      message:
-        'Recent hip fracture — IV zoledronate 5 mg first-line. NOGG 2024 (Strong, HORIZON-Recurrent Fractures trial): ' +
-        'IV zoledronate after hip fracture reduces fracture incidence AND all-cause mortality. ' +
-        'Do not delay for renal function concerns unless eGFR <35.',
-      rationale:
-        'Section 5.1 (v1.19): post-hip-fracture patients receive IV zoledronate as first-line bone protection regardless of FRAX category. ' +
-        'HORIZON-Recurrent Fractures (Lyles et al. NEJM 2007) enrolled patients within 90 days post-hip-fracture and demonstrated ' +
-        '35% reduction in clinical fractures and 28% reduction in all-cause mortality vs placebo.',
-      source: SRC_NOGG,
-    });
-    // Match the alendronate-first-line renal gate (>35, strict) so the
-    // boundary eGFR=35 case routes through the standard renal cascade to
-    // denosumab rather than firing a zoledronate recommendation. Spec
-    // wording is "Do not delay for renal concerns unless eGFR <35"; the
-    // strict-greater gate is the tool's accepted reading of "<35".
-    if (canUse('zoledronate', egfr) && (egfr === null || egfr > RENAL_LIMITS.alendronate.ci)) {
-      recs.push(withBPInitiationContext({
-        ...zoledronate(),
-        priority: 'first-line',
-        rationale:
-          'Post-hip-fracture first-line (NOGG 2024 Strong; HORIZON-RF — fracture AND mortality reduction). ' +
-          'Do not delay for renal concerns unless eGFR <35.',
-      }, patient));
-      return recs;
-    }
-    // eGFR ≤35 — fall through to AFF / alendronate-first / denosumab cascade,
-    // but the post-hip-fx info flag above stays visible so the rationale is
-    // still surfaced for the clinician.
-  }
+  // v1.46 retirement — narrow recent-hip-fracture early-return path retired.
+  //
+  // Pre-v1.46, this site emitted post_hip_fracture_zoledronate_first_line
+  // (info flag) AND pushed IV zoledronate with priority='first-line' as the
+  // sole recommendation, then returned early — orals were never pushed for
+  // this patient profile. Gate was narrow: priorHipFracture &&
+  // recentFractureWithin2Years && !GI-intolerance (matching the HORIZON-RF
+  // enrolment population: hip fx within 90 days).
+  //
+  // v1.46 implementation broadens the rule per NOGG Rec 3 (Strong) — ANY
+  // prior hip fracture (no time window) triggers IV zol as the preferred
+  // first-line option, with alendronate + risedronate rendered as
+  // alternatives (priority='alternative') so the GP can pick if IV is
+  // unsuitable. This logic now lives at the standard primary push sites
+  // (this function, normal-eGFR + eGFR-unknown branches below) using the
+  // existing TreatmentRecommendation.priority field. The flag is retired —
+  // its Rec 3 + Lyles content moves into the IV zol card's inline rationale
+  // as single source-of-truth.
+  //
+  // Renal CI behaviour preserved: at eGFR ≤35 the IV zol push is blocked
+  // by canUse() (same renal cascade as the prior implementation); the
+  // patient falls through to the denosumab fallback in the eGFR-low branch.
 
   // AFF history: permanent ban on ALL bisphosphonates — go directly to denosumab
   if (hasAFFHistory(patient)) {
@@ -1679,28 +1658,99 @@ function initiateTherapy(
 
   // v1.33 — Alendronate AND risedronate are equivalent first-line oral
   // bisphosphonates per NOGG 2024 Rec 12 / Section 6 Rec 2 (Strong). Push both.
+  // v1.46 — IV zoledronate added as co-equal first-line per NOGG 2024 Rec 2
+  // (Strong). For patients with prior hip fracture (any time, no recency
+  // window) per NOGG Rec 3 (Strong) + Lyles HORIZON-RF (NEJM 2007), IV zol
+  // becomes preferred first-line and the orals become alternatives. The
+  // priority field on TreatmentRecommendation carries this distinction.
+  // VHR patients are excluded from the new IV zol push (bridgingTagOrNullForVHR
+  // handles VHR-GC bridging tagging for orals only; the new IV zol push is
+  // gated explicitly on riskCategory !== 'very_high' so it does NOT enter the
+  // bridging cards for VHR-GC, matching NOGG Rec 8(g)'s "start an oral
+  // bisphosphonate in the meantime" wording).
   if (canUse('alendronate', egfr) && (egfr === null || egfr > RENAL_LIMITS.alendronate.ci)) {
-    // Borderline renal function: zoledronate should be avoided at eGFR <45
+    // Borderline renal function — monitoring guidance for any BP at this level.
+    // v1.46 — reworded from "IV zol avoided / orals preferred" to a co-equal
+    // monitoring frame matching the v1.46 NOGG Rec 2 co-equal first-line
+    // stance (alendronate, risedronate, IV zol all push at eGFR ≥ 35).
+    // The renal-monitoring expectation applies regardless of which BP is
+    // selected; the flag now captures that rather than implying a
+    // hierarchy that isn't NOGG-grounded.
     if (egfr !== null && egfr < 50) {
       flags.push({
         id: 'zoledronate_borderline_egfr',
         severity: 'info',
         message:
-          `eGFR ${egfr} ml/min: IV zoledronate should be used with caution or avoided when eGFR is borderline (<45 ml/min). ` +
-          'Oral bisphosphonate (alendronate or risedronate) is preferred at this level of renal function. Monitor eGFR at least annually.',
+          `eGFR ${egfr} ml/min — borderline renal function. Monitor eGFR at least annually for any patient on bisphosphonate therapy (oral or IV) at this level. NOGG 2024 Rec 2 co-equal first-line stance is preserved; renal monitoring is the prescribing safeguard.`,
         rationale:
-          'SmPC (Aclasta/zoledronate): caution required in renal impairment; consider avoiding if eGFR <45 ml/min. ' +
-          'Oral bisphosphonates do not accumulate in renal impairment at the same rate and are preferred when eGFR is borderline.',
+          'NOGG 2024 Rec 2 (Strong): alendronate, risedronate, and IV zoledronate are co-equal first-line antiresorptives. ' +
+          'All three carry renal CIs at eGFR <35 (alendronate, zoledronate) or <30 (risedronate). At borderline eGFR (35-49) ' +
+          'they remain prescribable; the SmPCs and NOGG monitoring guidance call for annual eGFR review while on therapy. ' +
+          'Choose based on patient suitability and preference; monitor renal function annually regardless of agent.',
         source: SRC_NICE,
       });
     }
+    const priorHipFx = patient.priorHipFracture;
+    // v1.46 — IV zol viability gate is canUse only (eGFR ≥ 35; ≥ floor matches
+    // RENAL_LIMITS.zoledronate.ci, same as alendronate). Alendronate and IV
+    // zoledronate share the same renal CI threshold (<35); pushing orals but
+    // withholding IV zol at eGFR 35-44 would be an asymmetric conservatism
+    // not grounded in NOGG. All three BPs push co-equally above their
+    // respective CI floors; the zoledronate_borderline_egfr info flag below
+    // continues to fire at eGFR <50 covering renal-monitoring guidance for
+    // any BP at this level (oral or IV).
+    const ivZolViableHere = canUse('zoledronate', egfr);
+    // Alendronate
     {
-      const tagged = bridgingTagOrNullForVHR(alendronate(), riskCategory, patient);
+      const base = alendronate();
+      const rec: TreatmentRecommendation = priorHipFx
+        ? {
+            ...base,
+            priority: 'alternative',
+            rationale:
+              'Alternative to IV zoledronate, which is the NOGG-preferred first-line option following a hip fracture (per NOGG 2024 Rec 3). Reasonable choice if IV is unsuitable or patient prefers oral therapy.',
+          }
+        : base;
+      const tagged = bridgingTagOrNullForVHR(rec, riskCategory, patient);
       if (tagged) recs.push(withBPInitiationContext(tagged, patient));
     }
+    // Risedronate
     if (canUse('risedronate', egfr)) {
-      const tagged = bridgingTagOrNullForVHR(risedronate(), riskCategory, patient);
+      const base = risedronate();
+      const rec: TreatmentRecommendation = priorHipFx
+        ? {
+            ...base,
+            priority: 'alternative',
+            rationale:
+              'Alternative to IV zoledronate, which is the NOGG-preferred first-line option following a hip fracture (per NOGG 2024 Rec 3). Reasonable choice if IV is unsuitable or patient prefers oral therapy.',
+          }
+        : base;
+      const tagged = bridgingTagOrNullForVHR(rec, riskCategory, patient);
       if (tagged) recs.push(withBPInitiationContext(tagged, patient));
+    }
+    // IV zoledronate (v1.46 new co-equal first-line push). Non-VHR only:
+    // bridgingTagOrNullForVHR would tag VHR-GC patients with 'bridging' but
+    // NOGG Rec 8(g)'s bridging instruction specifies oral bisphosphonate —
+    // IV zol is NOT a bridging option. The explicit !VHR gate keeps the
+    // new push scoped to Rule 1 / Rule 2's non-VHR target population.
+    if (riskCategory !== 'very_high' && ivZolViableHere) {
+      const base = zoledronate();
+      const rec: TreatmentRecommendation = priorHipFx
+        ? {
+            ...base,
+            priority: 'first-line',
+            rationale:
+              'IV zoledronate is the NOGG-preferred first-line option following a hip fracture (NOGG 2024 Rec 3, Strong). ' +
+              'The HORIZON-Recurrent Fractures trial (Lyles et al, NEJM 2007) demonstrated both subsequent fracture reduction AND mortality reduction in patients receiving annual IV zoledronate after hip-fracture repair compared to placebo. ' +
+              'Oral bisphosphonates remain alternatives if IV is unsuitable.',
+          }
+        : {
+            ...base,
+            rationale:
+              'IV zoledronate is a first-line antiresorptive option, co-equal with oral bisphosphonates per NOGG 2024 Rec 2 (Strong). ' +
+              'Annual IV infusion may suit patients preferring infrequent dosing, those with oral intolerance, or those with adherence concerns on weekly oral therapy.',
+          };
+      recs.push(withBPInitiationContext(rec, patient));
     }
     return recs;
   }
@@ -1776,13 +1826,63 @@ function initiateTherapy(
     source: SRC_HSE,
   });
   // v1.33 — push both equivalent first-line oral BPs.
+  // v1.46 — IV zoledronate added as co-equal first-line per NOGG 2024 Rec 2.
+  // Prior-hip-fracture patients get IV zol as preferred first-line (NOGG Rec 3
+  // / Lyles HORIZON-RF); orals become alternatives. Same priority-fork logic
+  // as the normal-eGFR block above. Non-VHR only.
   {
-    const tagged = bridgingTagOrNullForVHR(alendronate(), riskCategory, patient);
-    if (tagged) recs.push(withBPInitiationContext(tagged, patient));
-  }
-  {
-    const tagged = bridgingTagOrNullForVHR(risedronate(), riskCategory, patient);
-    if (tagged) recs.push(withBPInitiationContext(tagged, patient));
+    const priorHipFx = patient.priorHipFracture;
+    // Alendronate
+    {
+      const base = alendronate();
+      const rec: TreatmentRecommendation = priorHipFx
+        ? {
+            ...base,
+            priority: 'alternative',
+            rationale:
+              'Alternative to IV zoledronate, which is the NOGG-preferred first-line option following a hip fracture (per NOGG 2024 Rec 3). Reasonable choice if IV is unsuitable or patient prefers oral therapy.',
+          }
+        : base;
+      const tagged = bridgingTagOrNullForVHR(rec, riskCategory, patient);
+      if (tagged) recs.push(withBPInitiationContext(tagged, patient));
+    }
+    // Risedronate
+    {
+      const base = risedronate();
+      const rec: TreatmentRecommendation = priorHipFx
+        ? {
+            ...base,
+            priority: 'alternative',
+            rationale:
+              'Alternative to IV zoledronate, which is the NOGG-preferred first-line option following a hip fracture (per NOGG 2024 Rec 3). Reasonable choice if IV is unsuitable or patient prefers oral therapy.',
+          }
+        : base;
+      const tagged = bridgingTagOrNullForVHR(rec, riskCategory, patient);
+      if (tagged) recs.push(withBPInitiationContext(tagged, patient));
+    }
+    // IV zoledronate — eGFR-unknown branch can't pre-block on the <45
+    // borderline gate (no eGFR to check). The egfr_unknown flag above already
+    // tells the GP to check eGFR before prescribing; canUse('zoledronate',
+    // null) returns true for null eGFR (deferred to the GP). Non-VHR only.
+    if (riskCategory !== 'very_high') {
+      const base = zoledronate();
+      const rec: TreatmentRecommendation = priorHipFx
+        ? {
+            ...base,
+            priority: 'first-line',
+            rationale:
+              'IV zoledronate is the NOGG-preferred first-line option following a hip fracture (NOGG 2024 Rec 3, Strong). ' +
+              'The HORIZON-Recurrent Fractures trial (Lyles et al, NEJM 2007) demonstrated both subsequent fracture reduction AND mortality reduction in patients receiving annual IV zoledronate after hip-fracture repair compared to placebo. ' +
+              'Oral bisphosphonates remain alternatives if IV is unsuitable.',
+          }
+        : {
+            ...base,
+            rationale:
+              'IV zoledronate is a first-line antiresorptive option, co-equal with oral bisphosphonates per NOGG 2024 Rec 2 (Strong). ' +
+              'Annual IV infusion may suit patients preferring infrequent dosing, those with oral intolerance, or those with adherence concerns on weekly oral therapy.',
+          };
+      recs.push(withBPInitiationContext(rec, patient));
+    }
   }
   return recs;
 }

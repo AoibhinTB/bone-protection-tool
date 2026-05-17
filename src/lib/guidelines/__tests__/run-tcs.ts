@@ -125,6 +125,12 @@ function tc1(): TCResult {
   check(failures, 'risk = high', decision.riskStratification.category === 'high', `got ${decision.riskStratification.category}`);
   check(failures, 'recommends alendronate', hasAgent(decision, 'alendronate'));
   check(failures, 'recommends risedronate (equivalent first-line per NOGG 2024 Rec 12)', hasAgent(decision, 'risedronate'));
+  // v1.46 — IV zoledronate added as co-equal first-line per NOGG 2024 Rec 2
+  // (Strong). Pushed at the standard primary push site for non-VHR + treatment-
+  // indicated. (Filter F3 will tag status='blocked' at Vit D 40 in this profile,
+  // but the rec is still present in treatmentRecommendations — the status field
+  // is the v1.37 architecture for "what you'd prescribe once Vit D is fixed".)
+  check(failures, 'recommends IV zoledronate (v1.46 co-equal first-line)', hasAgent(decision, 'zoledronate'));
   check(failures, 'no denosumab', !hasAgent(decision, 'denosumab'));
   check(failures, 'Vit D supplement insufficient text', hasSupplementText(decision, 'vitamin_d', 'insufficient'));
   check(failures, 'Vit D 800–1000 IU/day mentioned', hasSupplementText(decision, 'vitamin_d', '800') || hasSupplementText(decision, 'vitamin_d', '1000'));
@@ -408,6 +414,7 @@ function tc12(): TCResult {
   check(failures, 'risk = high (T-score drives despite low FRAX)', decision.riskStratification.category === 'high', `got ${decision.riskStratification.category}`);
   check(failures, 'recommends alendronate', hasAgent(decision, 'alendronate'));
   check(failures, 'recommends risedronate (equivalent first-line per NOGG 2024 Rec 12)', hasAgent(decision, 'risedronate'));
+  check(failures, 'recommends IV zoledronate (v1.46 co-equal first-line)', hasAgent(decision, 'zoledronate'));
   // Young + osteoporosis + no obvious cause → broad workup (PTH at minimum)
   check(failures, 'PTH investigation triggered (young unexplained)', decision.investigationsNeeded.some(i => i.investigation === 'pth'));
   return { name: 'TC12 — 52F osteoporosis + low FRAX (discordance)', passed: failures.length === 0, failures, decision };
@@ -478,8 +485,11 @@ function tc15(): TCResult {
   check(failures, 'risk = high (prior-fx-high path post-NEG-1 removal)',
     decision.riskStratification.category === 'high',
     `got ${decision.riskStratification.category}`);
-  check(failures, 'post-hip-fracture treat-immediately flag fires',
-    hasFlag(decision, 'post_hip_fracture_zoledronate_first_line'));
+  // v1.46 — post_hip_fracture_zoledronate_first_line flag retired. At eGFR 35
+  // IV zol is renally CI'd (canUse fails) so no IV zol rec is pushed; can't
+  // anchor on the IV zol rationale here. TC15's remaining assertions
+  // (denosumab present, FRAX life-expectancy caveat, denosumab Vit D block,
+  // no alendronate) lock the primary clinical content for this profile.
   check(failures, 'recommends denosumab (eGFR 35 borderline)', hasAgent(decision, 'denosumab'));
   check(failures, 'NO alendronate at eGFR 35', !hasAgent(decision, 'alendronate'));
   check(failures, 'age ≥80 FRAX caveat', hasFlag(decision, 'frax_life_expectancy_caveat'));
@@ -594,6 +604,9 @@ function tc20(): TCResult {
   check(failures, 'testosterone investigation triggered', decision.investigationsNeeded.some(i => i.investigation === 'testosterone'));
   check(failures, 'recommends alendronate', hasAgent(decision, 'alendronate'));
   check(failures, 'recommends risedronate (equivalent first-line per NOGG 2024 Rec 12)', hasAgent(decision, 'risedronate'));
+  // v1.46 — IV zoledronate co-equal first-line. Vit D 35 < 50 will tag F3
+  // status='blocked' on parenterals; rec still present in array.
+  check(failures, 'recommends IV zoledronate (v1.46 co-equal first-line)', hasAgent(decision, 'zoledronate'));
   check(failures, 'Vit D insufficient text', hasSupplementText(decision, 'vitamin_d', 'insufficient'));
   return { name: 'TC20 — 58M hypogonadism + VF + osteoporosis', passed: failures.length === 0, failures, decision };
 }
@@ -1104,6 +1117,7 @@ function tc40(): TCResult {
   const decision = runClinicalDecision(patient);
   check(failures, 'recommends alendronate', hasAgent(decision, 'alendronate'));
   check(failures, 'recommends risedronate (equivalent first-line per NOGG 2024 Rec 12)', hasAgent(decision, 'risedronate'));
+  check(failures, 'recommends IV zoledronate (v1.46 co-equal first-line)', hasAgent(decision, 'zoledronate'));
   const alenRec = decision.treatmentRecommendations.find(r => r.agent === 'alendronate');
   const monitoringText = (alenRec?.monitoring ?? []).join(' | ').toLowerCase();
   check(failures, 'monitoring includes dental hygiene/dental check-up',
@@ -1357,6 +1371,14 @@ function tc50(): TCResult {
     hasFlag(decision, 'poi_bp_layered_hrt_ineligible'));
   check(failures, 'alendronate recommended', hasAgent(decision, 'alendronate'));
   check(failures, 'recommends risedronate (equivalent first-line per NOGG 2024 Rec 12)', hasAgent(decision, 'risedronate'));
+  // v1.46 note: IV zoledronate is NOT asserted here. POI / early-menopause
+  // routes through earlyMenopause() special-population override at
+  // generateTreatmentOutput, which returns BEFORE initiateTherapy() — the
+  // v1.46 IV zol push at initiateTherapy's primary site does not fire for
+  // this patient. POI is out of scope for the Rule 1 co-equal first-line
+  // contract, same as VHR is out of scope. Documented here so future readers
+  // see why TC50 lacks the IV zol assertion present on its sibling non-VHR
+  // primary-path TCs (TC1, TC12, TC20, TC40, TC59, TC71, TC83, TC84).
   // Both VTE and breast cancer safety flags should be visible for clinician documentation.
   check(failures, 'POI VTE flag fires', hasFlag(decision, 'poi_hrt_vte'));
   check(failures, 'POI breast cancer flag fires', hasFlag(decision, 'poi_hrt_breast_cancer'));
@@ -1601,6 +1623,7 @@ function tc59(): TCResult {
   check(failures, 'NO raloxifene in recommendations',
     !hasAgent(decision, 'raloxifene'));
   check(failures, 'alendronate first-line (T ≤ -2.5)', hasAgent(decision, 'alendronate'));
+  check(failures, 'recommends IV zoledronate (v1.46 co-equal first-line)', hasAgent(decision, 'zoledronate'));
   check(failures, 'recommends risedronate (equivalent first-line per NOGG 2024 Rec 12)', hasAgent(decision, 'risedronate'));
   return { name: 'TC59 — stroke history: raloxifene excluded, alendronate first-line', passed: failures.length === 0, failures, decision };
 }
@@ -1648,17 +1671,25 @@ function tc61(): TCResult {
     bloodResults: { adjustedCalciumMmol: 2.30, vitaminDNmol: 38, egfr: 55, alp: 80, tshMUL: 2.0, hbGramsPerLitre: 130, esrOrCrp: 'normal' },
   });
   const decision = runClinicalDecision(patient);
-  check(failures, 'post-hip-fracture zoledronate flag fires',
-    hasFlag(decision, 'post_hip_fracture_zoledronate_first_line'));
+  // v1.46 — post_hip_fracture_zoledronate_first_line flag retired; Rec 3 +
+  // Lyles content now lives on the IV zol recommendation's inline rationale
+  // (single source of truth). Assertions swapped to anchor on the rec's
+  // rationale field.
   check(failures, 'IV zoledronate in recommendations',
     hasAgent(decision, 'zoledronate'));
-  check(failures, 'flag message references HORIZON', hasFlagText(decision, 'horizon'));
+  const zoleRec = decision.treatmentRecommendations.find(r => r.agent === 'zoledronate');
+  check(failures, 'IV zol rationale anchors HORIZON-RF / Lyles reference',
+    !!zoleRec && /horizon|lyles/i.test(zoleRec.rationale));
+  check(failures, 'IV zol rationale anchors Rec 3 framing',
+    !!zoleRec && /rec 3|recommendation 3/i.test(zoleRec.rationale));
+  check(failures, 'IV zol rationale anchors mortality reduction',
+    !!zoleRec && /mortality/i.test(zoleRec.rationale));
   // Manual FRAX was NOT entered — assert that the engine surfaced the post-hip-fx
   // pathway without depending on user-supplied FRAX (the in-tool estimator may
   // still compute a value, which is fine; the test is that the recommendation
   // does not GATE on manual-FRAX-above-IT).
   check(failures, 'manual FRAX inputs absent', patient.fraxMOFPercent === null && patient.fraxHipPercent === null);
-  check(failures, 'flag fires regardless of DEXA presence (none here)', patient.dexaResults === null);
+  check(failures, 'pathway fires regardless of DEXA presence (none here)', patient.dexaResults === null);
   return { name: 'TC61 — post-hip-fx → zoledronate, no FRAX/BMD required', passed: failures.length === 0, failures, decision };
 }
 
@@ -1737,14 +1768,19 @@ function tc64(): TCResult {
     bloodResults: { adjustedCalciumMmol: 2.32, vitaminDNmol: 70, egfr: 65, alp: 80, tshMUL: 2.0, hbGramsPerLitre: 135, esrOrCrp: 'normal' },
   });
   const decision = runClinicalDecision(patient);
-  check(failures, 'post-hip-fracture zoledronate flag fires',
-    hasFlag(decision, 'post_hip_fracture_zoledronate_first_line'));
-  check(failures, 'flag references HORIZON evidence', hasFlagText(decision, 'horizon'));
-  check(failures, 'flag references mortality reduction', hasFlagText(decision, 'mortality'));
+  // v1.46 — post_hip_fracture_zoledronate_first_line flag retired; Rec 3 +
+  // Lyles content now lives on the IV zol recommendation's inline rationale.
+  // Assertions swapped to anchor on the rec's rationale field.
   check(failures, 'IV zoledronate recommended', hasAgent(decision, 'zoledronate'));
   const zoleRec = decision.treatmentRecommendations.find(r => r.agent === 'zoledronate');
   check(failures, 'zoledronate priority = first-line', zoleRec?.priority === 'first-line',
     `got ${zoleRec?.priority}`);
+  check(failures, 'IV zol rationale anchors HORIZON-RF / Lyles reference',
+    !!zoleRec && /horizon|lyles/i.test(zoleRec.rationale));
+  check(failures, 'IV zol rationale anchors mortality reduction',
+    !!zoleRec && /mortality/i.test(zoleRec.rationale));
+  check(failures, 'IV zol rationale anchors Rec 3 framing',
+    !!zoleRec && /rec 3|recommendation 3/i.test(zoleRec.rationale));
   return { name: 'TC64 — post-hip-fracture → IV zoledronate first-line', passed: failures.length === 0, failures, decision };
 }
 
@@ -1933,6 +1969,7 @@ function tc71(): TCResult {
   check(failures, 'ibandronate not in default cascade', !hasAgent(decision, 'ibandronate'));
   // Confirm alendronate is recommended for this standard female PMO patient.
   check(failures, 'alendronate recommended', hasAgent(decision, 'alendronate'));
+  check(failures, 'recommends IV zoledronate (v1.46 co-equal first-line)', hasAgent(decision, 'zoledronate'));
   return { name: 'TC71 — ibandronate not pushed; alendronate first-line', passed: failures.length === 0, failures, decision };
 }
 
@@ -2370,6 +2407,7 @@ function tc83(): TCResult {
     hasFlagText(decision, 'fragility fracture') || hasFlagText(decision, 'low-trauma fracture'));
   check(failures, 'recommendation list contains a bisphosphonate (alendronate or risedronate)',
     hasAgent(decision, 'alendronate') || hasAgent(decision, 'risedronate'));
+  check(failures, 'recommends IV zoledronate (v1.46 co-equal first-line)', hasAgent(decision, 'zoledronate'));
   check(failures, 'treatmentRecommended === true', decision.treatmentRecommended === true);
   check(failures, 'risk category high', decision.riskStratification.category === 'high');
 
@@ -2400,6 +2438,7 @@ function tc84(): TCResult {
   check(failures, 'output cites NOGG 2024 Rec 6', hasFlagText(decision, 'NOGG 2024 Rec 6'));
   check(failures, 'recommendation list contains a bisphosphonate',
     hasAgent(decision, 'alendronate') || hasAgent(decision, 'risedronate'));
+  check(failures, 'recommends IV zoledronate (v1.46 co-equal first-line)', hasAgent(decision, 'zoledronate'));
   check(failures, 'treatmentRecommended === true', decision.treatmentRecommended === true);
 
   return { name: 'TC84 — BMD unavailable + FRAX above IT (Rec 6)', passed: failures.length === 0, failures, decision };
@@ -4128,6 +4167,85 @@ function tc110(): TCResult {
   return { name: 'TC110 — postmenopausal F GC-driven VHR + refuses-injections: bridging recipe + GC-variant refusal-context flag (v1.44)', passed: failures.length === 0, failures, decision };
 }
 
+// ═══════════════════════════════════════════════════════════════════════════
+// v1.46 TEST CASE — Rule 2 post-hip-fracture IV zoledronate first-line
+// ═══════════════════════════════════════════════════════════════════════════
+
+// ─── TC111 ─────────────────────────────────────────────────────────────────
+// Non-VHR + prior hip fracture profile locking NOGG Rec 3 (Strong) + Lyles
+// HORIZON-RF behaviour. 65F, prior hip fx, T-2.6 hip (osteoporosis but not
+// VHR-3), no vert fx, no GC, no other RFs, manual MOF 15% (above age-65 IT
+// ~12% but below VHRT ~19.2% so VHR-6 doesn't fire), eGFR 75 (no renal CIs),
+// Vit D 70 (replete — avoids Filter F3 status-blocking IV zol), normal
+// bloods, no recent fragility fx. Profile lands in 'high' via the prior-fx-
+// high route in risk.ts (priorHipFracture true → engine routes to high
+// regardless of FRAX).
+//
+// v1.46 contract:
+//   - IV zoledronate as PRIMARY recommendation, priority='first-line'
+//   - Alendronate + risedronate as ALTERNATIVES, priority='alternative'
+//   - IV zol rationale anchors Rec 3 + Lyles + HORIZON-RF + mortality reduction
+//   - Oral rationales anchor "Alternative to IV zoledronate" framing
+//   - retired post_hip_fracture_zoledronate_first_line flag DOES NOT fire
+function tc111(): TCResult {
+  const failures: string[] = [];
+  const patient = basePatient({
+    age: 65,
+    sex: 'female',
+    priorFragilityFracture: true,
+    priorHipFracture: true,
+    recentFractureWithin2Years: false,
+    dexaResults: { lumbarSpineTScore: -2.4, totalHipTScore: -2.6, femoralNeckTScore: -2.5, forearmTScore: null },
+    fraxMOFPercent: 15.0,
+    fraxHipPercent: 4.0,
+    fraxCalculatedWithBMD: true,
+    bloodResults: { adjustedCalciumMmol: 2.32, vitaminDNmol: 70, egfr: 75, alp: 80, tshMUL: 2.0, hbGramsPerLitre: 135, esrOrCrp: 'normal' },
+  });
+  const decision = runClinicalDecision(patient);
+
+  // Profile lands in 'high' (not 'very_high' — Rule 2 is scoped to non-VHR).
+  check(failures, "riskCategory === 'high' (not very_high — Rule 2 scope)",
+    decision.riskStratification.category === 'high',
+    `got ${decision.riskStratification.category}`);
+
+  // All three primary drugs present in recommendations.
+  check(failures, 'IV zoledronate in recommendations', hasAgent(decision, 'zoledronate'));
+  check(failures, 'alendronate in recommendations', hasAgent(decision, 'alendronate'));
+  check(failures, 'risedronate in recommendations', hasAgent(decision, 'risedronate'));
+
+  // Rule 2 priority forking: IV zol first-line, orals alternative.
+  const zoleRec = decision.treatmentRecommendations.find(r => r.agent === 'zoledronate');
+  const alnRec = decision.treatmentRecommendations.find(r => r.agent === 'alendronate');
+  const risRec = decision.treatmentRecommendations.find(r => r.agent === 'risedronate');
+  check(failures, "zoledronate priority === 'first-line'",
+    zoleRec?.priority === 'first-line', `got ${zoleRec?.priority}`);
+  check(failures, "alendronate priority === 'alternative'",
+    alnRec?.priority === 'alternative', `got ${alnRec?.priority}`);
+  check(failures, "risedronate priority === 'alternative'",
+    risRec?.priority === 'alternative', `got ${risRec?.priority}`);
+
+  // IV zol rationale semantic anchors — Rec 3 + Lyles + HORIZON-RF + mortality
+  // reduction. Locked content carrying the Rule 2 clinical framing.
+  check(failures, 'IV zol rationale anchors Rec 3 framing',
+    !!zoleRec && /rec 3|recommendation 3/i.test(zoleRec.rationale));
+  check(failures, 'IV zol rationale anchors HORIZON-RF / Lyles reference',
+    !!zoleRec && /(horizon|lyles)/i.test(zoleRec.rationale));
+  check(failures, 'IV zol rationale anchors mortality reduction',
+    !!zoleRec && /mortality/i.test(zoleRec.rationale));
+
+  // Oral rationale semantic anchor — "Alternative to IV zoledronate" framing.
+  check(failures, 'alendronate rationale anchors alternative-to-IV framing',
+    !!alnRec && /alternative to iv zoledronate/i.test(alnRec.rationale));
+  check(failures, 'risedronate rationale anchors alternative-to-IV framing',
+    !!risRec && /alternative to iv zoledronate/i.test(risRec.rationale));
+
+  // v1.46 — retired flag must not fire (negative assertion locks the retirement).
+  check(failures, 'post_hip_fracture_zoledronate_first_line flag does NOT fire (v1.46 retirement)',
+    !hasFlag(decision, 'post_hip_fracture_zoledronate_first_line'));
+
+  return { name: 'TC111 — non-VHR + prior hip fx: IV zol primary + orals alternative (v1.46 Rule 2)', passed: failures.length === 0, failures, decision };
+}
+
 // ─── Runner ───────────────────────────────────────────────────────────────
 
 const TCs: Array<() => TCResult> = [
@@ -4170,6 +4288,10 @@ const TCs: Array<() => TCResult> = [
   // negative-asserted; GC-variant vhr_anabolic_refusal_context fires with three
   // locked semantic anchors.
   tc110,
+  // v1.46 — Rule 2 post-hip-fracture IV zoledronate first-line coverage; retired
+  // post_hip_fracture_zoledronate_first_line flag negative-asserted; Rule 1
+  // co-equal first-line locked separately via TC1's added hasAgent(zoledronate).
+  tc111,
 ];
 
 const results = TCs.map(fn => fn());
