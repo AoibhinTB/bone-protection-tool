@@ -65,46 +65,80 @@ function sourceText(flag: ClinicalFlag): string {
   return `${flag.source.guideline} ${flag.source.year}${flag.source.section ? ` §${flag.source.section}` : ''}`;
 }
 
-// ─── Unified AlertCard ────────────────────────────────────────────────────
-// One layout for urgent / warning / info. Visible: badge + 2-line action + source.
-// Collapsible rationale via "show rationale" toggle.
+// ─── Clinical Alerts severity-clustering (v1.45) ──────────────────────────
+// AlertCard renders full-size for Urgent cluster; collapsed-by-default
+// (title + chevron) for Warning + Info clusters. Click anywhere on a collapsed
+// card expands to the full layout (badge + body + source + rationale toggle).
+//
+// Cluster headers (small severity-coloured caps) and the cluster partition
+// live at the section render site below; AlertCard is parameterised on a
+// `collapsedDefault` prop driven by the cluster.
+//
+// Title for the collapsed state: prefer `flag.summary` if present (curated
+// short hint); otherwise auto-truncate `flag.message` at first sentence
+// boundary or 100 chars + ellipsis.
 
-function AlertCard({ flag }: { flag: ClinicalFlag }) {
+function truncateForTitle(text: string): string {
+  // Split on first period+space to capture the first sentence cleanly.
+  const dotIdx = text.indexOf('. ');
+  if (dotIdx > 0 && dotIdx < 120) {
+    return text.slice(0, dotIdx + 1);
+  }
+  if (text.length > 100) {
+    return text.slice(0, 100).trimEnd() + '…';
+  }
+  return text;
+}
+
+function AlertCard({ flag, collapsedDefault }: { flag: ClinicalFlag; collapsedDefault: boolean }) {
+  const [expanded, setExpanded] = useState(!collapsedDefault);
   const [showRationale, setShowRationale] = useState(false);
-  const [showDetails, setShowDetails] = useState(false);
   const fc = FLAG_CONFIG[flag.severity];
   const isUrgent = flag.severity === 'urgent';
-  // When collapsedByDefault is set with a summary, render the summary as the main
-  // card body and surface the full message behind a "▾ show details" toggle. Used
-  // for specialist-aimed info flags whose dense referral-letter prose should not
-  // dominate the GP's view (dental_check_pre_treatment, romosozumab_cv_risk_framing,
-  // sequential_therapy_plan_required). The rationale toggle remains independent.
-  const collapsed = flag.collapsedByDefault === true && typeof flag.summary === 'string';
 
+  // Collapsed-state render: button with severity-coloured 6px left border,
+  // title only (summary if present else truncated message), chevron affordance.
+  // No badge, no body, no source — those re-appear when expanded.
+  if (!expanded) {
+    const title = flag.summary ?? truncateForTitle(flag.message);
+    return (
+      <button
+        type="button"
+        onClick={() => setExpanded(true)}
+        className={`w-full text-left bg-white border-l-[6px] ${fc.border} rounded-r-lg px-3 py-2 hover:bg-slate-50 active:bg-slate-100 transition-colors min-h-[44px] flex items-center justify-between gap-3`}
+        aria-expanded="false"
+      >
+        <span className={`text-sm font-semibold ${fc.text} leading-snug flex-1`}>
+          {title}
+        </span>
+        <span className="shrink-0 text-slate-400 text-xs" aria-hidden="true">▾</span>
+      </button>
+    );
+  }
+
+  // Expanded-state render: full card layout (existing).
   return (
     <div className={`${fc.bg} border-l-[6px] ${fc.border} rounded-r-lg p-3 sm:p-4 ${fc.ring}`}>
-      <div className="flex items-start gap-2 mb-1.5">
+      <div className="flex items-start justify-between gap-2 mb-1.5">
         <Badge className={fc.badge}>{fc.label}</Badge>
+        {collapsedDefault && (
+          <button
+            type="button"
+            onClick={() => setExpanded(false)}
+            className="shrink-0 text-slate-400 hover:text-slate-700 text-xs"
+            aria-label="Collapse alert"
+          >
+            ▴
+          </button>
+        )}
       </div>
       <p
         className={`${isUrgent ? 'text-base font-bold' : 'text-sm font-semibold'} ${fc.text} leading-snug`}
       >
-        {collapsed ? flag.summary : flag.message}
+        {flag.message}
       </p>
-      {collapsed && showDetails && (
-        <p className={`text-sm ${fc.text} leading-snug mt-2`}>{flag.message}</p>
-      )}
       <div className="mt-2 flex items-center gap-3 flex-wrap">
         <p className="text-[11px] text-slate-500">{sourceText(flag)}</p>
-        {collapsed && (
-          <button
-            type="button"
-            onClick={() => setShowDetails((s) => !s)}
-            className="text-[11px] font-medium text-slate-500 hover:text-slate-800 underline underline-offset-2"
-          >
-            {showDetails ? '▴ hide details' : '▾ show details'}
-          </button>
-        )}
         <button
           type="button"
           onClick={() => setShowRationale((s) => !s)}
@@ -1066,17 +1100,60 @@ export function ResultsView({ result, patient, onReset, onBack, onRevealNoRfFrax
         );
       })()}
 
-      {/* Clinical alerts — single unified format for urgent / warning / info */}
-      {sortedFlags.length > 0 && (
-        <section>
-          <SectionTitle>Clinical alerts</SectionTitle>
-          <div className="space-y-2">
-            {sortedFlags.map((flag) => (
-              <AlertCard key={flag.id} flag={flag} />
-            ))}
-          </div>
-        </section>
-      )}
+      {/* Clinical alerts — v1.45 severity-clustering. Three clusters with
+          severity-coloured sub-headers: Urgent (full-size cards), Warning
+          (collapsed-by-default), Information (collapsed-by-default). Cluster
+          headers render only when their cluster is non-empty. Within-cluster
+          ordering preserved (sortedFlags is already severity-ordered via
+          SEVERITY_ORDER; same-severity flags retain emission order via
+          stable sort). */}
+      {sortedFlags.length > 0 &&
+        (() => {
+          const urgentFlags  = sortedFlags.filter((f) => f.severity === 'urgent');
+          const warningFlags = sortedFlags.filter((f) => f.severity === 'warning');
+          const infoFlags    = sortedFlags.filter((f) => f.severity === 'info');
+          return (
+            <section>
+              <SectionTitle>Clinical alerts</SectionTitle>
+              {urgentFlags.length > 0 && (
+                <>
+                  <p className="text-[11px] sm:text-xs font-bold uppercase tracking-wider text-red-700 mt-0 mb-2">
+                    Urgent
+                  </p>
+                  <div className="space-y-2">
+                    {urgentFlags.map((flag) => (
+                      <AlertCard key={flag.id} flag={flag} collapsedDefault={false} />
+                    ))}
+                  </div>
+                </>
+              )}
+              {warningFlags.length > 0 && (
+                <>
+                  <p className="text-[11px] sm:text-xs font-bold uppercase tracking-wider text-amber-700 mt-4 mb-2">
+                    Warning
+                  </p>
+                  <div className="space-y-2">
+                    {warningFlags.map((flag) => (
+                      <AlertCard key={flag.id} flag={flag} collapsedDefault={true} />
+                    ))}
+                  </div>
+                </>
+              )}
+              {infoFlags.length > 0 && (
+                <>
+                  <p className="text-[11px] sm:text-xs font-bold uppercase tracking-wider text-blue-700 mt-4 mb-2">
+                    Information
+                  </p>
+                  <div className="space-y-2">
+                    {infoFlags.map((flag) => (
+                      <AlertCard key={flag.id} flag={flag} collapsedDefault={true} />
+                    ))}
+                  </div>
+                </>
+              )}
+            </section>
+          );
+        })()}
 
       {/* Investigations */}
       {sortedInvestigations.length > 0 &&

@@ -517,7 +517,6 @@ export function generateTreatmentOutput(
     flags.push({
       id: 'dental_check_pre_treatment',
       severity: 'info',
-      collapsedByDefault: true,
       summary: 'Ask about outstanding invasive dental work before first IV zoledronate or denosumab dose.',
       message:
         'Before starting IV zoledronate or denosumab: ask about outstanding invasive dental work. ' +
@@ -907,7 +906,6 @@ export function generateTreatmentOutput(
         flags.push({
           id: 'romosozumab_cv_risk_framing',
           severity: 'info',
-          collapsedByDefault: true,
           summary: 'Romosozumab specialist review: assess CV risk and flag explicit CV history in the referral.',
           message:
             'If romosozumab is being considered at specialist review: both 1-year fracture risk AND 1-year cardiovascular risk must be assessed. ' +
@@ -1147,7 +1145,6 @@ export function generateTreatmentOutput(
     flags.push({
       id: 'sequential_therapy_plan_required',
       severity: 'info',
-      collapsedByDefault: true,
       summary: 'Plan sequential antiresorptive at initiation, not retrospectively. Document the follow-on plan in the referral.',
       message:
         'Plan the sequential therapy strategy at the time of initiation — not retrospectively. ' +
@@ -1320,7 +1317,6 @@ export function generateTreatmentOutput(
     flags.push({
       id: 'sequential_therapy_plan_required',
       severity: 'info',
-      collapsedByDefault: true,
       summary: 'Plan sequential antiresorptive at initiation, not retrospectively. Document the follow-on plan in the referral.',
       message:
         'Plan the sequential therapy strategy at the time of initiation — not retrospectively. ' +
@@ -1344,7 +1340,6 @@ export function generateTreatmentOutput(
     flags.push({
       id: 'sequential_therapy_plan_required',
       severity: 'info',
-      collapsedByDefault: true,
       summary: 'Plan sequential antiresorptive at initiation, not retrospectively. Document the follow-on plan in the referral.',
       message:
         'Plan the sequential therapy strategy at the time of initiation — not retrospectively. ' +
@@ -2915,7 +2910,6 @@ function giop(
       flags.push({
         id: 'sequential_therapy_plan_required',
         severity: 'info',
-        collapsedByDefault: true,
         summary: 'Plan sequential antiresorptive at initiation, not retrospectively. Document the follow-on plan in the referral.',
         message:
           'Plan the sequential therapy strategy at the time of initiation — not retrospectively. ' +

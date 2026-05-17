@@ -366,20 +366,14 @@ export interface ClinicalFlag {
   rationale: string;
   source: GuidelineSource;
   /**
-   * When true, UI renders `summary` (one-line preview) + a "▾ show details" toggle
-   * that expands the full `message` inline. Used for specialist-aimed info flags
-   * where the dense referral-letter prose is useful for audit / specialist review
-   * but should not dominate the GP's view at the point of care. Existing
-   * "▾ show rationale" toggle remains independent.
-   * Defaults to undefined; consumers treat undefined as `false` (existing
-   * behaviour — full message renders inline, only rationale toggle present).
-   */
-  collapsedByDefault?: boolean;
-  /**
-   * One-line preview rendered in place of `message` when `collapsedByDefault === true`.
-   * Author-controlled (not auto-extracted) so the preview can be more action-oriented
-   * than the message's first sentence. Required in practice when collapsedByDefault
-   * is true; left optional in the type for additive backwards-compatibility.
+   * Short one-line title rendered in the collapsed-state of a Warning or Info card
+   * (v1.45 Clinical Alerts severity-clustering). When absent, the UI auto-truncates
+   * `message` on the first sentence boundary / 100 chars for the collapsed title.
+   * Author-controlled where the auto-truncation reads badly. Engine-side: optional;
+   * absence is fully supported.
+   * v1.45 retirement: the prior `collapsedByDefault?: boolean` field was removed
+   * (cluster-driven default supersedes per-flag opt-in). `summary` repurposed from
+   * "preview when collapsedByDefault" to "preferred collapsed-title hint".
    */
   summary?: string;
 }
