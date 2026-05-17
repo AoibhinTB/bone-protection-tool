@@ -4329,6 +4329,146 @@ function tc112(): TCResult {
   return { name: 'TC112 — F2+F4 dedup contract lock: 65F + hip fx + no bloods (v1.46.2)', passed: failures.length === 0, failures, decision };
 }
 
+// v1.47 — Pending Prerequisites render contract. Locks the engine-side
+// pendingCaption field that drives the UI's amber banner caption on
+// status='pending' Treatment cards. Two TCs cover the two producible caption
+// variants — multi-missing (TC113, mirroring TC112's profile) and Vit D-only
+// parenteral (TC114, drug-class asymmetry).
+//
+// The calcium-only variant (caMissing + vitDPresent) IS exercised at the F2
+// caption-selection site (`f2PendingCaption = caMissing && vitDMissing ?
+// MULTI : CALCIUM_ONLY`) — the false branch of that ternary is the calcium-
+// only path. Not added as a dedicated TC: the false branch produces the same
+// status='pending' contract as TC113's true branch, just with a different
+// caption string. TC113 + TC114 together cover both ternary branches; a third
+// TC would add ~zero engine-behaviour coverage. Tracked for future addition
+// if a calcium-only-specific UI variant emerges.
+
+function tc113(): TCResult {
+  const failures: string[] = [];
+  const patient = basePatient({
+    age: 65,
+    sex: 'female',
+    priorFragilityFracture: true,
+    priorHipFracture: true,
+    recentFractureWithin2Years: true,
+    dexaResults: { lumbarSpineTScore: -2.0, totalHipTScore: -2.0, femoralNeckTScore: -2.0, forearmTScore: null },
+    bloodResults: null,
+  });
+  const decision = runClinicalDecision(patient);
+
+  // Profile mirrors TC112 (65F + prior hip fx + no bloods → 'high' via
+  // prior-fx-high; F2 + F4 both gate-evaluate true; F2's mutation wins
+  // precedence and tags all antiresorptives 'pending').
+  check(failures, "riskCategory === 'high'",
+    decision.riskStratification.category === 'high',
+    `got ${decision.riskStratification.category}`);
+
+  // Re-assert the TC112 status='pending' contract (independent lock here so
+  // that if TC112 is ever weakened, TC113's caption assertion doesn't pass
+  // vacuously on a missing pending state).
+  const antiresorptives = decision.treatmentRecommendations.filter(
+    r => r.agent === 'alendronate' || r.agent === 'risedronate' || r.agent === 'zoledronate',
+  );
+  check(failures, '3 antiresorptives present', antiresorptives.length === 3,
+    `got ${antiresorptives.length}`);
+  for (const rec of antiresorptives) {
+    check(failures, `${rec.agent} status === 'pending'`,
+      rec.status === 'pending', `got status=${rec.status}`);
+  }
+
+  // v1.47 pendingCaption contract — multi-missing variant.
+  // Locked wording: 'Complete Tier 1 bloods (calcium, Vit D, eGFR as
+  // applicable) before initiating treatment. Reassess once results available.'
+  const EXPECTED_MULTI =
+    'Complete Tier 1 bloods (calcium, Vit D, eGFR as applicable) before initiating treatment. Reassess once results available.';
+  for (const rec of antiresorptives) {
+    check(failures, `${rec.agent} pendingCaption populated`,
+      typeof rec.pendingCaption === 'string' && rec.pendingCaption.length > 0,
+      `got pendingCaption=${JSON.stringify(rec.pendingCaption)}`);
+    check(failures, `${rec.agent} pendingCaption matches multi-missing variant verbatim`,
+      rec.pendingCaption === EXPECTED_MULTI,
+      `got ${JSON.stringify(rec.pendingCaption)}`);
+  }
+
+  return { name: 'TC113 — pendingCaption multi-missing variant: 65F + hip fx + no bloods (v1.47)', passed: failures.length === 0, failures, decision };
+}
+
+function tc114(): TCResult {
+  const failures: string[] = [];
+  const patient = basePatient({
+    age: 65,
+    sex: 'female',
+    priorFragilityFracture: true,
+    priorHipFracture: true,
+    recentFractureWithin2Years: true,
+    dexaResults: { lumbarSpineTScore: -2.0, totalHipTScore: -2.0, femoralNeckTScore: -2.0, forearmTScore: null },
+    bloodResults: {
+      adjustedCalciumMmol: 2.3, // measured, in range → F2 skipped
+      vitaminDNmol: null,        // missing → F4 fires (parenterals only)
+      egfr: 80,                  // normal renal → no CI cascade
+      alp: null,
+      tshMUL: null,
+      hbGramsPerLitre: null,
+      esrOrCrp: null,
+    },
+  });
+  const decision = runClinicalDecision(patient);
+
+  // Profile lands in 'high' via prior-fx-high route — same as TC113.
+  check(failures, "riskCategory === 'high'",
+    decision.riskStratification.category === 'high',
+    `got ${decision.riskStratification.category}`);
+
+  // Drug-class asymmetry contract:
+  //   F2 skipped (caMissing=false) → orals stay active (no status mutation)
+  //   F4 fires (vitDMissing=true) → IV zol tagged 'pending' with Vit D-only caption
+  //   F4's oral-BP mutation path adds Rec 17 monitoring note but leaves status active
+
+  const alendronate = decision.treatmentRecommendations.find(r => r.agent === 'alendronate');
+  const risedronate = decision.treatmentRecommendations.find(r => r.agent === 'risedronate');
+  const zol = decision.treatmentRecommendations.find(r => r.agent === 'zoledronate');
+
+  check(failures, 'alendronate present', !!alendronate);
+  check(failures, 'risedronate present', !!risedronate);
+  check(failures, 'IV zoledronate present', !!zol);
+
+  // Orals: status active (or undefined which the engine treats as active).
+  // No pendingCaption on active entries.
+  check(failures, 'alendronate status NOT pending',
+    !!alendronate && alendronate.status !== 'pending',
+    `got status=${alendronate?.status}`);
+  check(failures, 'alendronate has NO pendingCaption (active)',
+    !!alendronate && !alendronate.pendingCaption,
+    `got pendingCaption=${JSON.stringify(alendronate?.pendingCaption)}`);
+  check(failures, 'risedronate status NOT pending',
+    !!risedronate && risedronate.status !== 'pending',
+    `got status=${risedronate?.status}`);
+  check(failures, 'risedronate has NO pendingCaption (active)',
+    !!risedronate && !risedronate.pendingCaption,
+    `got pendingCaption=${JSON.stringify(risedronate?.pendingCaption)}`);
+
+  // IV zol: status='pending' with Vit D-only caption verbatim.
+  const EXPECTED_VITD_ONLY =
+    'Complete Vit D measurement before initiating parenteral therapy. Reassess once result available.';
+  check(failures, "zoledronate status === 'pending' (F4 parenteral tag)",
+    !!zol && zol.status === 'pending', `got status=${zol?.status}`);
+  check(failures, 'zoledronate pendingCaption matches Vit D-only variant verbatim',
+    !!zol && zol.pendingCaption === EXPECTED_VITD_ONLY,
+    `got ${JSON.stringify(zol?.pendingCaption)}`);
+
+  // F4 fires URGENT (since F2 doesn't fire here, the F2/F4 dedup doesn't
+  // suppress F4 — locks the standalone-F4 contract).
+  check(failures, 'F4 (vitd_unmeasured_parenteral_block) fires URGENT',
+    decision.flags.some(f => f.id === 'vitd_unmeasured_parenteral_block' && f.severity === 'urgent'));
+
+  // F2 does NOT fire (calcium is measured + in range).
+  check(failures, 'F2 (calcium_unmeasured_antiresorptive_block) does NOT fire',
+    !decision.flags.some(f => f.id === 'calcium_unmeasured_antiresorptive_block'));
+
+  return { name: 'TC114 — pendingCaption Vit D-only variant + drug-class asymmetry: 65F + hip fx + Ca measured + Vit D missing (v1.47)', passed: failures.length === 0, failures, decision };
+}
+
 // ─── Runner ───────────────────────────────────────────────────────────────
 
 const TCs: Array<() => TCResult> = [
@@ -4379,6 +4519,14 @@ const TCs: Array<() => TCResult> = [
   // v1.45 lean-coverage gap; deterministic `f2WouldFire = caMissing` guard
   // refactor at safetyFilters.ts:218 (was: `flags.some(...)` runtime introspection).
   tc112,
+  // v1.47 — Pending Prerequisites render contract: lock the engine-side
+  // pendingCaption field that drives the UI's amber banner caption on
+  // status='pending' Treatment cards. TC113 covers multi-missing variant (Ca
+  // + Vit D both missing; mirrors TC112's profile + adds caption assertions).
+  // TC114 covers Vit D-only-parenteral variant + drug-class asymmetry (Ca
+  // measured + Vit D missing → orals active, IV zol pending with Vit D-only
+  // caption). Locks the verbatim caption strings + the asymmetry contract.
+  tc113, tc114,
 ];
 
 const results = TCs.map(fn => fn());

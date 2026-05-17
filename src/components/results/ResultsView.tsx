@@ -700,16 +700,39 @@ function TreatmentCard({ tr, variant }: { tr: TreatmentRecommendation; variant: 
   const isBridging = variant === 'bridging';
   const isPatientPref = variant === 'patient_preference_fallback';
   const muted = isBridging || isPatientPref;
+  // v1.47 — pending-prerequisites visual state. Renders an amber "PENDING
+  // PREREQUISITES" banner flush at the top of the card + a caption box below
+  // (tr.pendingCaption, sourced from safetyFilters.ts F2/F4 variant selection),
+  // and applies opacity-75 to the entire card. Banner sits flush via
+  // outer/inner div split with overflow-hidden on the outer wrapper. Blocked
+  // cards never reach this component — filtered out at the Treatment section
+  // IIFE.
+  const isPending = tr.status === 'pending';
+  const outerBase = muted
+    ? 'bg-slate-50 border border-slate-200'
+    : isAlt
+      ? 'bg-white border border-slate-200 opacity-95'
+      : 'bg-white border border-slate-300';
+  const innerPad = muted ? 'p-3.5' : 'p-4';
   return (
     <div
-      className={`rounded-lg shadow-sm ${
-        muted
-          ? 'bg-slate-50 border border-slate-200 p-3.5'
-          : isAlt
-            ? 'bg-white border border-slate-200 opacity-95 p-4'
-            : 'bg-white border border-slate-300 p-4'
+      className={`rounded-lg shadow-sm overflow-hidden ${outerBase} ${
+        isPending ? 'opacity-75' : ''
       }`}
     >
+      {isPending && (
+        <>
+          <div className="bg-amber-500 text-white text-[11px] sm:text-xs font-bold uppercase tracking-wider px-3 py-1.5">
+            Pending prerequisites
+          </div>
+          {tr.pendingCaption && (
+            <p className="text-xs text-amber-900 bg-amber-50 border-b border-amber-200 px-3 py-2 leading-snug">
+              {tr.pendingCaption}
+            </p>
+          )}
+        </>
+      )}
+      <div className={innerPad}>
       <div className="flex items-start justify-between gap-2 mb-1">
         <div className="flex items-center gap-2 flex-wrap">
           <p
@@ -794,6 +817,7 @@ function TreatmentCard({ tr, variant }: { tr: TreatmentRecommendation; variant: 
       </p>
 
       {!isPatientPref && tr.patientEducation && <PatientEducationPanel edu={tr.patientEducation} />}
+      </div>
     </div>
   );
 }
@@ -1027,7 +1051,17 @@ export function ResultsView({ result, patient, onReset, onBack, onRevealNoRfFrax
           because anabolic-referral is the clinically primary surface — fallback
           cards are documentation/handoff for the specialist letter. */}
       {(() => {
-        const recs = result.treatmentRecommendations;
+        // v1.47 — hide blocked-status recipes entirely. Per spec, status='blocked'
+        // means the drug is contraindicated under the patient's current state (F1
+        // hypoCa measured + low, F3 Vit D measured + low parenteral) — the user
+        // should not see a card they cannot safely act on. The corresponding
+        // URGENT clinical-alert flag (hypocalcaemia_antiresorptive_block /
+        // vitd_parenteral_block) tells the GP what to correct first. Pending
+        // cards continue to render — they carry the v1.47 amber banner + caption
+        // + opacity-75 muting in TreatmentCard below.
+        const recs = result.treatmentRecommendations.filter(
+          (tr) => tr.status !== 'blocked',
+        );
         // v1.46.1 — sort primary cards by priority so first-line renders above
         // alternative. Stable sort (ES2019) preserves within-priority-group
         // order: for Rule 1 (all priority undefined → rank 0) the original

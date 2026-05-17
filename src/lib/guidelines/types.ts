@@ -436,6 +436,23 @@ export interface TreatmentRecommendation {
   /** What the GP needs to do to unblock the recommendation. */
   unblockAction?: string;
   /**
+   * v1.47 — caption surfaced in the UI's "Pending prerequisites" banner on a
+   * TreatmentRecommendation. Populated by applyPreTreatmentSafetyFilters when a
+   * filter tags an entry status='pending'. Variant chosen based on the global
+   * missing-prerequisite state (calcium-only / Vit-D-only-parenteral / multi-
+   * missing), NOT per-filter — filters carry filter-specific blockReason /
+   * unblockAction subject to precedence (first filter to tag wins). The
+   * caption summarises every missing prerequisite the patient has, which a
+   * single filter's view can't reflect. Three locked variants per spec:
+   *   - calcium-only:        F2 fires alone (Ca missing, Vit D measured)
+   *   - Vit-D-only:          F4 fires alone (Vit D missing, Ca measured)
+   *   - multi-missing:       F2 fires AND vitDMissing also true (caption
+   *                          assigned at F2's mutation site, where it
+   *                          captures both gaps; F4's mutation is then
+   *                          short-circuited by the status-precedence guard)
+   */
+  pendingCaption?: string;
+  /**
    * Role of this recommendation in the overall treatment plan.
    *   'primary'                     — definitive treatment for the patient at their risk level (default; undefined treated as 'primary')
    *   'bridging'                    — interim cover while the patient awaits specialist initiation of definitive treatment

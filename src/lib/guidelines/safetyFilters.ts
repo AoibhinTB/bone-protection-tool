@@ -39,6 +39,20 @@ const SRC_NOGG = GUIDELINE_VERSIONS.nogg;
 const CA_LOW = 2.10; // mmol/L — NOGG threshold for hypocalcaemia
 const VITD_INSUFFICIENT = 50; // nmol/L — NOGG Rec 17 parenteral threshold
 
+// v1.47 — Pending-prerequisites caption variants (locked wording). Surfaced to
+// the UI via TreatmentRecommendation.pendingCaption at every pending-tagging
+// site below. Variant chosen at filter-chain entry based on the global
+// missing-prerequisite state — NOT per-filter (filters carry filter-specific
+// blockReason/unblockAction subject to precedence; the caption must summarise
+// every gap, which a single filter's view can't reflect). See types.ts
+// TreatmentRecommendation.pendingCaption comment for the variant table.
+const CAPTION_CALCIUM_ONLY =
+  'Complete corrected calcium before initiating treatment. Reassess once result available.';
+const CAPTION_VITD_ONLY_PARENTERAL =
+  'Complete Vit D measurement before initiating parenteral therapy. Reassess once result available.';
+const CAPTION_MULTI_MISSING =
+  'Complete Tier 1 bloods (calcium, Vit D, eGFR as applicable) before initiating treatment. Reassess once results available.';
+
 const ANTIRESORPTIVES: ReadonlySet<TreatmentAgent> = new Set<TreatmentAgent>([
   'alendronate',
   'risedronate',
@@ -88,6 +102,17 @@ export function applyPreTreatmentSafetyFilters(
   const vitDLow = vitD !== null && vitD < VITD_INSUFFICIENT;
   const vitDMissing = vitD === null;
 
+  // v1.47 — pending-caption variant selection based on the global missing-
+  // prerequisite state. F2 (caMissing) tags all antiresorptives — when
+  // vitDMissing is also true, caption captures both gaps because F2's mutation
+  // wins precedence over F4's (status-already-set guard skips F4's mutation).
+  // F4 (vitDMissing standalone) only runs on entries not already tagged by F2,
+  // so by construction caMissing is false at F4's mutation site → Vit D-only
+  // caption applies.
+  const f2PendingCaption =
+    caMissing && vitDMissing ? CAPTION_MULTI_MISSING : CAPTION_CALCIUM_ONLY;
+  const f4PendingCaption = CAPTION_VITD_ONLY_PARENTERAL;
+
   // ─── Filter 1: Universal hypocalcaemia (Ca < 2.10) ──────────────────────
   // NOGG p.29 §a (oral + IV BPs), p.30 §a (denosumab), p.34 §c (romosozumab) —
   // hypocalcaemia is an absolute contraindication for all antiresorptives.
@@ -129,6 +154,7 @@ export function applyPreTreatmentSafetyFilters(
       rec.blockReason = 'Pre-treatment corrected calcium not yet measured';
       rec.unblockAction =
         'Check corrected calcium (Tier 1 bloods); confirm in range (2.10–2.55 mmol/L) before initiation.';
+      rec.pendingCaption = f2PendingCaption;
     }
     flags.push({
       id: 'calcium_unmeasured_antiresorptive_block',
@@ -193,6 +219,7 @@ export function applyPreTreatmentSafetyFilters(
       rec.blockReason = 'Vit D not yet measured — parenteral antiresorptives require Vit D ≥50 before initiation';
       rec.unblockAction =
         'Check Vit D (Tier 1 bloods); confirm ≥50 nmol/L before parenteral initiation.';
+      rec.pendingCaption = f4PendingCaption;
     }
     // Oral BPs continue with NOGG Rec 17 concurrent-supplementation note.
     for (const rec of recommendations) {
