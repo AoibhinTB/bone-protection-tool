@@ -6,6 +6,7 @@
 // to obtain official values, particularly when BMD is available.
 
 import type { PatientInput } from './guidelines/types';
+import { computeBMI } from './guidelines/thresholds';
 
 export interface FraxEstimate {
   mof: number; // 10-year major osteoporotic fracture probability (%)
@@ -148,7 +149,7 @@ export function estimateFrax(patient: PatientInput): FraxEstimate {
   const hipRF = Math.exp(lp(beta.hip));
 
   // BMI adjustment
-  const bmiAdj = bmiAdjustment(patient.bmi ?? 25);
+  const bmiAdj = bmiAdjustment(computeBMI(patient) ?? 25);
 
   let mof = baseMof * mofRF * bmiAdj.mofFactor;
   let hip  = baseHip  * hipRF  * bmiAdj.hipFactor;

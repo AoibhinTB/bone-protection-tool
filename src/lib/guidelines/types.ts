@@ -48,9 +48,11 @@ export type SecondaryOsteoporosisCause =
   | 'copd'                           // often combined with steroid use
   | 'chronic_kidney_disease';        // CKD 3a–5 / non-dialysis (NOGG Table 1)
 
-// v1.31 follow-up — RenalFunction removed. eGFR now lives only on
-// BloodResults.egfr. Single source of truth for kidney function across UI,
-// engine, and tests.
+// v1.31 follow-up — RenalFunction removed. eGFR field on BloodResults
+// replaced by serum creatinine in v1.46 — kidney function now expressed
+// as CrCl (Cockcroft-Gault), computed by computeCrCl(patient) in
+// thresholds.ts. Engine + UI + tests consume kidney function via the
+// helper, not by reading a raw eGFR field.
 
 export interface DexaResults {
   lumbarSpineTScore: number | null;
@@ -62,7 +64,7 @@ export interface DexaResults {
 export interface BloodResults {
   adjustedCalciumMmol: number | null;       // mmol/L
   vitaminDNmol: number | null;              // nmol/L (25-OHD)
-  egfr: number | null;                      // ml/min/1.73 m²
+  creatinine: number | null;                // µmol/L — serum creatinine. (formerly egfr; CrCl derived via computeCrCl)
   alp: number | null;                       // U/L — bone turnover, Paget's, osteomalacia screen (normal 30–130)
   tshMUL: number | null;                    // mU/L — TSH (normal 0.4–4.0)
   hbGramsPerLitre: number | null;           // g/L — Hb (anaemia threshold: <120 women, <130 men)
@@ -193,7 +195,11 @@ export interface PatientInput {
   currentSmoker: boolean;
   vaping: boolean;                    // NOGG 2024 addition — possible risk factor
   alcoholUnitsPerWeek: number;
-  bmi: number | null;
+  // Anthropometry — v1.46 migration. (formerly: bmi: number | null)
+  // BMI computed via computeBMI(patient) in thresholds.ts.
+  // Weight is also required for Cockcroft-Gault CrCl computation.
+  weightKg: number | null;
+  heightCm: number | null;
   rheumatoidArthritis: boolean;
   secondaryOsteoporosis: SecondaryOsteoporosisCause[];
 
@@ -275,8 +281,11 @@ export interface PatientInput {
   // Imminent fracture risk
   recentFractureWithin2Years: boolean; // any fragility fracture within last 24 months → treat immediately
 
-  // (Renal function — eGFR moved to BloodResults.egfr; renalFunction field
-  // removed in v1.31 follow-up to avoid dual sources of truth.)
+  // (Renal function — single source of truth is BloodResults.creatinine.
+  // CrCl computed via computeCrCl(patient) helper in thresholds.ts; no raw
+  // renalFunction or eGFR field on PatientInput. v1.46: eGFR field on
+  // BloodResults replaced by creatinine; CrCl derived from creatinine +
+  // weight + age + sex via Cockcroft-Gault.)
 
   // Investigations
   dexaResults: DexaResults | null;
@@ -384,7 +393,7 @@ export interface InvestigationRecommendation {
     | 'vfa'
     | 'calcium'
     | 'vitamin_d'
-    | 'egfr'
+    | 'creatinine'    // (formerly 'egfr'; CrCl computed via computeCrCl)
     | 'pth'
     | 'thyroid'
     | 'testosterone'

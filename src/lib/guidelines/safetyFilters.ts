@@ -51,7 +51,7 @@ const CAPTION_CALCIUM_ONLY =
 const CAPTION_VITD_ONLY_PARENTERAL =
   'Complete Vit D measurement before initiating parenteral therapy. Reassess once result available.';
 const CAPTION_MULTI_MISSING =
-  'Complete Tier 1 bloods (calcium, Vit D, eGFR as applicable) before initiating treatment. Reassess once results available.';
+  'Complete Tier 1 bloods (calcium, Vit D, serum creatinine as applicable) before initiating treatment. Reassess once results available.';
 
 const ANTIRESORPTIVES: ReadonlySet<TreatmentAgent> = new Set<TreatmentAgent>([
   'alendronate',
@@ -161,7 +161,7 @@ export function applyPreTreatmentSafetyFilters(
       severity: 'urgent',
       message:
         'Mandatory pre-treatment corrected calcium check required before any antiresorptive can be initiated. ' +
-        'Measure Ca, Vit D, and eGFR as Tier 1 bloods (see investigationsNeeded). Reassess once results available.',
+        'Measure Ca, Vit D, and serum creatinine as Tier 1 bloods (see investigationsNeeded). Reassess once results available.',
       rationale:
         'Spec v1.37 §4 line 323 + §5.3 line 444: corrected calcium must be measured before any antiresorptive ' +
         'initiation (cannot verify NOGG hypoCa CI without measurement; pre-each-dose Ca check is the SmPC mandate ' +
@@ -232,7 +232,7 @@ export function applyPreTreatmentSafetyFilters(
     }
     // v1.45 dedup — suppress F4 flag emission when F2
     // (calcium_unmeasured_antiresorptive_block) is already firing. F2's
-    // message explicitly says "Measure Ca, Vit D, and eGFR as Tier 1 bloods"
+    // message explicitly says "Measure Ca, Vit D, and serum creatinine as Tier 1 bloods"
     // — the parenteral-specific Vit D message below duplicates that
     // guidance, producing two URGENT alerts both prompting Vit D
     // measurement. The recipe-status mutation block above (pending +

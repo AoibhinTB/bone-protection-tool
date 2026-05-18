@@ -21,7 +21,8 @@ function basePatient(overrides: Partial<PatientInput>): PatientInput {
     currentSmoker: false,
     vaping: false,
     alcoholUnitsPerWeek: 0,
-    bmi: 25,
+    weightKg: 65.6,    // v1.46 default (formerly bmi: 25; derived from 162cm female default)
+    heightCm: 162,     // v1.46 default — female adult-typical scaffold (per migration)
     rheumatoidArthritis: false,
     secondaryOsteoporosis: [],
     type2Diabetes: false,
@@ -64,6 +65,7 @@ function basePatient(overrides: Partial<PatientInput>): PatientInput {
     oesophagealDiseaseHistory: false,
     bornOutsideIreland: false,
     onThiazolidinedione: false,
+    noRiskFactorOverride: false,
   };
   return { ...base, ...overrides };
 }
@@ -118,8 +120,10 @@ function tc1(): TCResult {
   const patient = basePatient({
     age: 68,
     sex: 'female',
+    heightCm: 162,
+    weightKg: 65.6,
     dexaResults: { lumbarSpineTScore: -2.8, totalHipTScore: -2.2, femoralNeckTScore: -2.2, forearmTScore: null },
-    bloodResults: { adjustedCalciumMmol: 2.3, vitaminDNmol: 40, egfr: 58, alp: 80, tshMUL: 2.0, hbGramsPerLitre: 140, esrOrCrp: 'normal' },
+    bloodResults: { adjustedCalciumMmol: 2.3, vitaminDNmol: 40, creatinine: 85, alp: 80, tshMUL: 2.0, hbGramsPerLitre: 140, esrOrCrp: 'normal' },
   });
   const decision = runClinicalDecision(patient);
   check(failures, 'risk = high', decision.riskStratification.category === 'high', `got ${decision.riskStratification.category}`);
@@ -145,6 +149,8 @@ function tc2(): TCResult {
   const patient = basePatient({
     age: 72,
     sex: 'female',
+    heightCm: 162,
+    weightKg: 65.6,
     dexaResults: { lumbarSpineTScore: null, totalHipTScore: -3.1, femoralNeckTScore: -3.1, forearmTScore: null },
     previousTreatments: [{ agent: 'alendronate', durationMonths: 36, reasonStopped: 'aff_confirmed', currentlyOn: false, monthsSinceLastDose: null }],
   });
@@ -160,25 +166,35 @@ function tc2(): TCResult {
 }
 
 // ─── TC3 ──────────────────────────────────────────────────────────────────
-// 80M, T-score -2.6, eGFR 30, no fx, Vit D 60
+// 80M, T-score -2.6, CrCl 30 (creat 188), no fx, Vit D 60.
+// v1.46: Locks BPs CI'd at CrCl <=35, deno path. NOT severe-CKD per SPC <30 —
+// no mandatory Ca-watch, no nephrology referral. Both predicates moved <35 → <30
+// (SPC-aligned for Ca-watch; signal-to-noise for nephrology referral).
 
 function tc3(): TCResult {
   const failures: string[] = [];
   const patient = basePatient({
     age: 80,
     sex: 'male',
+    heightCm: 175,
+    weightKg: 76.6,
     dexaResults: { lumbarSpineTScore: -2.6, totalHipTScore: -2.6, femoralNeckTScore: -2.6, forearmTScore: null },
-    bloodResults: { adjustedCalciumMmol: 2.3, vitaminDNmol: 60, egfr: 30, alp: 80, tshMUL: 2.0, hbGramsPerLitre: 140, esrOrCrp: 'normal' },
+    bloodResults: { adjustedCalciumMmol: 2.3, vitaminDNmol: 60, creatinine: 188, alp: 80, tshMUL: 2.0, hbGramsPerLitre: 140, esrOrCrp: 'normal' },
   });
   const decision = runClinicalDecision(patient);
   check(failures, 'risk = high', decision.riskStratification.category === 'high', `got ${decision.riskStratification.category}`);
-  check(failures, 'NO alendronate (eGFR 30 < 35)', !hasAgent(decision, 'alendronate'));
-  check(failures, 'NO zoledronate (eGFR 30 < 35)', !hasAgent(decision, 'zoledronate'));
+  check(failures, 'NO alendronate (CrCl 30.07 <= 35)', !hasAgent(decision, 'alendronate'));
+  check(failures, 'NO zoledronate (CrCl 30.07 <= 35)', !hasAgent(decision, 'zoledronate'));
   check(failures, 'recommends denosumab', hasAgent(decision, 'denosumab'));
-  check(failures, 'mandatory Ca 2-week check flag', hasFlag(decision, 'denosumab_ckd_hypocalcaemia'));
-  check(failures, 'nephrology referral', hasReferral(decision, 'nephrology'));
+  // v1.46 — deno Ca-watch + nephrology referral predicates moved <35 → <30
+  // (SPC-aligned for Ca-watch; signal-to-noise for nephrology referral). At
+  // CrCl 30.07 (above new <30 threshold) neither fires. Negative locks below.
+  check(failures, 'no denosumab_ckd_hypocalcaemia (CrCl >= 30, below SPC threshold)',
+    !hasFlag(decision, 'denosumab_ckd_hypocalcaemia'));
+  check(failures, 'no nephrology referral (CrCl 30 not severe per SPC <30)',
+    !hasReferral(decision, 'nephrology'));
   check(failures, 'Vit D adequate (target met or below target)', hasSupplementText(decision, 'vitamin_d', 'target') || hasSupplementText(decision, 'vitamin_d', 'maintenance'));
-  return { name: 'TC3 — 80M severe CKD', passed: failures.length === 0, failures, decision };
+  return { name: 'TC3 — 80M CrCl 30: deno path, NOT severe (SPC <30)', passed: failures.length === 0, failures, decision };
 }
 
 // ─── TC4 ──────────────────────────────────────────────────────────────────
@@ -189,8 +205,10 @@ function tc4(): TCResult {
   const patient = basePatient({
     age: 55,
     sex: 'female',
+    heightCm: 162,
+    weightKg: 65.6,
     dexaResults: { lumbarSpineTScore: -2.9, totalHipTScore: -2.9, femoralNeckTScore: -2.9, forearmTScore: null },
-    bloodResults: { adjustedCalciumMmol: 2.3, vitaminDNmol: 80, egfr: 62, alp: 80, tshMUL: 2.0, hbGramsPerLitre: 140, esrOrCrp: 'normal' },
+    bloodResults: { adjustedCalciumMmol: 2.3, vitaminDNmol: 80, creatinine: 94, alp: 80, tshMUL: 2.0, hbGramsPerLitre: 140, esrOrCrp: 'normal' },
     previousTreatments: [{ agent: 'alendronate', durationMonths: 6, reasonStopped: 'gi_intolerance', currentlyOn: false, monthsSinceLastDose: null }],
   });
   const decision = runClinicalDecision(patient);
@@ -213,6 +231,8 @@ function tc5(): TCResult {
   const patient = basePatient({
     age: 77,
     sex: 'female',
+    heightCm: 162,
+    weightKg: 65.6,
     priorFragilityFracture: true,
     priorVertebralFracture: true,
     recentVertebralFractureYears: 1.5,
@@ -244,8 +264,10 @@ function tc6(): TCResult {
   const patient = basePatient({
     age: 63,
     sex: 'female',
+    heightCm: 162,
+    weightKg: 65.6,
     dexaResults: { lumbarSpineTScore: -2.6, totalHipTScore: -2.4, femoralNeckTScore: -2.4, forearmTScore: null },
-    bloodResults: { adjustedCalciumMmol: 2.3, vitaminDNmol: 45, egfr: 75, alp: 80, tshMUL: 2.0, hbGramsPerLitre: 140, esrOrCrp: 'normal' },
+    bloodResults: { adjustedCalciumMmol: 2.3, vitaminDNmol: 45, creatinine: 70, alp: 80, tshMUL: 2.0, hbGramsPerLitre: 140, esrOrCrp: 'normal' },
     // v1.19 — months-since-last-dose now lives on the treatment record itself.
     currentTreatment: { agent: 'denosumab', durationMonths: 36, reasonStopped: null, currentlyOn: true, monthsSinceLastDose: 5 },
   });
@@ -267,10 +289,12 @@ function tc7(): TCResult {
   const patient = basePatient({
     age: 58,
     sex: 'female',
+    heightCm: 162,
+    weightKg: 65.6,
     earlyMenopause: true,
     ageAtMenopause: 40,
     dexaResults: { lumbarSpineTScore: -1.8, totalHipTScore: -1.6, femoralNeckTScore: -1.6, forearmTScore: null },
-    bloodResults: { adjustedCalciumMmol: 2.3, vitaminDNmol: 55, egfr: 70, alp: 80, tshMUL: 2.0, hbGramsPerLitre: 140, esrOrCrp: 'normal' },
+    bloodResults: { adjustedCalciumMmol: 2.3, vitaminDNmol: 55, creatinine: 80, alp: 80, tshMUL: 2.0, hbGramsPerLitre: 140, esrOrCrp: 'normal' },
   });
   const decision = runClinicalDecision(patient);
   check(failures, 'risk = high (early meno + T ≤ -1.5)', decision.riskStratification.category === 'high', `got ${decision.riskStratification.category}`);
@@ -291,6 +315,8 @@ function tc8(): TCResult {
   const patient = basePatient({
     age: 74,
     sex: 'female',
+    heightCm: 162,
+    weightKg: 65.6,
     dexaResults: { lumbarSpineTScore: -2.8, totalHipTScore: -2.6, femoralNeckTScore: -2.6, forearmTScore: null },
     previousTreatments: [
       { agent: 'alendronate', durationMonths: 24, reasonStopped: 'onj', currentlyOn: false, monthsSinceLastDose: null },
@@ -318,9 +344,11 @@ function tc9(): TCResult {
   const patient = basePatient({
     age: 69,
     sex: 'male',
+    heightCm: 175,
+    weightKg: 76.6,
     adtUse: true,
     dexaResults: { lumbarSpineTScore: -2.3, totalHipTScore: -2.1, femoralNeckTScore: -2.1, forearmTScore: null },
-    bloodResults: { adjustedCalciumMmol: 2.3, vitaminDNmol: 30, egfr: 65, alp: 80, tshMUL: 2.0, hbGramsPerLitre: 140, esrOrCrp: 'normal' },
+    bloodResults: { adjustedCalciumMmol: 2.3, vitaminDNmol: 30, creatinine: 103, alp: 80, tshMUL: 2.0, hbGramsPerLitre: 140, esrOrCrp: 'normal' },
   });
   const decision = runClinicalDecision(patient);
   check(failures, 'risk = high (ADT + T-score ≤ -2.0)', decision.riskStratification.category === 'high', `got ${decision.riskStratification.category}`);
@@ -355,15 +383,17 @@ function tc10(): TCResult {
   const patient = basePatient({
     age: 82,
     sex: 'female',
+    heightCm: 162,
+    weightKg: 65.6,
     dexaResults: { lumbarSpineTScore: -2.7, totalHipTScore: -2.5, femoralNeckTScore: -2.5, forearmTScore: null },
-    bloodResults: { adjustedCalciumMmol: 2.35, vitaminDNmol: null, egfr: 45, alp: null, tshMUL: 2.0, hbGramsPerLitre: 140, esrOrCrp: 'normal' },
+    bloodResults: { adjustedCalciumMmol: 2.35, vitaminDNmol: null, creatinine: 88, alp: null, tshMUL: 2.0, hbGramsPerLitre: 140, esrOrCrp: 'normal' },
     fraxHipPercent: 5.2,
   });
   const decision = runClinicalDecision(patient);
   // Per code's spec discrepancy comment: HIGH (T-score -2.7 ≤ -2.5), not VHR (FRAX hip 5.2 < 8.6 VHRT)
   check(failures, 'risk = high (T-score driven)', decision.riskStratification.category === 'high', `got ${decision.riskStratification.category}`);
   check(failures, 'recommends alendronate (oral preferred at borderline eGFR)', hasAgent(decision, 'alendronate'));
-  check(failures, 'zoledronate borderline eGFR caution flag', hasFlag(decision, 'zoledronate_borderline_egfr'));
+  check(failures, 'bp_borderline_crcl caution flag (v1.46: formerly zoledronate_borderline_egfr)', hasFlag(decision, 'bp_borderline_crcl'));
   check(failures, 'age ≥80 FRAX life expectancy caveat', hasFlag(decision, 'frax_life_expectancy_caveat'));
   check(failures, 'Vit D check before treatment (unknown level)', hasSupplementText(decision, 'vitamin_d', 'unknown') || hasSupplementText(decision, 'vitamin_d', 'before starting'));
   return { name: 'TC10 — 82F T-2.7 borderline CKD', passed: failures.length === 0, failures, decision };
@@ -378,10 +408,12 @@ function tc11(): TCResult {
   const patient = basePatient({
     age: 66,
     sex: 'male',
+    heightCm: 175,
+    weightKg: 76.6,
     rheumatoidArthritis: true, // implicit — RA on prednisolone for RA
     glucocorticoidUse: { current: true, durationMonths: 2, dose: 'high' },
     dexaResults: { lumbarSpineTScore: -2.1, totalHipTScore: -2.0, femoralNeckTScore: -2.1, forearmTScore: null },
-    bloodResults: { adjustedCalciumMmol: 2.3, vitaminDNmol: 50, egfr: 55, alp: 80, tshMUL: 2.0, hbGramsPerLitre: 140, esrOrCrp: 'normal' },
+    bloodResults: { adjustedCalciumMmol: 2.3, vitaminDNmol: 50, creatinine: 127, alp: 80, tshMUL: 2.0, hbGramsPerLitre: 140, esrOrCrp: 'normal' },
     previousTreatments: [{ agent: 'alendronate', durationMonths: 6, reasonStopped: 'gi_intolerance', currentlyOn: false, monthsSinceLastDose: null }],
   });
   const decision = runClinicalDecision(patient);
@@ -405,8 +437,10 @@ function tc12(): TCResult {
   const patient = basePatient({
     age: 52,
     sex: 'female',
+    heightCm: 162,
+    weightKg: 65.6,
     dexaResults: { lumbarSpineTScore: -2.6, totalHipTScore: -2.4, femoralNeckTScore: -2.4, forearmTScore: null },
-    bloodResults: { adjustedCalciumMmol: 2.32, vitaminDNmol: 65, egfr: 75, alp: 80, tshMUL: 2.0, hbGramsPerLitre: 140, esrOrCrp: 'normal' },
+    bloodResults: { adjustedCalciumMmol: 2.32, vitaminDNmol: 65, creatinine: 80, alp: 80, tshMUL: 2.0, hbGramsPerLitre: 140, esrOrCrp: 'normal' },
     fraxMOFPercent: 6.8,
     fraxHipPercent: 0.7,
   });
@@ -429,10 +463,12 @@ function tc13(): TCResult {
   const patient = basePatient({
     age: 74,
     sex: 'female',
+    heightCm: 162,
+    weightKg: 65.6,
     priorFragilityFracture: true,
     recentFractureWithin2Years: true,
     dexaResults: { lumbarSpineTScore: -3.0, totalHipTScore: -2.8, femoralNeckTScore: -2.8, forearmTScore: null },
-    bloodResults: { adjustedCalciumMmol: 2.05, vitaminDNmol: 18, egfr: 60, alp: 80, tshMUL: 2.0, hbGramsPerLitre: 140, esrOrCrp: 'normal' },
+    bloodResults: { adjustedCalciumMmol: 2.05, vitaminDNmol: 18, creatinine: 75, alp: 80, tshMUL: 2.0, hbGramsPerLitre: 140, esrOrCrp: 'normal' },
   });
   const decision = runClinicalDecision(patient);
   check(failures, 'risk = high', decision.riskStratification.category === 'high', `got ${decision.riskStratification.category}`);
@@ -450,8 +486,10 @@ function tc14(): TCResult {
   const patient = basePatient({
     age: 59,
     sex: 'female',
+    heightCm: 162,
+    weightKg: 65.6,
     dexaResults: { lumbarSpineTScore: -2.8, totalHipTScore: -2.6, femoralNeckTScore: -2.6, forearmTScore: null },
-    bloodResults: { adjustedCalciumMmol: 2.32, vitaminDNmol: 70, egfr: 72, alp: 80, tshMUL: 2.0, hbGramsPerLitre: 140, esrOrCrp: 'normal' },
+    bloodResults: { adjustedCalciumMmol: 2.32, vitaminDNmol: 70, creatinine: 77, alp: 80, tshMUL: 2.0, hbGramsPerLitre: 140, esrOrCrp: 'normal' },
     currentTreatment: { agent: 'hrt', durationMonths: 48, reasonStopped: null, currentlyOn: true, monthsSinceLastDose: null },
   });
   const decision = runClinicalDecision(patient);
@@ -471,11 +509,13 @@ function tc15(): TCResult {
   const patient = basePatient({
     age: 91,
     sex: 'female',
+    heightCm: 162,
+    weightKg: 65.6,
     priorFragilityFracture: true,
     priorHipFracture: true,
     recentFractureWithin2Years: true,
     dexaResults: { lumbarSpineTScore: -3.4, totalHipTScore: -3.4, femoralNeckTScore: -3.4, forearmTScore: null },
-    bloodResults: { adjustedCalciumMmol: 2.30, vitaminDNmol: 22, egfr: 35, alp: 80, tshMUL: 2.0, hbGramsPerLitre: 140, esrOrCrp: 'normal' },
+    bloodResults: { adjustedCalciumMmol: 2.30, vitaminDNmol: 22, creatinine: 96, alp: 80, tshMUL: 2.0, hbGramsPerLitre: 140, esrOrCrp: 'normal' },
   });
   const decision = runClinicalDecision(patient);
   // v1.37 Fix B4: hip-fracture-alone no longer fires VHR. Patient routes to high via the
@@ -507,9 +547,11 @@ function tc16(): TCResult {
   const patient = basePatient({
     age: 61,
     sex: 'female',
+    heightCm: 162,
+    weightKg: 65.6,
     aromataseInhibitorUse: true,
     dexaResults: { lumbarSpineTScore: -1.8, totalHipTScore: -1.7, femoralNeckTScore: -1.7, forearmTScore: null },
-    bloodResults: { adjustedCalciumMmol: 2.32, vitaminDNmol: 55, egfr: 68, alp: 80, tshMUL: 2.0, hbGramsPerLitre: 140, esrOrCrp: 'normal' },
+    bloodResults: { adjustedCalciumMmol: 2.32, vitaminDNmol: 55, creatinine: 79, alp: 80, tshMUL: 2.0, hbGramsPerLitre: 140, esrOrCrp: 'normal' },
     fraxMOFPercent: 11.5,
     fraxHipPercent: 1.5,
   });
@@ -537,10 +579,12 @@ function tc17(): TCResult {
   const patient = basePatient({
     age: 71,
     sex: 'female',
+    heightCm: 162,
+    weightKg: 65.6,
     priorFragilityFracture: true,
     recentFractureWithin2Years: true,
     dexaResults: { lumbarSpineTScore: -2.3, totalHipTScore: -2.3, femoralNeckTScore: -2.3, forearmTScore: null },
-    bloodResults: { adjustedCalciumMmol: 2.32, vitaminDNmol: 72, egfr: 62, alp: 80, tshMUL: 2.0, hbGramsPerLitre: 140, esrOrCrp: 'normal' },
+    bloodResults: { adjustedCalciumMmol: 2.32, vitaminDNmol: 72, creatinine: 76, alp: 80, tshMUL: 2.0, hbGramsPerLitre: 140, esrOrCrp: 'normal' },
     previousTreatments: [{ agent: 'alendronate', durationMonths: 60, reasonStopped: 'treatment_holiday', currentlyOn: false, monthsSinceLastDose: null }],
   });
   const decision = runClinicalDecision(patient);
@@ -557,8 +601,10 @@ function tc18(): TCResult {
   const patient = basePatient({
     age: 67,
     sex: 'female',
+    heightCm: 162,
+    weightKg: 65.6,
     dexaResults: { lumbarSpineTScore: -2.9, totalHipTScore: -2.8, femoralNeckTScore: -2.8, forearmTScore: null },
-    bloodResults: { adjustedCalciumMmol: 2.32, vitaminDNmol: 60, egfr: 65, alp: 80, tshMUL: 2.0, hbGramsPerLitre: 140, esrOrCrp: 'normal' },
+    bloodResults: { adjustedCalciumMmol: 2.32, vitaminDNmol: 60, creatinine: 77, alp: 80, tshMUL: 2.0, hbGramsPerLitre: 140, esrOrCrp: 'normal' },
     currentTreatment: { agent: 'denosumab', durationMonths: 24, reasonStopped: null, currentlyOn: true, monthsSinceLastDose: 8 },
   });
   const decision = runClinicalDecision(patient);
@@ -574,9 +620,11 @@ function tc19(): TCResult {
   const patient = basePatient({
     age: 58,
     sex: 'male',
+    heightCm: 175,
+    weightKg: 76.6,
     glucocorticoidUse: { current: true, durationMonths: 4, dose: 'low' },
     dexaResults: { lumbarSpineTScore: -1.7, totalHipTScore: -1.6, femoralNeckTScore: -1.6, forearmTScore: null },
-    bloodResults: { adjustedCalciumMmol: 2.32, vitaminDNmol: 45, egfr: 70, alp: 80, tshMUL: 2.0, hbGramsPerLitre: 140, esrOrCrp: 'normal' },
+    bloodResults: { adjustedCalciumMmol: 2.32, vitaminDNmol: 45, creatinine: 110, alp: 80, tshMUL: 2.0, hbGramsPerLitre: 140, esrOrCrp: 'normal' },
   });
   const decision = runClinicalDecision(patient);
   check(failures, 'risk = high (GIOP context, T ≤ -1.5)', decision.riskStratification.category === 'high', `got ${decision.riskStratification.category}`);
@@ -593,11 +641,13 @@ function tc20(): TCResult {
   const patient = basePatient({
     age: 58,
     sex: 'male',
+    heightCm: 175,
+    weightKg: 76.6,
     priorFragilityFracture: true,
     priorVertebralFracture: true,
     secondaryOsteoporosis: ['hypogonadism'],
     dexaResults: { lumbarSpineTScore: -2.7, totalHipTScore: -2.5, femoralNeckTScore: -2.5, forearmTScore: null },
-    bloodResults: { adjustedCalciumMmol: 2.30, vitaminDNmol: 35, egfr: 72, alp: 80, tshMUL: 2.0, hbGramsPerLitre: 140, esrOrCrp: 'normal' },
+    bloodResults: { adjustedCalciumMmol: 2.30, vitaminDNmol: 35, creatinine: 107, alp: 80, tshMUL: 2.0, hbGramsPerLitre: 140, esrOrCrp: 'normal' },
   });
   const decision = runClinicalDecision(patient);
   check(failures, 'risk = high', decision.riskStratification.category === 'high', `got ${decision.riskStratification.category}`);
@@ -618,8 +668,10 @@ function tc21(): TCResult {
   const patient = basePatient({
     age: 48,
     sex: 'female',
+    heightCm: 162,
+    weightKg: 65.6,
     dexaResults: { lumbarSpineTScore: -2.6, totalHipTScore: -2.4, femoralNeckTScore: -2.4, forearmTScore: null },
-    bloodResults: { adjustedCalciumMmol: 2.32, vitaminDNmol: 50, egfr: 78, alp: 80, tshMUL: 2.0, hbGramsPerLitre: 140, esrOrCrp: 'normal' },
+    bloodResults: { adjustedCalciumMmol: 2.32, vitaminDNmol: 50, creatinine: 80, alp: 80, tshMUL: 2.0, hbGramsPerLitre: 140, esrOrCrp: 'normal' },
   });
   const decision = runClinicalDecision(patient);
   check(failures, 'out of scope', decision.outOfScope === true);
@@ -642,12 +694,14 @@ function tc22(): TCResult {
   const patient = basePatient({
     age: 78,
     sex: 'female',
+    heightCm: 162,
+    weightKg: 65.6,
     priorFragilityFracture: true,
     priorVertebralFracture: true,
     recentVertebralFractureYears: 0.83, // 10 months
     numberOfPriorFractures: 2,
     dexaResults: { lumbarSpineTScore: -3.6, totalHipTScore: -3.5, femoralNeckTScore: -3.5, forearmTScore: null },
-    bloodResults: { adjustedCalciumMmol: 2.32, vitaminDNmol: 55, egfr: 58, alp: 80, tshMUL: 2.0, hbGramsPerLitre: 140, esrOrCrp: 'normal' },
+    bloodResults: { adjustedCalciumMmol: 2.32, vitaminDNmol: 55, creatinine: 73, alp: 80, tshMUL: 2.0, hbGramsPerLitre: 140, esrOrCrp: 'normal' },
     refusesInjections: true,
   });
   const decision = runClinicalDecision(patient);
@@ -710,10 +764,12 @@ function tc23(): TCResult {
   const patient = basePatient({
     age: 65,
     sex: 'female',
+    heightCm: 162,
+    weightKg: 65.6,
     glucocorticoidDoseMgDay: 2,
     fraxMOFPercent: 17.5,
     fraxHipPercent: 3.8,
-    bloodResults: { adjustedCalciumMmol: 2.30, vitaminDNmol: 60, egfr: 70, alp: 80, tshMUL: 2.0, hbGramsPerLitre: 140, esrOrCrp: 'normal' },
+    bloodResults: { adjustedCalciumMmol: 2.30, vitaminDNmol: 60, creatinine: 73, alp: 80, tshMUL: 2.0, hbGramsPerLitre: 140, esrOrCrp: 'normal' },
   });
   const decision = runClinicalDecision(patient);
   const adjMOF = decision.riskStratification.adjustedFraxMOFPercent;
@@ -740,11 +796,13 @@ function tc24(): TCResult {
   const patient = basePatient({
     age: 62,
     sex: 'female',
+    heightCm: 162,
+    weightKg: 65.6,
     glucocorticoidDoseMgDay: 3,
     glucocorticoidUse: { current: true, dose: 'low', durationMonths: 1 },
     priorFragilityFracture: true,
     dexaResults: { lumbarSpineTScore: -1.6, totalHipTScore: -1.6, femoralNeckTScore: -1.6, forearmTScore: null },
-    bloodResults: { adjustedCalciumMmol: 2.30, vitaminDNmol: 55, egfr: 65, alp: 80, tshMUL: 2.0, hbGramsPerLitre: 140, esrOrCrp: 'normal' },
+    bloodResults: { adjustedCalciumMmol: 2.30, vitaminDNmol: 55, creatinine: 82, alp: 80, tshMUL: 2.0, hbGramsPerLitre: 140, esrOrCrp: 'normal' },
   });
   const decision = runClinicalDecision(patient);
   check(failures, 'risk = high', decision.riskStratification.category === 'high', `got ${decision.riskStratification.category}`);
@@ -762,12 +820,14 @@ function tc25(): TCResult {
   const patient = basePatient({
     age: 73,
     sex: 'female',
+    heightCm: 162,
+    weightKg: 65.6,
     glucocorticoidDoseMgDay: 4,
     glucocorticoidUse: { current: true, dose: 'low', durationMonths: 1 },
     fraxMOFPercent: 18.5,
     fraxHipPercent: 4.5,
     dexaResults: { lumbarSpineTScore: -1.4, totalHipTScore: -1.4, femoralNeckTScore: -1.4, forearmTScore: null },
-    bloodResults: { adjustedCalciumMmol: 2.30, vitaminDNmol: 65, egfr: 60, alp: 80, tshMUL: 2.0, hbGramsPerLitre: 140, esrOrCrp: 'normal' },
+    bloodResults: { adjustedCalciumMmol: 2.30, vitaminDNmol: 65, creatinine: 76, alp: 80, tshMUL: 2.0, hbGramsPerLitre: 140, esrOrCrp: 'normal' },
   });
   const decision = runClinicalDecision(patient);
   // FRAX category is intermediate (MOF 18.5% < IT 20.3%); GIOP criterion (b) overrides via immediate-start.
@@ -785,12 +845,14 @@ function tc26(): TCResult {
   const patient = basePatient({
     age: 64,
     sex: 'female',
+    heightCm: 162,
+    weightKg: 65.6,
     glucocorticoidStatus: 'stopped_over_12m_ago',
     glucocorticoidDoseMgDay: null,
     fraxMOFPercent: 10.5,
     fraxHipPercent: 2.1,
     dexaResults: { lumbarSpineTScore: -1.9, totalHipTScore: -1.9, femoralNeckTScore: -1.9, forearmTScore: null },
-    bloodResults: { adjustedCalciumMmol: 2.32, vitaminDNmol: 70, egfr: 68, alp: 80, tshMUL: 2.0, hbGramsPerLitre: 140, esrOrCrp: 'normal' },
+    bloodResults: { adjustedCalciumMmol: 2.32, vitaminDNmol: 70, creatinine: 76, alp: 80, tshMUL: 2.0, hbGramsPerLitre: 140, esrOrCrp: 'normal' },
     currentTreatment: { agent: 'alendronate', durationMonths: 24, reasonStopped: null, currentlyOn: true, monthsSinceLastDose: null },
   });
   const decision = runClinicalDecision(patient);
@@ -807,12 +869,14 @@ function tc27(): TCResult {
   const patient = basePatient({
     age: 71,
     sex: 'female',
+    heightCm: 162,
+    weightKg: 65.6,
     glucocorticoidStatus: 'stopped_over_12m_ago',
     glucocorticoidDoseMgDay: null,
     fraxMOFPercent: 19.0,
     fraxHipPercent: 5.6,
     dexaResults: { lumbarSpineTScore: -2.0, totalHipTScore: -2.0, femoralNeckTScore: -2.0, forearmTScore: null },
-    bloodResults: { adjustedCalciumMmol: 2.32, vitaminDNmol: 70, egfr: 62, alp: 80, tshMUL: 2.0, hbGramsPerLitre: 140, esrOrCrp: 'normal' },
+    bloodResults: { adjustedCalciumMmol: 2.32, vitaminDNmol: 70, creatinine: 76, alp: 80, tshMUL: 2.0, hbGramsPerLitre: 140, esrOrCrp: 'normal' },
     currentTreatment: { agent: 'alendronate', durationMonths: 24, reasonStopped: null, currentlyOn: true, monthsSinceLastDose: null },
   });
   const decision = runClinicalDecision(patient);
@@ -829,11 +893,13 @@ function tc28(): TCResult {
   const patient = basePatient({
     age: 60,
     sex: 'male',
+    heightCm: 175,
+    weightKg: 76.6,
     glucocorticoidDoseMgDay: 6,
     glucocorticoidUse: { current: true, dose: 'medium', durationMonths: 1 },
     fraxMOFPercent: 10.5,
     fraxHipPercent: 2.0,
-    bloodResults: { adjustedCalciumMmol: 2.30, vitaminDNmol: 60, egfr: 72, alp: 80, tshMUL: 2.0, hbGramsPerLitre: 140, esrOrCrp: 'normal' },
+    bloodResults: { adjustedCalciumMmol: 2.30, vitaminDNmol: 60, creatinine: 105, alp: 80, tshMUL: 2.0, hbGramsPerLitre: 140, esrOrCrp: 'normal' },
   });
   const decision = runClinicalDecision(patient);
   check(failures, 'risk = intermediate', decision.riskStratification.category === 'intermediate', `got ${decision.riskStratification.category}`);
@@ -851,10 +917,12 @@ function tc29(): TCResult {
   const patient = basePatient({
     age: 63,
     sex: 'female',
+    heightCm: 162,
+    weightKg: 65.6,
     fraxMOFPercent: 8.0,
     fraxHipPercent: 1.5,
     dexaResults: { lumbarSpineTScore: -1.9, totalHipTScore: -1.9, femoralNeckTScore: -1.9, forearmTScore: null },
-    bloodResults: { adjustedCalciumMmol: 2.32, vitaminDNmol: 70, egfr: 70, alp: 80, tshMUL: 2.0, hbGramsPerLitre: 140, esrOrCrp: 'normal' },
+    bloodResults: { adjustedCalciumMmol: 2.32, vitaminDNmol: 70, creatinine: 75, alp: 80, tshMUL: 2.0, hbGramsPerLitre: 140, esrOrCrp: 'normal' },
     currentTreatment: { agent: 'alendronate', durationMonths: 60, reasonStopped: null, currentlyOn: true, monthsSinceLastDose: null },
   });
   const decision = runClinicalDecision(patient);
@@ -871,10 +939,12 @@ function tc30(): TCResult {
   const patient = basePatient({
     age: 60,
     sex: 'female',
+    heightCm: 162,
+    weightKg: 65.6,
     fraxMOFPercent: 7.0,
     fraxHipPercent: 1.3,
     dexaResults: { lumbarSpineTScore: -1.9, totalHipTScore: -1.9, femoralNeckTScore: -1.9, forearmTScore: null },
-    bloodResults: { adjustedCalciumMmol: 2.32, vitaminDNmol: 70, egfr: 70, alp: 80, tshMUL: 2.0, hbGramsPerLitre: 140, esrOrCrp: 'normal' },
+    bloodResults: { adjustedCalciumMmol: 2.32, vitaminDNmol: 70, creatinine: 78, alp: 80, tshMUL: 2.0, hbGramsPerLitre: 140, esrOrCrp: 'normal' },
     currentTreatment: { agent: 'risedronate', durationMonths: 60, reasonStopped: null, currentlyOn: true, monthsSinceLastDose: null },
   });
   const decision = runClinicalDecision(patient);
@@ -890,10 +960,12 @@ function tc31(): TCResult {
   const patient = basePatient({
     age: 58,
     sex: 'female',
+    heightCm: 162,
+    weightKg: 65.6,
     fraxMOFPercent: 6.0,
     fraxHipPercent: 1.0,
     dexaResults: { lumbarSpineTScore: -1.9, totalHipTScore: -1.9, femoralNeckTScore: -1.9, forearmTScore: null },
-    bloodResults: { adjustedCalciumMmol: 2.32, vitaminDNmol: 70, egfr: 72, alp: 80, tshMUL: 2.0, hbGramsPerLitre: 140, esrOrCrp: 'normal' },
+    bloodResults: { adjustedCalciumMmol: 2.32, vitaminDNmol: 70, creatinine: 78, alp: 80, tshMUL: 2.0, hbGramsPerLitre: 140, esrOrCrp: 'normal' },
     currentTreatment: { agent: 'ibandronate', durationMonths: 60, reasonStopped: null, currentlyOn: true, monthsSinceLastDose: null },
   });
   const decision = runClinicalDecision(patient);
@@ -909,10 +981,12 @@ function tc32(): TCResult {
   const patient = basePatient({
     age: 65,
     sex: 'female',
+    heightCm: 162,
+    weightKg: 65.6,
     fraxMOFPercent: 9.0,
     fraxHipPercent: 1.8,
     dexaResults: { lumbarSpineTScore: -1.8, totalHipTScore: -1.8, femoralNeckTScore: -1.8, forearmTScore: null },
-    bloodResults: { adjustedCalciumMmol: 2.32, vitaminDNmol: 70, egfr: 70, alp: 80, tshMUL: 2.0, hbGramsPerLitre: 140, esrOrCrp: 'normal' },
+    bloodResults: { adjustedCalciumMmol: 2.32, vitaminDNmol: 70, creatinine: 73, alp: 80, tshMUL: 2.0, hbGramsPerLitre: 140, esrOrCrp: 'normal' },
     currentTreatment: { agent: 'zoledronate', durationMonths: 36, reasonStopped: null, currentlyOn: true, monthsSinceLastDose: null },
   });
   const decision = runClinicalDecision(patient);
@@ -928,11 +1002,13 @@ function tc33(): TCResult {
   const patient = basePatient({
     age: 67,
     sex: 'female',
+    heightCm: 162,
+    weightKg: 65.6,
     priorFragilityFracture: true,
     recentFractureWithin2Years: true,
     numberOfPriorFractures: 1,
     dexaResults: { lumbarSpineTScore: -2.2, totalHipTScore: -2.2, femoralNeckTScore: -2.2, forearmTScore: null },
-    bloodResults: { adjustedCalciumMmol: 2.32, vitaminDNmol: 68, egfr: 65, alp: 80, tshMUL: 2.0, hbGramsPerLitre: 140, esrOrCrp: 'normal' },
+    bloodResults: { adjustedCalciumMmol: 2.32, vitaminDNmol: 68, creatinine: 77, alp: 80, tshMUL: 2.0, hbGramsPerLitre: 140, esrOrCrp: 'normal' },
     previousTreatments: [{ agent: 'alendronate', durationMonths: 60, reasonStopped: 'treatment_holiday', currentlyOn: false, monthsSinceLastDose: null }],
   });
   const decision = runClinicalDecision(patient);
@@ -950,12 +1026,14 @@ function tc34(): TCResult {
   const patient = basePatient({
     age: 69,
     sex: 'female',
+    heightCm: 162,
+    weightKg: 65.6,
     priorFragilityFracture: true,
     priorHipFracture: true,
     recentFractureWithin2Years: true,
     numberOfPriorFractures: 1,
     dexaResults: { lumbarSpineTScore: -2.4, totalHipTScore: -2.4, femoralNeckTScore: -2.4, forearmTScore: null },
-    bloodResults: { adjustedCalciumMmol: 2.32, vitaminDNmol: 55, egfr: 60, alp: 80, tshMUL: 2.0, hbGramsPerLitre: 140, esrOrCrp: 'normal' },
+    bloodResults: { adjustedCalciumMmol: 2.32, vitaminDNmol: 55, creatinine: 80, alp: 80, tshMUL: 2.0, hbGramsPerLitre: 140, esrOrCrp: 'normal' },
     currentTreatment: { agent: 'alendronate', durationMonths: 36, reasonStopped: null, currentlyOn: true, monthsSinceLastDose: null },
   });
   const decision = runClinicalDecision(patient);
@@ -977,10 +1055,12 @@ function tc35(): TCResult {
   const patient = basePatient({
     age: 74,
     sex: 'female',
+    heightCm: 162,
+    weightKg: 65.6,
     fraxMOFPercent: 18.0,
     fraxHipPercent: 4.0,
     dexaResults: { lumbarSpineTScore: -2.0, totalHipTScore: -2.0, femoralNeckTScore: -2.0, forearmTScore: null },
-    bloodResults: { adjustedCalciumMmol: 2.32, vitaminDNmol: 65, egfr: 65, alp: 80, tshMUL: 2.0, hbGramsPerLitre: 140, esrOrCrp: 'normal' },
+    bloodResults: { adjustedCalciumMmol: 2.32, vitaminDNmol: 65, creatinine: 69, alp: 80, tshMUL: 2.0, hbGramsPerLitre: 140, esrOrCrp: 'normal' },
     currentTreatment: { agent: 'alendronate', durationMonths: 126, reasonStopped: null, currentlyOn: true, monthsSinceLastDose: null },
   });
   const decision = runClinicalDecision(patient);
@@ -996,10 +1076,12 @@ function tc36(): TCResult {
   const patient = basePatient({
     age: 71,
     sex: 'female',
+    heightCm: 162,
+    weightKg: 65.6,
     fraxMOFPercent: 16.0,
     fraxHipPercent: 3.5,
     dexaResults: { lumbarSpineTScore: -2.1, totalHipTScore: -2.1, femoralNeckTScore: -2.1, forearmTScore: null },
-    bloodResults: { adjustedCalciumMmol: 2.32, vitaminDNmol: 65, egfr: 58, alp: 80, tshMUL: 2.0, hbGramsPerLitre: 140, esrOrCrp: 'normal' },
+    bloodResults: { adjustedCalciumMmol: 2.32, vitaminDNmol: 65, creatinine: 81, alp: 80, tshMUL: 2.0, hbGramsPerLitre: 140, esrOrCrp: 'normal' },
     currentTreatment: { agent: 'zoledronate', durationMonths: 78, reasonStopped: null, currentlyOn: true, monthsSinceLastDose: null },
   });
   const decision = runClinicalDecision(patient);
@@ -1015,11 +1097,13 @@ function tc37(): TCResult {
   const patient = basePatient({
     age: 66,
     sex: 'female',
+    heightCm: 162,
+    weightKg: 65.6,
     boneTurnoverMarkersRising: true,
     fraxMOFPercent: 16.0,
     fraxHipPercent: 3.0,
     dexaResults: { lumbarSpineTScore: -2.0, totalHipTScore: -2.0, femoralNeckTScore: -2.0, forearmTScore: null },
-    bloodResults: { adjustedCalciumMmol: 2.32, vitaminDNmol: 65, egfr: 70, alp: 145, tshMUL: 2.0, hbGramsPerLitre: 140, esrOrCrp: 'normal' },
+    bloodResults: { adjustedCalciumMmol: 2.32, vitaminDNmol: 65, creatinine: 72, alp: 145, tshMUL: 2.0, hbGramsPerLitre: 140, esrOrCrp: 'normal' },
     previousTreatments: [{ agent: 'alendronate', durationMonths: 60, reasonStopped: 'treatment_holiday', currentlyOn: false, monthsSinceLastDose: null }],
   });
   const decision = runClinicalDecision(patient);
@@ -1043,11 +1127,13 @@ function tc37b(): TCResult {
   const patient = basePatient({
     age: 66,
     sex: 'female',
+    heightCm: 162,
+    weightKg: 65.6,
     boneTurnoverMarkersRising: true,
     fraxMOFPercent: 16.0,
     fraxHipPercent: 3.0,
     dexaResults: { lumbarSpineTScore: -2.0, totalHipTScore: -2.0, femoralNeckTScore: -2.0, forearmTScore: null },
-    bloodResults: { adjustedCalciumMmol: 2.32, vitaminDNmol: 65, egfr: 70, alp: 145, tshMUL: 2.0, hbGramsPerLitre: 140, esrOrCrp: 'normal' },
+    bloodResults: { adjustedCalciumMmol: 2.32, vitaminDNmol: 65, creatinine: 72, alp: 145, tshMUL: 2.0, hbGramsPerLitre: 140, esrOrCrp: 'normal' },
     currentTreatment: { agent: 'alendronate', durationMonths: 60, reasonStopped: 'treatment_holiday', currentlyOn: false, monthsSinceLastDose: 18 },
     previousTreatments: [],
   });
@@ -1065,11 +1151,13 @@ function tc38(): TCResult {
   const patient = basePatient({
     age: 72,
     sex: 'male',
+    heightCm: 175,
+    weightKg: 76.6,
     adtUse: true,
     fraxMOFPercent: 17.5,
     fraxHipPercent: 4.8,
     dexaResults: { lumbarSpineTScore: -1.6, totalHipTScore: -1.6, femoralNeckTScore: -1.6, forearmTScore: null },
-    bloodResults: { adjustedCalciumMmol: 2.30, vitaminDNmol: 65, egfr: 65, alp: 80, tshMUL: 2.0, hbGramsPerLitre: 140, esrOrCrp: 'normal' },
+    bloodResults: { adjustedCalciumMmol: 2.30, vitaminDNmol: 65, creatinine: 99, alp: 80, tshMUL: 2.0, hbGramsPerLitre: 140, esrOrCrp: 'normal' },
   });
   const decision = runClinicalDecision(patient);
   check(failures, 'risk = intermediate', decision.riskStratification.category === 'intermediate',
@@ -1088,11 +1176,13 @@ function tc39(): TCResult {
   const patient = basePatient({
     age: 63,
     sex: 'female',
+    heightCm: 162,
+    weightKg: 65.6,
     aromataseInhibitorUse: true,
     fraxMOFPercent: 10.8,
     fraxHipPercent: 1.9,
     dexaResults: { lumbarSpineTScore: -1.6, totalHipTScore: -1.6, femoralNeckTScore: -1.6, forearmTScore: null },
-    bloodResults: { adjustedCalciumMmol: 2.32, vitaminDNmol: 65, egfr: 70, alp: 80, tshMUL: 2.0, hbGramsPerLitre: 140, esrOrCrp: 'normal' },
+    bloodResults: { adjustedCalciumMmol: 2.32, vitaminDNmol: 65, creatinine: 75, alp: 80, tshMUL: 2.0, hbGramsPerLitre: 140, esrOrCrp: 'normal' },
   });
   const decision = runClinicalDecision(patient);
   check(failures, 'risk = intermediate', decision.riskStratification.category === 'intermediate',
@@ -1111,8 +1201,10 @@ function tc40(): TCResult {
   const patient = basePatient({
     age: 66,
     sex: 'female',
+    heightCm: 162,
+    weightKg: 65.6,
     dexaResults: { lumbarSpineTScore: -2.7, totalHipTScore: -2.4, femoralNeckTScore: -2.4, forearmTScore: null },
-    bloodResults: { adjustedCalciumMmol: 2.32, vitaminDNmol: 65, egfr: 70, alp: 80, tshMUL: 2.0, hbGramsPerLitre: 140, esrOrCrp: 'normal' },
+    bloodResults: { adjustedCalciumMmol: 2.32, vitaminDNmol: 65, creatinine: 72, alp: 80, tshMUL: 2.0, hbGramsPerLitre: 140, esrOrCrp: 'normal' },
   });
   const decision = runClinicalDecision(patient);
   check(failures, 'recommends alendronate', hasAgent(decision, 'alendronate'));
@@ -1135,12 +1227,14 @@ function tc41(): TCResult {
   const patient = basePatient({
     age: 58,
     sex: 'female',
+    heightCm: 162,
+    weightKg: 65.6,
     glucocorticoidDoseMgDay: 15,
     glucocorticoidUse: { current: true, dose: 'high', durationMonths: 1 },
     fraxMOFPercent: 8.5,
     fraxHipPercent: 1.3,
     dexaResults: { lumbarSpineTScore: -1.8, totalHipTScore: -1.8, femoralNeckTScore: -1.8, forearmTScore: null },
-    bloodResults: { adjustedCalciumMmol: 2.32, vitaminDNmol: 65, egfr: 70, alp: 80, tshMUL: 2.0, hbGramsPerLitre: 140, esrOrCrp: 'normal' },
+    bloodResults: { adjustedCalciumMmol: 2.32, vitaminDNmol: 65, creatinine: 80, alp: 80, tshMUL: 2.0, hbGramsPerLitre: 140, esrOrCrp: 'normal' },
   });
   const decision = runClinicalDecision(patient);
   const adjMOF = decision.riskStratification.adjustedFraxMOFPercent;
@@ -1179,8 +1273,10 @@ function tc42(): TCResult {
   const patient = basePatient({
     age: 70,
     sex: 'female',
+    heightCm: 162,
+    weightKg: 65.6,
     dexaResults: { lumbarSpineTScore: -2.6, totalHipTScore: -2.6, femoralNeckTScore: -2.6, forearmTScore: null },
-    bloodResults: { adjustedCalciumMmol: 2.30, vitaminDNmol: 55, egfr: 65, alp: 80, tshMUL: 2.0, hbGramsPerLitre: 140, esrOrCrp: 'normal' },
+    bloodResults: { adjustedCalciumMmol: 2.30, vitaminDNmol: 55, creatinine: 73, alp: 80, tshMUL: 2.0, hbGramsPerLitre: 140, esrOrCrp: 'normal' },
   });
   const decision = runClinicalDecision(patient);
   const calcium = decision.supplements.find(s => s.supplement === 'calcium');
@@ -1205,8 +1301,10 @@ function tc43(): TCResult {
   const patient = basePatient({
     age: 68,
     sex: 'female',
+    heightCm: 162,
+    weightKg: 65.6,
     dexaResults: { lumbarSpineTScore: -2.8, totalHipTScore: -2.8, femoralNeckTScore: -2.8, forearmTScore: null },
-    bloodResults: { adjustedCalciumMmol: 2.32, vitaminDNmol: 60, egfr: 70, alp: 80, tshMUL: 2.0, hbGramsPerLitre: 140, esrOrCrp: 'normal' },
+    bloodResults: { adjustedCalciumMmol: 2.32, vitaminDNmol: 60, creatinine: 70, alp: 80, tshMUL: 2.0, hbGramsPerLitre: 140, esrOrCrp: 'normal' },
   });
   const decision = runClinicalDecision(patient);
   check(failures, 'calcium output mentions 700 mg/day RNI floor',
@@ -1225,8 +1323,10 @@ function tc44(): TCResult {
   const patient = basePatient({
     age: 84,
     sex: 'female',
+    heightCm: 162,
+    weightKg: 65.6,
     dexaResults: { lumbarSpineTScore: -2.9, totalHipTScore: -2.9, femoralNeckTScore: -2.9, forearmTScore: null },
-    bloodResults: { adjustedCalciumMmol: 2.30, vitaminDNmol: 30, egfr: 50, alp: 80, tshMUL: 2.0, hbGramsPerLitre: 130, esrOrCrp: 'normal' },
+    bloodResults: { adjustedCalciumMmol: 2.30, vitaminDNmol: 30, creatinine: 76, alp: 80, tshMUL: 2.0, hbGramsPerLitre: 130, esrOrCrp: 'normal' },
   });
   const decision = runClinicalDecision(patient);
   check(failures, 'supplements mention "housebound"',
@@ -1248,8 +1348,10 @@ function tc45(): TCResult {
   const patient = basePatient({
     age: 72,
     sex: 'female',
+    heightCm: 162,
+    weightKg: 65.6,
     dexaResults: { lumbarSpineTScore: -2.5, totalHipTScore: -2.5, femoralNeckTScore: -2.5, forearmTScore: null },
-    bloodResults: { adjustedCalciumMmol: 2.30, vitaminDNmol: 35, egfr: 65, alp: 80, tshMUL: 2.0, hbGramsPerLitre: 135, esrOrCrp: 'normal' },
+    bloodResults: { adjustedCalciumMmol: 2.30, vitaminDNmol: 35, creatinine: 71, alp: 80, tshMUL: 2.0, hbGramsPerLitre: 135, esrOrCrp: 'normal' },
   });
   const decision = runClinicalDecision(patient);
   check(failures, 'vit D output: "does not reduce fracture"',
@@ -1270,8 +1372,10 @@ function tc46(): TCResult {
   const patient = basePatient({
     age: 65,
     sex: 'female',
+    heightCm: 162,
+    weightKg: 65.6,
     dexaResults: { lumbarSpineTScore: -2.6, totalHipTScore: -2.6, femoralNeckTScore: -2.6, forearmTScore: null },
-    bloodResults: { adjustedCalciumMmol: 2.30, vitaminDNmol: 60, egfr: 70, alp: 80, tshMUL: 2.0, hbGramsPerLitre: 135, esrOrCrp: 'normal' },
+    bloodResults: { adjustedCalciumMmol: 2.30, vitaminDNmol: 60, creatinine: 73, alp: 80, tshMUL: 2.0, hbGramsPerLitre: 135, esrOrCrp: 'normal' },
   });
   const decision = runClinicalDecision(patient);
   check(failures, 'lifestyle has at least 1 entry', decision.lifestyleAdvice.length >= 1);
@@ -1290,9 +1394,11 @@ function tc47(): TCResult {
   const patient = basePatient({
     age: 60,
     sex: 'male',
+    heightCm: 175,
+    weightKg: 76.6,
     alcoholUnitsPerWeek: 21,
     dexaResults: { lumbarSpineTScore: -2.7, totalHipTScore: -2.7, femoralNeckTScore: -2.7, forearmTScore: null },
-    bloodResults: { adjustedCalciumMmol: 2.30, vitaminDNmol: 60, egfr: 70, alp: 80, tshMUL: 2.0, hbGramsPerLitre: 140, esrOrCrp: 'normal' },
+    bloodResults: { adjustedCalciumMmol: 2.30, vitaminDNmol: 60, creatinine: 108, alp: 80, tshMUL: 2.0, hbGramsPerLitre: 140, esrOrCrp: 'normal' },
   });
   const decision = runClinicalDecision(patient);
   const alcoholAdvice = decision.lifestyleAdvice.find(a => a.toLowerCase().includes('alcohol'));
@@ -1310,9 +1416,11 @@ function tc48(): TCResult {
   const patient = basePatient({
     age: 66,
     sex: 'female',
+    heightCm: 162,
+    weightKg: 65.6,
     fallsInLastYear: 0,
     dexaResults: { lumbarSpineTScore: -2.6, totalHipTScore: -2.6, femoralNeckTScore: -2.6, forearmTScore: null },
-    bloodResults: { adjustedCalciumMmol: 2.30, vitaminDNmol: 60, egfr: 70, alp: 80, tshMUL: 2.0, hbGramsPerLitre: 140, esrOrCrp: 'normal' },
+    bloodResults: { adjustedCalciumMmol: 2.30, vitaminDNmol: 60, creatinine: 72, alp: 80, tshMUL: 2.0, hbGramsPerLitre: 140, esrOrCrp: 'normal' },
   });
   const decision = runClinicalDecision(patient);
   check(failures, 'falls flag fires despite no falls history', hasFlag(decision, 'falls_risk_assessment'));
@@ -1329,12 +1437,14 @@ function tc49(): TCResult {
   const patient = basePatient({
     age: 38,
     sex: 'female',
+    heightCm: 162,
+    weightKg: 65.6,
     earlyMenopause: true,
     ageAtMenopause: 36,
     fraxMOFPercent: 3.2,
     fraxHipPercent: 0.5,
     dexaResults: { lumbarSpineTScore: -1.4, totalHipTScore: -1.4, femoralNeckTScore: -1.4, forearmTScore: null },
-    bloodResults: { adjustedCalciumMmol: 2.32, vitaminDNmol: 65, egfr: 80, alp: 80, tshMUL: 2.0, hbGramsPerLitre: 135, esrOrCrp: 'normal' },
+    bloodResults: { adjustedCalciumMmol: 2.32, vitaminDNmol: 65, creatinine: 87, alp: 80, tshMUL: 2.0, hbGramsPerLitre: 135, esrOrCrp: 'normal' },
   });
   const decision = runClinicalDecision(patient);
   const poiFlag = decision.flags.find(f => f.id === 'early_menopause_frax_underestimate');
@@ -1359,12 +1469,14 @@ function tc50(): TCResult {
   const patient = basePatient({
     age: 41,
     sex: 'female',
+    heightCm: 162,
+    weightKg: 65.6,
     earlyMenopause: true,
     ageAtMenopause: 39,
     vteHistory: true,
     breastCancerHistory: true,
     dexaResults: { lumbarSpineTScore: -2.6, totalHipTScore: -2.6, femoralNeckTScore: -2.6, forearmTScore: null },
-    bloodResults: { adjustedCalciumMmol: 2.32, vitaminDNmol: 65, egfr: 75, alp: 80, tshMUL: 2.0, hbGramsPerLitre: 135, esrOrCrp: 'normal' },
+    bloodResults: { adjustedCalciumMmol: 2.32, vitaminDNmol: 65, creatinine: 90, alp: 80, tshMUL: 2.0, hbGramsPerLitre: 135, esrOrCrp: 'normal' },
   });
   const decision = runClinicalDecision(patient);
   check(failures, 'poi_bp_layered_hrt_ineligible flag fires',
@@ -1395,11 +1507,13 @@ function tc51(): TCResult {
   const patient = basePatient({
     age: 44,
     sex: 'female',
+    heightCm: 162,
+    weightKg: 65.6,
     earlyMenopause: true,
     ageAtMenopause: 41,
     currentSmoker: true,
     dexaResults: { lumbarSpineTScore: -1.8, totalHipTScore: -1.8, femoralNeckTScore: -1.8, forearmTScore: null },
-    bloodResults: { adjustedCalciumMmol: 2.32, vitaminDNmol: 65, egfr: 80, alp: 80, tshMUL: 2.0, hbGramsPerLitre: 135, esrOrCrp: 'normal' },
+    bloodResults: { adjustedCalciumMmol: 2.32, vitaminDNmol: 65, creatinine: 82, alp: 80, tshMUL: 2.0, hbGramsPerLitre: 135, esrOrCrp: 'normal' },
   });
   const decision = runClinicalDecision(patient);
   check(failures, 'poi_bp_consider_if_hrt_insufficient flag fires',
@@ -1420,10 +1534,12 @@ function tc52(): TCResult {
   const patient = basePatient({
     age: 39,
     sex: 'female',
+    heightCm: 162,
+    weightKg: 65.6,
     earlyMenopause: true,
     ageAtMenopause: 36,
     dexaResults: { lumbarSpineTScore: -1.5, totalHipTScore: -1.5, femoralNeckTScore: -1.5, forearmTScore: null },
-    bloodResults: { adjustedCalciumMmol: 2.32, vitaminDNmol: 65, egfr: 80, alp: 80, tshMUL: 2.0, hbGramsPerLitre: 140, esrOrCrp: 'normal' },
+    bloodResults: { adjustedCalciumMmol: 2.32, vitaminDNmol: 65, creatinine: 86, alp: 80, tshMUL: 2.0, hbGramsPerLitre: 140, esrOrCrp: 'normal' },
   });
   const decision = runClinicalDecision(patient);
   const poiFlag = decision.flags.find(f => f.id === 'poi_hrt_first_line');
@@ -1456,9 +1572,11 @@ function tc53(): TCResult {
   const patient = basePatient({
     age: 67,
     sex: 'female',
+    heightCm: 162,
+    weightKg: 65.6,
     priorFragilityFracture: true,
     dexaResults: { lumbarSpineTScore: -3.0, totalHipTScore: -2.8, femoralNeckTScore: -2.8, forearmTScore: null },
-    bloodResults: { adjustedCalciumMmol: 2.30, vitaminDNmol: 70, egfr: 30, alp: 80, tshMUL: 2.0, hbGramsPerLitre: 135, esrOrCrp: 'normal' },
+    bloodResults: { adjustedCalciumMmol: 2.30, vitaminDNmol: 70, creatinine: 166, alp: 80, tshMUL: 2.0, hbGramsPerLitre: 135, esrOrCrp: 'normal' },
   });
   const decision = runClinicalDecision(patient);
   check(failures, 'denosumab recommended', hasAgent(decision, 'denosumab'));
@@ -1484,8 +1602,10 @@ function tc54(): TCResult {
   const patient = basePatient({
     age: 65,
     sex: 'male',
+    heightCm: 175,
+    weightKg: 76.6,
     dexaResults: { lumbarSpineTScore: -2.7, totalHipTScore: -2.7, femoralNeckTScore: -2.7, forearmTScore: null },
-    bloodResults: { adjustedCalciumMmol: 2.30, vitaminDNmol: 58, egfr: 55, alp: 80, tshMUL: 2.0, hbGramsPerLitre: 140, esrOrCrp: 'normal' },
+    bloodResults: { adjustedCalciumMmol: 2.30, vitaminDNmol: 58, creatinine: 128, alp: 80, tshMUL: 2.0, hbGramsPerLitre: 140, esrOrCrp: 'normal' },
     previousTreatments: [{ agent: 'alendronate', durationMonths: 12, reasonStopped: 'gi_intolerance', currentlyOn: false, monthsSinceLastDose: 3 }],
   });
   const decision = runClinicalDecision(patient);
@@ -1505,12 +1625,14 @@ function tc55(): TCResult {
   const patient = basePatient({
     age: 72,
     sex: 'male',
+    heightCm: 175,
+    weightKg: 76.6,
     priorFragilityFracture: true,
     priorVertebralFracture: true,
     numberOfPriorFractures: 2,
     recentVertebralFractureYears: 0.8,
     dexaResults: { lumbarSpineTScore: -3.6, totalHipTScore: -3.4, femoralNeckTScore: -3.4, forearmTScore: null },
-    bloodResults: { adjustedCalciumMmol: 2.30, vitaminDNmol: 55, egfr: 60, alp: 80, tshMUL: 2.0, hbGramsPerLitre: 140, esrOrCrp: 'normal' },
+    bloodResults: { adjustedCalciumMmol: 2.30, vitaminDNmol: 55, creatinine: 106, alp: 80, tshMUL: 2.0, hbGramsPerLitre: 140, esrOrCrp: 'normal' },
   });
   const decision = runClinicalDecision(patient);
   check(failures, 'risk = very_high',
@@ -1535,12 +1657,14 @@ function tc56(): TCResult {
   const patient = basePatient({
     age: 68,
     sex: 'female',
+    heightCm: 162,
+    weightKg: 65.6,
     priorFragilityFracture: true,
     priorVertebralFracture: true,
     recentVertebralFractureYears: 0.25,
     numberOfPriorFractures: 1,
     dexaResults: { lumbarSpineTScore: -3.1, totalHipTScore: -3.0, femoralNeckTScore: -3.0, forearmTScore: null },
-    bloodResults: { adjustedCalciumMmol: 2.30, vitaminDNmol: 65, egfr: 62, alp: 80, tshMUL: 2.0, hbGramsPerLitre: 135, esrOrCrp: 'normal' },
+    bloodResults: { adjustedCalciumMmol: 2.30, vitaminDNmol: 65, creatinine: 79, alp: 80, tshMUL: 2.0, hbGramsPerLitre: 135, esrOrCrp: 'normal' },
     previousTreatments: [{ agent: 'teriparatide', durationMonths: 24, reasonStopped: 'completed_course', currentlyOn: false, monthsSinceLastDose: 18 }],
   });
   const decision = runClinicalDecision(patient);
@@ -1560,8 +1684,10 @@ function tc57(): TCResult {
   const patient = basePatient({
     age: 64,
     sex: 'female',
+    heightCm: 162,
+    weightKg: 65.6,
     dexaResults: { lumbarSpineTScore: -3.2, totalHipTScore: -3.0, femoralNeckTScore: -3.0, forearmTScore: null },
-    bloodResults: { adjustedCalciumMmol: 2.30, vitaminDNmol: 70, egfr: 65, alp: 80, tshMUL: 2.0, hbGramsPerLitre: 135, esrOrCrp: 'normal' },
+    bloodResults: { adjustedCalciumMmol: 2.30, vitaminDNmol: 70, creatinine: 80, alp: 80, tshMUL: 2.0, hbGramsPerLitre: 135, esrOrCrp: 'normal' },
     currentTreatment: { agent: 'teriparatide', durationMonths: 8, reasonStopped: null, currentlyOn: true, monthsSinceLastDose: 0 },
   });
   const decision = runClinicalDecision(patient);
@@ -1582,12 +1708,14 @@ function tc58(): TCResult {
   const patient = basePatient({
     age: 71,
     sex: 'female',
+    heightCm: 162,
+    weightKg: 65.6,
     priorFragilityFracture: true,
     priorVertebralFracture: true,
     recentVertebralFractureYears: 0.25,
     numberOfPriorFractures: 1,
     dexaResults: { lumbarSpineTScore: -3.3, totalHipTScore: -3.1, femoralNeckTScore: -3.1, forearmTScore: null },
-    bloodResults: { adjustedCalciumMmol: 2.30, vitaminDNmol: 70, egfr: 58, alp: 80, tshMUL: 2.0, hbGramsPerLitre: 135, esrOrCrp: 'normal' },
+    bloodResults: { adjustedCalciumMmol: 2.30, vitaminDNmol: 70, creatinine: 81, alp: 80, tshMUL: 2.0, hbGramsPerLitre: 135, esrOrCrp: 'normal' },
     currentTreatment: { agent: 'alendronate', durationMonths: 84, reasonStopped: null, currentlyOn: true, monthsSinceLastDose: 0 },
   });
   const decision = runClinicalDecision(patient);
@@ -1613,9 +1741,11 @@ function tc59(): TCResult {
   const patient = basePatient({
     age: 67,
     sex: 'female',
+    heightCm: 162,
+    weightKg: 65.6,
     strokeHistory: true,
     dexaResults: { lumbarSpineTScore: -2.6, totalHipTScore: -2.6, femoralNeckTScore: -2.6, forearmTScore: null },
-    bloodResults: { adjustedCalciumMmol: 2.30, vitaminDNmol: 70, egfr: 65, alp: 80, tshMUL: 2.0, hbGramsPerLitre: 135, esrOrCrp: 'normal' },
+    bloodResults: { adjustedCalciumMmol: 2.30, vitaminDNmol: 70, creatinine: 77, alp: 80, tshMUL: 2.0, hbGramsPerLitre: 135, esrOrCrp: 'normal' },
   });
   const decision = runClinicalDecision(patient);
   check(failures, 'raloxifene_excluded_stroke flag fires',
@@ -1635,12 +1765,13 @@ function tc60(): TCResult {
   const patient = basePatient({
     age: 78,
     sex: 'female',
-    bmi: 17.5,
+    heightCm: 162,
+    weightKg: 45.9,
     priorFragilityFracture: true,
     priorHipFracture: true,
     recentFractureWithin2Years: true,
     dexaResults: { lumbarSpineTScore: -2.9, totalHipTScore: -2.9, femoralNeckTScore: -2.9, forearmTScore: null },
-    bloodResults: { adjustedCalciumMmol: 2.30, vitaminDNmol: 70, egfr: 42, alp: 80, tshMUL: 2.0, hbGramsPerLitre: 130, esrOrCrp: 'normal' },
+    bloodResults: { adjustedCalciumMmol: 2.30, vitaminDNmol: 70, creatinine: 70, alp: 80, tshMUL: 2.0, hbGramsPerLitre: 130, esrOrCrp: 'normal' },
   });
   const decision = runClinicalDecision(patient);
   check(failures, 'IV zoledronate recommended (post-hip-fx)',
@@ -1662,13 +1793,15 @@ function tc61(): TCResult {
   const patient = basePatient({
     age: 74,
     sex: 'female',
+    heightCm: 162,
+    weightKg: 65.6,
     priorFragilityFracture: true,
     priorHipFracture: true,
     recentFractureWithin2Years: true,
     fraxMOFPercent: null,
     fraxHipPercent: null,
     dexaResults: null,
-    bloodResults: { adjustedCalciumMmol: 2.30, vitaminDNmol: 38, egfr: 55, alp: 80, tshMUL: 2.0, hbGramsPerLitre: 130, esrOrCrp: 'normal' },
+    bloodResults: { adjustedCalciumMmol: 2.30, vitaminDNmol: 38, creatinine: 82, alp: 80, tshMUL: 2.0, hbGramsPerLitre: 130, esrOrCrp: 'normal' },
   });
   const decision = runClinicalDecision(patient);
   // v1.46 — post_hip_fracture_zoledronate_first_line flag retired; Rec 3 +
@@ -1701,9 +1834,11 @@ function tc62(): TCResult {
   const patient = basePatient({
     age: 65,
     sex: 'female',
+    heightCm: 162,
+    weightKg: 65.6,
     priorFragilityFracture: true,
     dexaResults: { lumbarSpineTScore: -2.8, totalHipTScore: -2.6, femoralNeckTScore: -2.6, forearmTScore: null },
-    bloodResults: { adjustedCalciumMmol: 2.38, vitaminDNmol: 72, egfr: 30, alp: 80, tshMUL: 2.0, hbGramsPerLitre: 135, esrOrCrp: 'normal' },
+    bloodResults: { adjustedCalciumMmol: 2.38, vitaminDNmol: 72, creatinine: 170, alp: 80, tshMUL: 2.0, hbGramsPerLitre: 135, esrOrCrp: 'normal' },
   });
   const decision = runClinicalDecision(patient);
   check(failures, 'denosumab recommended', hasAgent(decision, 'denosumab'));
@@ -1730,11 +1865,13 @@ function tc63(): TCResult {
   const patient = basePatient({
     age: 56,
     sex: 'female',
+    heightCm: 162,
+    weightKg: 65.6,
     parentalHipFracture: true, // a FRAX clinical risk factor so the engine evaluates FRAX (NOGG Rec 1 gate)
     fraxMOFPercent: 13.0,      // above IT at age 55 (9.5%) → high
     fraxHipPercent: 2.0,
     dexaResults: { lumbarSpineTScore: -2.0, totalHipTScore: -1.9, femoralNeckTScore: -1.9, forearmTScore: null },
-    bloodResults: { adjustedCalciumMmol: 2.32, vitaminDNmol: 70, egfr: 70, alp: 80, tshMUL: 2.0, hbGramsPerLitre: 135, esrOrCrp: 'normal' },
+    bloodResults: { adjustedCalciumMmol: 2.32, vitaminDNmol: 70, creatinine: 82, alp: 80, tshMUL: 2.0, hbGramsPerLitre: 135, esrOrCrp: 'normal' },
   });
   const decision = runClinicalDecision(patient);
   check(failures, 'hrt_option_under60 flag fires',
@@ -1761,11 +1898,13 @@ function tc64(): TCResult {
   const patient = basePatient({
     age: 72,
     sex: 'female',
+    heightCm: 162,
+    weightKg: 65.6,
     priorFragilityFracture: true,
     priorHipFracture: true,
     recentFractureWithin2Years: true,
     dexaResults: { lumbarSpineTScore: -2.2, totalHipTScore: -2.2, femoralNeckTScore: -2.2, forearmTScore: null },
-    bloodResults: { adjustedCalciumMmol: 2.32, vitaminDNmol: 70, egfr: 65, alp: 80, tshMUL: 2.0, hbGramsPerLitre: 135, esrOrCrp: 'normal' },
+    bloodResults: { adjustedCalciumMmol: 2.32, vitaminDNmol: 70, creatinine: 71, alp: 80, tshMUL: 2.0, hbGramsPerLitre: 135, esrOrCrp: 'normal' },
   });
   const decision = runClinicalDecision(patient);
   // v1.46 — post_hip_fracture_zoledronate_first_line flag retired; Rec 3 +
@@ -1791,9 +1930,11 @@ function tc65(): TCResult {
   const patient = basePatient({
     age: 68,
     sex: 'female',
+    heightCm: 162,
+    weightKg: 65.6,
     oesophagealDiseaseHistory: true,
     dexaResults: { lumbarSpineTScore: -2.8, totalHipTScore: -2.6, femoralNeckTScore: -2.6, forearmTScore: null },
-    bloodResults: { adjustedCalciumMmol: 2.32, vitaminDNmol: 70, egfr: 60, alp: 80, tshMUL: 2.0, hbGramsPerLitre: 135, esrOrCrp: 'normal' },
+    bloodResults: { adjustedCalciumMmol: 2.32, vitaminDNmol: 70, creatinine: 81, alp: 80, tshMUL: 2.0, hbGramsPerLitre: 135, esrOrCrp: 'normal' },
   });
   const decision = runClinicalDecision(patient);
   check(failures, 'oesophageal disease oral-BP CI flag fires',
@@ -1815,9 +1956,11 @@ function tc66(): TCResult {
   const patient = basePatient({
     age: 75,
     sex: 'female',
+    heightCm: 162,
+    weightKg: 65.6,
     oesophagealDiseaseHistory: true,
     dexaResults: { lumbarSpineTScore: -2.9, totalHipTScore: -2.8, femoralNeckTScore: -2.8, forearmTScore: null },
-    bloodResults: { adjustedCalciumMmol: 2.32, vitaminDNmol: 70, egfr: 30, alp: 80, tshMUL: 2.0, hbGramsPerLitre: 130, esrOrCrp: 'normal' },
+    bloodResults: { adjustedCalciumMmol: 2.32, vitaminDNmol: 70, creatinine: 147, alp: 80, tshMUL: 2.0, hbGramsPerLitre: 130, esrOrCrp: 'normal' },
   });
   const decision = runClinicalDecision(patient);
   check(failures, 'oesophageal disease CI flag fires',
@@ -1838,8 +1981,10 @@ function tc67(): TCResult {
   const patient = basePatient({
     age: 65,
     sex: 'female',
+    heightCm: 162,
+    weightKg: 65.6,
     dexaResults: { lumbarSpineTScore: -2.6, totalHipTScore: -2.5, femoralNeckTScore: -2.5, forearmTScore: null },
-    bloodResults: { adjustedCalciumMmol: 2.32, vitaminDNmol: 70, egfr: 70, alp: 80, tshMUL: 2.0, hbGramsPerLitre: 135, esrOrCrp: 'normal' },
+    bloodResults: { adjustedCalciumMmol: 2.32, vitaminDNmol: 70, creatinine: 73, alp: 80, tshMUL: 2.0, hbGramsPerLitre: 135, esrOrCrp: 'normal' },
     currentTreatment: { agent: 'denosumab', durationMonths: 18, reasonStopped: null, currentlyOn: true, monthsSinceLastDose: 5.5 },
   });
   const decision = runClinicalDecision(patient);
@@ -1863,8 +2008,10 @@ function tc68(): TCResult {
   const patient = basePatient({
     age: 68,
     sex: 'female',
+    heightCm: 162,
+    weightKg: 65.6,
     dexaResults: { lumbarSpineTScore: -2.6, totalHipTScore: -2.6, femoralNeckTScore: -2.6, forearmTScore: null },
-    bloodResults: { adjustedCalciumMmol: 2.32, vitaminDNmol: 70, egfr: 65, alp: 80, tshMUL: 2.0, hbGramsPerLitre: 135, esrOrCrp: 'normal' },
+    bloodResults: { adjustedCalciumMmol: 2.32, vitaminDNmol: 70, creatinine: 76, alp: 80, tshMUL: 2.0, hbGramsPerLitre: 135, esrOrCrp: 'normal' },
     currentTreatment: { agent: 'denosumab', durationMonths: 36, reasonStopped: null, currentlyOn: true, monthsSinceLastDose: 8 },
   });
   const decision = runClinicalDecision(patient);
@@ -1893,12 +2040,14 @@ function tc69(): TCResult {
   const patient = basePatient({
     age: 72,
     sex: 'male',
+    heightCm: 175,
+    weightKg: 76.6,
     priorFragilityFracture: true,
     priorVertebralFracture: true,
     recentVertebralFractureYears: 0.5,
     numberOfPriorFractures: 2,
     dexaResults: { lumbarSpineTScore: -3.4, totalHipTScore: -3.0, femoralNeckTScore: -3.0, forearmTScore: null },
-    bloodResults: { adjustedCalciumMmol: 2.32, vitaminDNmol: 70, egfr: 70, alp: 80, tshMUL: 2.0, hbGramsPerLitre: 140, esrOrCrp: 'normal' },
+    bloodResults: { adjustedCalciumMmol: 2.32, vitaminDNmol: 70, creatinine: 92, alp: 80, tshMUL: 2.0, hbGramsPerLitre: 140, esrOrCrp: 'normal' },
   });
   const decision = runClinicalDecision(patient);
   for (const agent of ['romosozumab', 'ibandronate', 'hrt', 'raloxifene', 'abaloparatide'] as const) {
@@ -1922,12 +2071,14 @@ function tc70(): TCResult {
   const patient = basePatient({
     age: 75,
     sex: 'female',
+    heightCm: 162,
+    weightKg: 65.6,
     priorFragilityFracture: true,
     priorVertebralFracture: true,
     numberOfPriorFractures: 2,
     recentVertebralFractureYears: 1,
     dexaResults: { lumbarSpineTScore: -3.6, totalHipTScore: -3.0, femoralNeckTScore: -3.0, forearmTScore: null },
-    bloodResults: { adjustedCalciumMmol: 2.32, vitaminDNmol: 70, egfr: 65, alp: 80, tshMUL: 2.0, hbGramsPerLitre: 135, esrOrCrp: 'normal' },
+    bloodResults: { adjustedCalciumMmol: 2.32, vitaminDNmol: 70, creatinine: 68, alp: 80, tshMUL: 2.0, hbGramsPerLitre: 135, esrOrCrp: 'normal' },
     previousTreatments: [
       { agent: 'teriparatide', durationMonths: 24, reasonStopped: 'completed_course', currentlyOn: false, monthsSinceLastDose: 12 },
     ],
@@ -1959,8 +2110,10 @@ function tc71(): TCResult {
   const patient = basePatient({
     age: 68,
     sex: 'female',
+    heightCm: 162,
+    weightKg: 65.6,
     dexaResults: { lumbarSpineTScore: -2.8, totalHipTScore: -2.6, femoralNeckTScore: -2.6, forearmTScore: null },
-    bloodResults: { adjustedCalciumMmol: 2.32, vitaminDNmol: 70, egfr: 65, alp: 80, tshMUL: 2.0, hbGramsPerLitre: 135, esrOrCrp: 'normal' },
+    bloodResults: { adjustedCalciumMmol: 2.32, vitaminDNmol: 70, creatinine: 76, alp: 80, tshMUL: 2.0, hbGramsPerLitre: 135, esrOrCrp: 'normal' },
   });
   const decision = runClinicalDecision(patient);
   // The engine does not actively push ibandronate; this is intentional
@@ -1981,12 +2134,14 @@ function tc72(): TCResult {
   const patient = basePatient({
     age: 70,
     sex: 'female',
+    heightCm: 162,
+    weightKg: 65.6,
     priorFragilityFracture: true,
     priorVertebralFracture: true,
     numberOfPriorFractures: 2,
     recentVertebralFractureYears: 1,
     dexaResults: { lumbarSpineTScore: -3.0, totalHipTScore: -2.8, femoralNeckTScore: -2.8, forearmTScore: null },
-    bloodResults: { adjustedCalciumMmol: 2.32, vitaminDNmol: 70, egfr: 70, alp: 80, tshMUL: 2.0, hbGramsPerLitre: 135, esrOrCrp: 'normal' },
+    bloodResults: { adjustedCalciumMmol: 2.32, vitaminDNmol: 70, creatinine: 68, alp: 80, tshMUL: 2.0, hbGramsPerLitre: 135, esrOrCrp: 'normal' },
     currentTreatment: { agent: 'romosozumab', durationMonths: 6, reasonStopped: null, currentlyOn: true, monthsSinceLastDose: 0 },
   });
   const decision = runClinicalDecision(patient);
@@ -2007,9 +2162,11 @@ function tc73(): TCResult {
   const patient = basePatient({
     age: 78,
     sex: 'female',
+    heightCm: 162,
+    weightKg: 65.6,
     priorHipFracture: false,
     dexaResults: { lumbarSpineTScore: -2.8, totalHipTScore: -2.7, femoralNeckTScore: -2.7, forearmTScore: null },
-    bloodResults: { adjustedCalciumMmol: 2.32, vitaminDNmol: 70, egfr: 60, alp: 80, tshMUL: 2.0, hbGramsPerLitre: 135, esrOrCrp: 'normal' },
+    bloodResults: { adjustedCalciumMmol: 2.32, vitaminDNmol: 70, creatinine: 70, alp: 80, tshMUL: 2.0, hbGramsPerLitre: 135, esrOrCrp: 'normal' },
     currentTreatment: { agent: 'ibandronate', durationMonths: 24, reasonStopped: null, currentlyOn: true, monthsSinceLastDose: 0 },
   });
   const decision = runClinicalDecision(patient);
@@ -2039,12 +2196,14 @@ function tc74(): TCResult {
   const patient = basePatient({
     age: 71,
     sex: 'female',
+    heightCm: 162,
+    weightKg: 65.6,
     priorFragilityFracture: true,
     priorVertebralFracture: true,
     numberOfPriorFractures: 2,
     recentVertebralFractureYears: 0.5,
     dexaResults: { lumbarSpineTScore: -3.6, totalHipTScore: -3.0, femoralNeckTScore: -3.0, forearmTScore: null },
-    bloodResults: { adjustedCalciumMmol: 2.32, vitaminDNmol: 70, egfr: 70, alp: 80, tshMUL: 2.0, hbGramsPerLitre: 135, esrOrCrp: 'normal' },
+    bloodResults: { adjustedCalciumMmol: 2.32, vitaminDNmol: 70, creatinine: 67, alp: 80, tshMUL: 2.0, hbGramsPerLitre: 135, esrOrCrp: 'normal' },
     currentTreatment: { agent: 'alendronate', durationMonths: 84, reasonStopped: null, currentlyOn: true, monthsSinceLastDose: 0 },
   });
   const decision = runClinicalDecision(patient);
@@ -2074,12 +2233,14 @@ function tc75(): TCResult {
   const patient = basePatient({
     age: 71,
     sex: 'female',
+    heightCm: 162,
+    weightKg: 65.6,
     priorFragilityFracture: true,
     priorVertebralFracture: true,
     numberOfPriorFractures: 2,
     recentVertebralFractureYears: 0.5,
     dexaResults: { lumbarSpineTScore: -3.6, totalHipTScore: -3.0, femoralNeckTScore: -3.0, forearmTScore: null },
-    bloodResults: { adjustedCalciumMmol: 2.32, vitaminDNmol: 70, egfr: 30, alp: 80, tshMUL: 2.0, hbGramsPerLitre: 130, esrOrCrp: 'normal' },
+    bloodResults: { adjustedCalciumMmol: 2.32, vitaminDNmol: 70, creatinine: 156, alp: 80, tshMUL: 2.0, hbGramsPerLitre: 130, esrOrCrp: 'normal' },
   });
   const decision = runClinicalDecision(patient);
   check(failures, 'denosumab recommended (renal CI to BPs)',
@@ -2103,12 +2264,14 @@ function tc76(): TCResult {
   const patient = basePatient({
     age: 72,
     sex: 'female',
+    heightCm: 162,
+    weightKg: 65.6,
     priorFragilityFracture: true,
     dexaResults: { lumbarSpineTScore: -2.8, totalHipTScore: -2.6, femoralNeckTScore: -2.6, forearmTScore: null },
     bloodResults: {
       adjustedCalciumMmol: 2.35, // normal — Step 2 (dual blocker) must NOT fire
       vitaminDNmol: 40,           // 25 < 40 < 50: insufficient, not severe
-      egfr: 30,
+      creatinine: 154,
       alp: 80,
       tshMUL: 2.0,
       hbGramsPerLitre: 135,
@@ -2151,14 +2314,15 @@ function tc76_v131(): TCResult {
   const patient = basePatient({
     age: 62,
     sex: 'female',
-    bmi: 24,
+    heightCm: 162,
+    weightKg: 63,
     fraxMOFPercent: null,
     fraxHipPercent: null,
     dexaResults: null,
     bloodResults: {
       adjustedCalciumMmol: 2.32,
       vitaminDNmol: 70,
-      egfr: 75,
+      creatinine: 68,
       alp: 80,
       tshMUL: 2.0,
       hbGramsPerLitre: 135,
@@ -2217,12 +2381,14 @@ function tc78(): TCResult {
   const patient = basePatient({
     age: 65,
     sex: 'female',
+    heightCm: 162,
+    weightKg: 65.6,
     parentalHipFracture: true,
     dexaResults: { lumbarSpineTScore: -2.4, totalHipTScore: -0.5, femoralNeckTScore: -0.4, forearmTScore: null },
     fraxMOFPercent: 12,
     fraxHipPercent: 4,
     fraxCalculatedWithBMD: true,
-    bloodResults: { adjustedCalciumMmol: 2.3, vitaminDNmol: 60, egfr: 80, alp: 80, tshMUL: 2.0, hbGramsPerLitre: 135, esrOrCrp: 'normal' },
+    bloodResults: { adjustedCalciumMmol: 2.3, vitaminDNmol: 60, creatinine: 64, alp: 80, tshMUL: 2.0, hbGramsPerLitre: 135, esrOrCrp: 'normal' },
   });
   const decision = runClinicalDecision(patient);
 
@@ -2255,12 +2421,14 @@ function tc79(): TCResult {
   const patient = basePatient({
     age: 65,
     sex: 'female',
+    heightCm: 162,
+    weightKg: 65.6,
     parentalHipFracture: true,
     dexaResults: { lumbarSpineTScore: -0.4, totalHipTScore: -2.4, femoralNeckTScore: -2.4, forearmTScore: null },
     fraxMOFPercent: 10,
     fraxHipPercent: 3,
     fraxCalculatedWithBMD: true,
-    bloodResults: { adjustedCalciumMmol: 2.3, vitaminDNmol: 60, egfr: 80, alp: 80, tshMUL: 2.0, hbGramsPerLitre: 135, esrOrCrp: 'normal' },
+    bloodResults: { adjustedCalciumMmol: 2.3, vitaminDNmol: 60, creatinine: 64, alp: 80, tshMUL: 2.0, hbGramsPerLitre: 135, esrOrCrp: 'normal' },
   });
   const decision = runClinicalDecision(patient);
 
@@ -2294,12 +2462,14 @@ function tc80(): TCResult {
   const patient = basePatient({
     age: 65,
     sex: 'female',
+    heightCm: 162,
+    weightKg: 65.6,
     lowerLimbAmputation: true,
     learningDisabilities: true,
     fraxMOFPercent: 2,
     fraxHipPercent: 0.5,
     fraxCalculatedWithBMD: true,
-    bloodResults: { adjustedCalciumMmol: 2.3, vitaminDNmol: 60, egfr: 80, alp: 80, tshMUL: 2.0, hbGramsPerLitre: 135, esrOrCrp: 'normal' },
+    bloodResults: { adjustedCalciumMmol: 2.3, vitaminDNmol: 60, creatinine: 64, alp: 80, tshMUL: 2.0, hbGramsPerLitre: 135, esrOrCrp: 'normal' },
   });
   const decision = runClinicalDecision(patient);
 
@@ -2331,9 +2501,10 @@ function tc81(): TCResult {
   const patient = basePatient({
     age: 65,
     sex: 'female',
-    bmi: 25,
+    heightCm: 162,
+    weightKg: 65.6,
     noRiskFactorOverride: true,
-    bloodResults: { adjustedCalciumMmol: 2.3, vitaminDNmol: 60, egfr: 80, alp: 80, tshMUL: 2.0, hbGramsPerLitre: 135, esrOrCrp: 'normal' },
+    bloodResults: { adjustedCalciumMmol: 2.3, vitaminDNmol: 60, creatinine: 64, alp: 80, tshMUL: 2.0, hbGramsPerLitre: 135, esrOrCrp: 'normal' },
   });
   const decision = runClinicalDecision(patient);
 
@@ -2367,11 +2538,13 @@ function tc82(): TCResult {
   const patient = basePatient({
     age: 65,
     sex: 'female',
+    heightCm: 162,
+    weightKg: 65.6,
     parentalHipFracture: true, // passes gate; not in Table 2 → no FRAX adj
     fraxMOFPercent: 15,
     fraxHipPercent: 3,
     fraxCalculatedWithBMD: false,
-    bloodResults: { adjustedCalciumMmol: 2.3, vitaminDNmol: 60, egfr: 80, alp: 80, tshMUL: 2.0, hbGramsPerLitre: 135, esrOrCrp: 'normal' },
+    bloodResults: { adjustedCalciumMmol: 2.3, vitaminDNmol: 60, creatinine: 64, alp: 80, tshMUL: 2.0, hbGramsPerLitre: 135, esrOrCrp: 'normal' },
   });
   const decision = runClinicalDecision(patient);
 
@@ -2395,9 +2568,11 @@ function tc83(): TCResult {
   const patient = basePatient({
     age: 70,
     sex: 'female',
+    heightCm: 162,
+    weightKg: 65.6,
     priorFragilityFracture: true,
     bmdUnavailable: true,
-    bloodResults: { adjustedCalciumMmol: 2.3, vitaminDNmol: 60, egfr: 80, alp: 80, tshMUL: 2.0, hbGramsPerLitre: 135, esrOrCrp: 'normal' },
+    bloodResults: { adjustedCalciumMmol: 2.3, vitaminDNmol: 60, creatinine: 60, alp: 80, tshMUL: 2.0, hbGramsPerLitre: 135, esrOrCrp: 'normal' },
   });
   const decision = runClinicalDecision(patient);
 
@@ -2423,12 +2598,14 @@ function tc84(): TCResult {
   const patient = basePatient({
     age: 70,
     sex: 'female',
+    heightCm: 162,
+    weightKg: 65.6,
     parentalHipFracture: true, // passes gate
     bmdUnavailable: true,
     fraxMOFPercent: 22,
     fraxHipPercent: 4,
     fraxCalculatedWithBMD: false,
-    bloodResults: { adjustedCalciumMmol: 2.3, vitaminDNmol: 60, egfr: 80, alp: 80, tshMUL: 2.0, hbGramsPerLitre: 135, esrOrCrp: 'normal' },
+    bloodResults: { adjustedCalciumMmol: 2.3, vitaminDNmol: 60, creatinine: 60, alp: 80, tshMUL: 2.0, hbGramsPerLitre: 135, esrOrCrp: 'normal' },
   });
   const decision = runClinicalDecision(patient);
 
@@ -2453,12 +2630,14 @@ function tc85(): TCResult {
   const patient = basePatient({
     age: 70,
     sex: 'female',
+    heightCm: 162,
+    weightKg: 65.6,
     parentalHipFracture: true,
     bmdUnavailable: true,
     fraxMOFPercent: 12,
     fraxHipPercent: 2.5,
     fraxCalculatedWithBMD: false,
-    bloodResults: { adjustedCalciumMmol: 2.3, vitaminDNmol: 60, egfr: 80, alp: 80, tshMUL: 2.0, hbGramsPerLitre: 135, esrOrCrp: 'normal' },
+    bloodResults: { adjustedCalciumMmol: 2.3, vitaminDNmol: 60, creatinine: 60, alp: 80, tshMUL: 2.0, hbGramsPerLitre: 135, esrOrCrp: 'normal' },
   });
   const decision = runClinicalDecision(patient);
 
@@ -2483,12 +2662,14 @@ function tc86(): TCResult {
   const patient = basePatient({
     age: 60,
     sex: 'female',
+    heightCm: 162,
+    weightKg: 65.6,
     parentalHipFracture: true,
     dexaResults: { lumbarSpineTScore: -1.0, totalHipTScore: -1.5, femoralNeckTScore: -1.4, forearmTScore: -2.7 },
     fraxMOFPercent: 8,
     fraxHipPercent: 1.5,
     fraxCalculatedWithBMD: true,
-    bloodResults: { adjustedCalciumMmol: 2.3, vitaminDNmol: 60, egfr: 80, alp: 80, tshMUL: 2.0, hbGramsPerLitre: 135, esrOrCrp: 'normal' },
+    bloodResults: { adjustedCalciumMmol: 2.3, vitaminDNmol: 60, creatinine: 68, alp: 80, tshMUL: 2.0, hbGramsPerLitre: 135, esrOrCrp: 'normal' },
   });
   const decision = runClinicalDecision(patient);
 
@@ -2527,12 +2708,14 @@ function tc87(): TCResult {
   const patient = basePatient({
     age: 65,
     sex: 'female',
+    heightCm: 162,
+    weightKg: 65.6,
     currentSmoker: true,
     dexaResults: { lumbarSpineTScore: -1.8, totalHipTScore: -2.1, femoralNeckTScore: -2.0, forearmTScore: null },
     fraxMOFPercent: 12.0,
     fraxHipPercent: 2.5,
     fraxCalculatedWithBMD: true,
-    bloodResults: { adjustedCalciumMmol: 2.32, vitaminDNmol: 70, egfr: 75, alp: 80, tshMUL: 2.0, hbGramsPerLitre: 135, esrOrCrp: 'normal' },
+    bloodResults: { adjustedCalciumMmol: 2.32, vitaminDNmol: 70, creatinine: 68, alp: 80, tshMUL: 2.0, hbGramsPerLitre: 135, esrOrCrp: 'normal' },
     currentTreatment: {
       agent: 'alendronate',
       durationMonths: 60,
@@ -2603,6 +2786,8 @@ function tc88(): TCResult {
   const patient = basePatient({
     age: 75,
     sex: 'female',
+    heightCm: 162,
+    weightKg: 65.6,
     priorFragilityFracture: true,
     priorVertebralFracture: true,
     numberOfPriorFractures: 1,
@@ -2611,7 +2796,7 @@ function tc88(): TCResult {
     fraxMOFPercent: 18.0,
     fraxHipPercent: 5.0,
     fraxCalculatedWithBMD: true,
-    bloodResults: { adjustedCalciumMmol: 2.32, vitaminDNmol: 70, egfr: 65, alp: 80, tshMUL: 2.0, hbGramsPerLitre: 135, esrOrCrp: 'normal' },
+    bloodResults: { adjustedCalciumMmol: 2.32, vitaminDNmol: 70, creatinine: 68, alp: 80, tshMUL: 2.0, hbGramsPerLitre: 135, esrOrCrp: 'normal' },
     currentTreatment: {
       agent: 'alendronate',
       durationMonths: 120,
@@ -2677,6 +2862,8 @@ function tc89(): TCResult {
   const patient = basePatient({
     age: 70,
     sex: 'female',
+    heightCm: 162,
+    weightKg: 65.6,
     priorFragilityFracture: true,
     priorVertebralFracture: true,
     recentVertebralFractureYears: 0,
@@ -2686,7 +2873,7 @@ function tc89(): TCResult {
     fraxMOFPercent: 22.0,
     fraxHipPercent: 4.5,
     fraxCalculatedWithBMD: true,
-    bloodResults: { adjustedCalciumMmol: 2.35, vitaminDNmol: 70, egfr: 65, alp: 80, tshMUL: 2.0, hbGramsPerLitre: 135, esrOrCrp: 'normal' },
+    bloodResults: { adjustedCalciumMmol: 2.35, vitaminDNmol: 70, creatinine: 73, alp: 80, tshMUL: 2.0, hbGramsPerLitre: 135, esrOrCrp: 'normal' },
     currentTreatment: {
       agent: 'alendronate',
       durationMonths: 36,
@@ -2747,6 +2934,8 @@ function tc90(): TCResult {
   const patient = basePatient({
     age: 72,
     sex: 'female',
+    heightCm: 162,
+    weightKg: 65.6,
     priorFragilityFracture: true,
     priorVertebralFracture: true,
     recentVertebralFractureYears: 1, // 14 months ≈ 1y (engine VHR fires at ≤2)
@@ -2759,7 +2948,7 @@ function tc90(): TCResult {
     bloodResults: {
       adjustedCalciumMmol: null, // MISSING — drives Pre.2 Tier 1 + Tier 3
       vitaminDNmol: 62,
-      egfr: 68,
+      creatinine: 68,
       alp: 80,
       tshMUL: 2.0,
       hbGramsPerLitre: 135,
@@ -2831,6 +3020,8 @@ function tc91(): TCResult {
   const patient = basePatient({
     age: 68,
     sex: 'female',
+    heightCm: 162,
+    weightKg: 65.6,
     priorFragilityFracture: true,
     priorVertebralFracture: true,
     recentVertebralFractureYears: 1, // 10 months ≈ 1y (engine VHR fires at ≤2)
@@ -2841,7 +3032,7 @@ function tc91(): TCResult {
     fraxHipPercent: 8.0,
     fraxCalculatedWithBMD: true,
     refusesInjections: true, // denosumab declined
-    bloodResults: { adjustedCalciumMmol: 2.32, vitaminDNmol: 70, egfr: 28, alp: 80, tshMUL: 2.0, hbGramsPerLitre: 135, esrOrCrp: 'normal' },
+    bloodResults: { adjustedCalciumMmol: 2.32, vitaminDNmol: 70, creatinine: 175, alp: 80, tshMUL: 2.0, hbGramsPerLitre: 135, esrOrCrp: 'normal' },
   });
   const decision = runClinicalDecision(patient);
 
@@ -2883,6 +3074,8 @@ function tc92(): TCResult {
   const patient = basePatient({
     age: 70,
     sex: 'female',
+    heightCm: 162,
+    weightKg: 65.6,
     priorFragilityFracture: true,
     priorVertebralFracture: true,
     recentVertebralFractureYears: 0, // 8 months — within 2y
@@ -2893,7 +3086,7 @@ function tc92(): TCResult {
     fraxHipPercent: 8.0,
     fraxCalculatedWithBMD: true,
     priorMIOrStroke: true, // prior MI 5y ago
-    bloodResults: { adjustedCalciumMmol: 2.32, vitaminDNmol: 70, egfr: 70, alp: 80, tshMUL: 2.0, hbGramsPerLitre: 135, esrOrCrp: 'normal' },
+    bloodResults: { adjustedCalciumMmol: 2.32, vitaminDNmol: 70, creatinine: 68, alp: 80, tshMUL: 2.0, hbGramsPerLitre: 135, esrOrCrp: 'normal' },
   });
   const decision = runClinicalDecision(patient);
 
@@ -2951,6 +3144,8 @@ function tc93(): TCResult {
   const patient = basePatient({
     age: 62,
     sex: 'female',
+    heightCm: 162,
+    weightKg: 65.6,
     glucocorticoidUse: { current: true, durationMonths: 18, dose: 'medium' },
     glucocorticoidDoseMgDay: 8,
     glucocorticoidStatus: 'current',
@@ -2962,7 +3157,7 @@ function tc93(): TCResult {
     bloodResults: {
       adjustedCalciumMmol: null, // MISSING — drives Pre.2 Tier 1 (romo suffix) + Tier 3 corrected-Ca
       vitaminDNmol: 70,
-      egfr: null, // MISSING — drives Pre.1 Tier 1 eGFR (teri suffix)
+      creatinine: null, // MISSING — drives Pre.1 Tier 1 eGFR (teri suffix)
       alp: 80,
       tshMUL: 2.0,
       hbGramsPerLitre: 135,
@@ -3009,7 +3204,7 @@ function tc93(): TCResult {
     !!pthEntry && /teriparatide/i.test(pthEntry.reason));
 
   // Pre.1 eGFR Tier 1 with teri-specific suffix (eGFR missing).
-  const egfrEntry = decision.investigationsNeeded.find(i => i.investigation === 'egfr' && i.tier === 1);
+  const egfrEntry = decision.investigationsNeeded.find(i => i.investigation === 'creatinine' && i.tier === 1);
   check(failures, 'Tier 1 eGFR entry fires (eGFR missing) with teriparatide suffix',
     !!egfrEntry && /teriparatide/i.test(egfrEntry.reason));
 
@@ -3030,8 +3225,8 @@ function tc93(): TCResult {
   // giop_monitoring fires with A2-impl-corrected text.
   check(failures, 'giop_monitoring flag fires',
     hasFlag(decision, 'giop_monitoring'));
-  check(failures, 'giop_monitoring includes ALP in annual bloods',
-    hasFlagText(decision, 'calcium, vitamin D, eGFR, ALP'));
+  check(failures, 'giop_monitoring includes ALP in annual bloods (v1.46: eGFR→CrCl)',
+    hasFlagText(decision, 'calcium, vitamin D, CrCl, ALP'));
   check(failures, 'giop_monitoring includes FRAX-at-DEXA-repeat sentence',
     hasFlagText(decision, 'Reassess FRAX with BMD at each DEXA repeat'));
 
@@ -3059,6 +3254,8 @@ function tc94(): TCResult {
   const patient = basePatient({
     age: 65,
     sex: 'female',
+    heightCm: 162,
+    weightKg: 65.6,
     priorFragilityFracture: true,
     priorVertebralFracture: true,
     recentVertebralFractureYears: 4, // OLD — outside VHR-1's 24mo window
@@ -3069,7 +3266,7 @@ function tc94(): TCResult {
     fraxMOFPercent: 20.0,
     fraxHipPercent: 4.2,
     fraxCalculatedWithBMD: true,
-    bloodResults: { adjustedCalciumMmol: 2.32, vitaminDNmol: 70, egfr: 75, alp: 80, tshMUL: 2.0, hbGramsPerLitre: 135, esrOrCrp: 'normal' },
+    bloodResults: { adjustedCalciumMmol: 2.32, vitaminDNmol: 70, creatinine: 68, alp: 80, tshMUL: 2.0, hbGramsPerLitre: 135, esrOrCrp: 'normal' },
   });
   const decision = runClinicalDecision(patient);
 
@@ -3130,13 +3327,15 @@ function tc95(): TCResult {
   const patient = basePatient({
     age: 55,
     sex: 'female',
+    heightCm: 162,
+    weightKg: 65.6,
     currentSmoker: true,
     parentalHipFracture: true,
     dexaResults: { lumbarSpineTScore: -2.2, totalHipTScore: -2.0, femoralNeckTScore: -1.9, forearmTScore: null },
     fraxMOFPercent: 17.0,
     fraxHipPercent: 1.8,
     fraxCalculatedWithBMD: true,
-    bloodResults: { adjustedCalciumMmol: 2.32, vitaminDNmol: 70, egfr: 80, alp: 80, tshMUL: 2.0, hbGramsPerLitre: 135, esrOrCrp: 'normal' },
+    bloodResults: { adjustedCalciumMmol: 2.32, vitaminDNmol: 70, creatinine: 72, alp: 80, tshMUL: 2.0, hbGramsPerLitre: 135, esrOrCrp: 'normal' },
   });
   const decision = runClinicalDecision(patient);
 
@@ -3177,7 +3376,7 @@ function tc95(): TCResult {
     !!pthEntry && /teriparatide/i.test(pthEntry.reason));
   // Pre.1 eGFR Tier 1 entry does NOT fire — eGFR replete (present + normal) means the
   // missing-only Tier 1 push doesn't fire. Document this gate state explicitly.
-  const egfrEntry = decision.investigationsNeeded.find(i => i.investigation === 'egfr' && i.tier === 1);
+  const egfrEntry = decision.investigationsNeeded.find(i => i.investigation === 'creatinine' && i.tier === 1);
   check(failures, 'Pre.1 eGFR Tier 1 entry NOT present (eGFR replete, not missing)',
     !egfrEntry);
   // Pre.2 / romoRef — romosozumab_cv_risk_framing fires for female VHR without
@@ -3227,6 +3426,8 @@ function tc96(): TCResult {
   const patient = basePatient({
     age: 72,
     sex: 'female',
+    heightCm: 162,
+    weightKg: 65.6,
     dexaResults: { lumbarSpineTScore: -3.0, totalHipTScore: -2.7, femoralNeckTScore: -2.6, forearmTScore: null },
     fraxMOFPercent: 22.0,
     fraxHipPercent: 5.0,
@@ -3234,7 +3435,7 @@ function tc96(): TCResult {
     bloodResults: {
       adjustedCalciumMmol: 2.05, // hypoCa
       vitaminDNmol: 65,          // replete
-      egfr: 62,                  // normal
+      creatinine: 75,                  // normal
       alp: 80, tshMUL: 2.0, hbGramsPerLitre: 135, esrOrCrp: 'normal',
     },
   });
@@ -3305,6 +3506,8 @@ function tc97(): TCResult {
   const patient = basePatient({
     age: 68,
     sex: 'female',
+    heightCm: 162,
+    weightKg: 65.6,
     dexaResults: { lumbarSpineTScore: -2.8, totalHipTScore: -2.6, femoralNeckTScore: -2.5, forearmTScore: null },
     fraxMOFPercent: 20.0,
     fraxHipPercent: 4.5,
@@ -3312,7 +3515,7 @@ function tc97(): TCResult {
     bloodResults: {
       adjustedCalciumMmol: null, // missing
       vitaminDNmol: 62,          // replete
-      egfr: 70,                  // normal
+      creatinine: 70,                  // normal
       alp: 80, tshMUL: 2.0, hbGramsPerLitre: 135, esrOrCrp: 'normal',
     },
   });
@@ -3373,6 +3576,8 @@ function tc98(): TCResult {
   const patient = basePatient({
     age: 74,
     sex: 'female',
+    heightCm: 162,
+    weightKg: 65.6,
     priorFragilityFracture: true,
     priorVertebralFracture: true,
     recentVertebralFractureYears: 2, // VHR-1 trigger (≤ 2y)
@@ -3386,7 +3591,7 @@ function tc98(): TCResult {
     bloodResults: {
       adjustedCalciumMmol: 2.05, // new hypoCa on routine monitoring
       vitaminDNmol: 60,           // replete
-      egfr: 55,                   // CKD stage 3a, not severe
+      creatinine: 82,                   // CKD stage 3a, not severe
       alp: 80, tshMUL: 2.0, hbGramsPerLitre: 135, esrOrCrp: 'normal',
     },
     currentTreatment: {
@@ -3452,6 +3657,8 @@ function tc99(): TCResult {
   const patient = basePatient({
     age: 69,
     sex: 'female',
+    heightCm: 162,
+    weightKg: 65.6,
     dexaResults: { lumbarSpineTScore: -2.9, totalHipTScore: -2.7, femoralNeckTScore: -2.6, forearmTScore: null },
     fraxMOFPercent: 21.0,
     fraxHipPercent: 4.8,
@@ -3459,7 +3666,7 @@ function tc99(): TCResult {
     bloodResults: {
       adjustedCalciumMmol: 2.35, // normal
       vitaminDNmol: 42,           // insufficient (<50, >25)
-      egfr: 68,                   // normal
+      creatinine: 71,                   // normal
       alp: 80, tshMUL: 2.0, hbGramsPerLitre: 135, esrOrCrp: 'normal',
     },
   });
@@ -3527,6 +3734,8 @@ function tc100(): TCResult {
   const patient = basePatient({
     age: 67,
     sex: 'female',
+    heightCm: 162,
+    weightKg: 65.6,
     dexaResults: { lumbarSpineTScore: -2.7, totalHipTScore: -2.6, femoralNeckTScore: -2.5, forearmTScore: null },
     fraxMOFPercent: 19.5,
     fraxHipPercent: 4.0,
@@ -3534,7 +3743,7 @@ function tc100(): TCResult {
     bloodResults: {
       adjustedCalciumMmol: 2.32, // normal
       vitaminDNmol: null,         // missing
-      egfr: 72,                   // normal
+      creatinine: 69,                   // normal
       alp: 80, tshMUL: 2.0, hbGramsPerLitre: 135, esrOrCrp: 'normal',
     },
   });
@@ -3607,6 +3816,8 @@ function tc101(): TCResult {
   const patient = basePatient({
     age: 69,
     sex: 'female',
+    heightCm: 162,
+    weightKg: 65.6,
     dexaResults: { lumbarSpineTScore: -2.9, totalHipTScore: -2.7, femoralNeckTScore: -2.6, forearmTScore: null },
     fraxMOFPercent: 22.0,
     fraxHipPercent: 5.0,
@@ -3614,7 +3825,7 @@ function tc101(): TCResult {
     bloodResults: {
       adjustedCalciumMmol: 2.35,
       vitaminDNmol: 42,             // insufficient — <50, >25
-      egfr: 25,                     // stage 4 CKD — renally CI's all BPs
+      creatinine: 194,                     // stage 4 CKD — renally CI's all BPs
       alp: 80, tshMUL: 2.0, hbGramsPerLitre: 135, esrOrCrp: 'normal',
     },
   });
@@ -3685,6 +3896,8 @@ function tc102(): TCResult {
   const patient = basePatient({
     age: 67,
     sex: 'female',
+    heightCm: 162,
+    weightKg: 65.6,
     dexaResults: { lumbarSpineTScore: -2.7, totalHipTScore: -2.6, femoralNeckTScore: -2.5, forearmTScore: null },
     fraxMOFPercent: 20.0,
     fraxHipPercent: 4.0,
@@ -3692,7 +3905,7 @@ function tc102(): TCResult {
     bloodResults: {
       adjustedCalciumMmol: 2.32,
       vitaminDNmol: null,           // MISSING
-      egfr: 25,                     // stage 4 CKD
+      creatinine: 199,                     // stage 4 CKD
       alp: 80, tshMUL: 2.0, hbGramsPerLitre: 135, esrOrCrp: 'normal',
     },
   });
@@ -3770,13 +3983,15 @@ function tc103(): TCResult {
   const patient = basePatient({
     age: 65,
     sex: 'female',
+    heightCm: 162,
+    weightKg: 65.6,
     type1Diabetes: true,
     type2Diabetes: false,
     dexaResults: { lumbarSpineTScore: -2.7, totalHipTScore: -2.5, femoralNeckTScore: -2.6, forearmTScore: null },
     fraxMOFPercent: 20.0,
     fraxHipPercent: 3.5,
     fraxCalculatedWithBMD: true,
-    bloodResults: { adjustedCalciumMmol: 2.32, vitaminDNmol: 70, egfr: 75, alp: 80, tshMUL: 2.0, hbGramsPerLitre: 135, esrOrCrp: 'normal' },
+    bloodResults: { adjustedCalciumMmol: 2.32, vitaminDNmol: 70, creatinine: 68, alp: 80, tshMUL: 2.0, hbGramsPerLitre: 135, esrOrCrp: 'normal' },
   });
   const decision = runClinicalDecision(patient);
 
@@ -3811,13 +4026,15 @@ function tc104(): TCResult {
   const patient = basePatient({
     age: 65,
     sex: 'female',
+    heightCm: 162,
+    weightKg: 65.6,
     type1Diabetes: true,
     type2Diabetes: true,
     dexaResults: { lumbarSpineTScore: -2.7, totalHipTScore: -2.5, femoralNeckTScore: -2.6, forearmTScore: null },
     fraxMOFPercent: 20.0,
     fraxHipPercent: 3.5,
     fraxCalculatedWithBMD: true,
-    bloodResults: { adjustedCalciumMmol: 2.32, vitaminDNmol: 70, egfr: 75, alp: 80, tshMUL: 2.0, hbGramsPerLitre: 135, esrOrCrp: 'normal' },
+    bloodResults: { adjustedCalciumMmol: 2.32, vitaminDNmol: 70, creatinine: 68, alp: 80, tshMUL: 2.0, hbGramsPerLitre: 135, esrOrCrp: 'normal' },
   });
   const decision = runClinicalDecision(patient);
 
@@ -3850,6 +4067,8 @@ function tc105(): TCResult {
   const patient = basePatient({
     age: 70,
     sex: 'female',
+    heightCm: 162,
+    weightKg: 65.6,
     priorFragilityFracture: true,        // distal radius wrist fx
     recentFractureWithin2Years: true,    // 8 months ago → within 24mo
     numberOfPriorFractures: 1,
@@ -3857,7 +4076,7 @@ function tc105(): TCResult {
     fraxMOFPercent: 25.0,
     fraxHipPercent: 5.0,
     fraxCalculatedWithBMD: true,
-    bloodResults: { adjustedCalciumMmol: 2.32, vitaminDNmol: 70, egfr: 70, alp: 80, tshMUL: 2.0, hbGramsPerLitre: 135, esrOrCrp: 'normal' },
+    bloodResults: { adjustedCalciumMmol: 2.32, vitaminDNmol: 70, creatinine: 68, alp: 80, tshMUL: 2.0, hbGramsPerLitre: 135, esrOrCrp: 'normal' },
   });
   const decision = runClinicalDecision(patient);
 
@@ -3895,6 +4114,8 @@ function tc106(): TCResult {
   const patient = basePatient({
     age: 65,
     sex: 'female',
+    heightCm: 162,
+    weightKg: 65.6,
     priorFragilityFracture: true,
     priorVertebralFracture: true,
     recentVertebralFractureYears: 1,
@@ -3905,7 +4126,7 @@ function tc106(): TCResult {
     fraxMOFPercent: 28.0,
     fraxHipPercent: 6.5,
     fraxCalculatedWithBMD: true,
-    bloodResults: { adjustedCalciumMmol: 2.32, vitaminDNmol: 70, egfr: 70, alp: 80, tshMUL: 2.0, hbGramsPerLitre: 135, esrOrCrp: 'normal' },
+    bloodResults: { adjustedCalciumMmol: 2.32, vitaminDNmol: 70, creatinine: 73, alp: 80, tshMUL: 2.0, hbGramsPerLitre: 135, esrOrCrp: 'normal' },
     currentTreatment: {
       agent: 'abaloparatide',
       durationMonths: 6,
@@ -3964,8 +4185,10 @@ function tc107(): TCResult {
   const patient = basePatient({
     age: 65,
     sex: 'female',
+    heightCm: 162,
+    weightKg: 65.6,
     dexaResults: { lumbarSpineTScore: -3.6, totalHipTScore: -2.8, femoralNeckTScore: -2.7, forearmTScore: null },
-    bloodResults: { adjustedCalciumMmol: 2.32, vitaminDNmol: 60, egfr: 75, alp: 80, tshMUL: 2.0, hbGramsPerLitre: 135, esrOrCrp: 'normal' },
+    bloodResults: { adjustedCalciumMmol: 2.32, vitaminDNmol: 60, creatinine: 68, alp: 80, tshMUL: 2.0, hbGramsPerLitre: 135, esrOrCrp: 'normal' },
   });
   const decision = runClinicalDecision(patient);
 
@@ -3995,8 +4218,8 @@ function tc107(): TCResult {
   check(failures, 'teriparatide present as first_line', !!teri && teri.tier === 'first_line');
   check(failures, 'teriparatide rationale references VERO Evidence Ib',
     !!teri && /VERO/i.test(teri.rationale));
-  check(failures, 'teriparatide preReferralChecks includes eGFR + PTH',
-    !!teri?.preReferralChecks && /eGFR/i.test(teri.preReferralChecks) && /PTH/i.test(teri.preReferralChecks));
+  check(failures, 'teriparatide preReferralChecks includes CrCl + PTH (v1.46)',
+    !!teri?.preReferralChecks && /CrCl/i.test(teri.preReferralChecks) && /PTH/i.test(teri.preReferralChecks));
 
   check(failures, 'romosozumab present as further_option', !!romo && romo.tier === 'further_option');
   check(failures, 'romosozumab references HSE MAP', !!romo && /HSE Managed Access Protocol/i.test(romo.reference));
@@ -4019,9 +4242,11 @@ function tc108(): TCResult {
   const patient = basePatient({
     age: 60,
     sex: 'male',
+    heightCm: 175,
+    weightKg: 76.6,
     priorFragilityFracture: true,
     dexaResults: { lumbarSpineTScore: -3.6, totalHipTScore: -2.8, femoralNeckTScore: -2.7, forearmTScore: null },
-    bloodResults: { adjustedCalciumMmol: 2.32, vitaminDNmol: 60, egfr: 75, alp: 80, tshMUL: 2.0, hbGramsPerLitre: 140, esrOrCrp: 'normal' },
+    bloodResults: { adjustedCalciumMmol: 2.32, vitaminDNmol: 60, creatinine: 100, alp: 80, tshMUL: 2.0, hbGramsPerLitre: 140, esrOrCrp: 'normal' },
   });
   const decision = runClinicalDecision(patient);
 
@@ -4065,11 +4290,13 @@ function tc109(): TCResult {
   const patient = basePatient({
     age: 66,
     sex: 'female',
+    heightCm: 162,
+    weightKg: 65.6,
     glucocorticoidStatus: 'current',
     glucocorticoidUse: { current: true, durationMonths: 4, dose: 'medium' },
     glucocorticoidDoseMgDay: 10,
     dexaResults: { lumbarSpineTScore: -3.5, totalHipTScore: -2.8, femoralNeckTScore: -2.7, forearmTScore: null },
-    bloodResults: { adjustedCalciumMmol: 2.32, vitaminDNmol: 60, egfr: 75, alp: 80, tshMUL: 2.0, hbGramsPerLitre: 135, esrOrCrp: 'normal' },
+    bloodResults: { adjustedCalciumMmol: 2.32, vitaminDNmol: 60, creatinine: 67, alp: 80, tshMUL: 2.0, hbGramsPerLitre: 135, esrOrCrp: 'normal' },
   });
   const decision = runClinicalDecision(patient);
 
@@ -4118,11 +4345,13 @@ function tc110(): TCResult {
   const patient = basePatient({
     age: 66,
     sex: 'female',
+    heightCm: 162,
+    weightKg: 65.6,
     glucocorticoidStatus: 'current',
     glucocorticoidUse: { current: true, durationMonths: 4, dose: 'medium' },
     glucocorticoidDoseMgDay: 10,
     dexaResults: { lumbarSpineTScore: -3.5, totalHipTScore: -2.8, femoralNeckTScore: -2.7, forearmTScore: null },
-    bloodResults: { adjustedCalciumMmol: 2.32, vitaminDNmol: 60, egfr: 75, alp: 80, tshMUL: 2.0, hbGramsPerLitre: 135, esrOrCrp: 'normal' },
+    bloodResults: { adjustedCalciumMmol: 2.32, vitaminDNmol: 60, creatinine: 67, alp: 80, tshMUL: 2.0, hbGramsPerLitre: 135, esrOrCrp: 'normal' },
     refusesInjections: true,
   });
   const decision = runClinicalDecision(patient);
@@ -4192,6 +4421,8 @@ function tc111(): TCResult {
   const patient = basePatient({
     age: 65,
     sex: 'female',
+    heightCm: 162,
+    weightKg: 65.6,
     priorFragilityFracture: true,
     priorHipFracture: true,
     recentFractureWithin2Years: false,
@@ -4199,7 +4430,7 @@ function tc111(): TCResult {
     fraxMOFPercent: 15.0,
     fraxHipPercent: 4.0,
     fraxCalculatedWithBMD: true,
-    bloodResults: { adjustedCalciumMmol: 2.32, vitaminDNmol: 70, egfr: 75, alp: 80, tshMUL: 2.0, hbGramsPerLitre: 135, esrOrCrp: 'normal' },
+    bloodResults: { adjustedCalciumMmol: 2.32, vitaminDNmol: 70, creatinine: 68, alp: 80, tshMUL: 2.0, hbGramsPerLitre: 135, esrOrCrp: 'normal' },
   });
   const decision = runClinicalDecision(patient);
 
@@ -4276,6 +4507,8 @@ function tc112(): TCResult {
   const patient = basePatient({
     age: 65,
     sex: 'female',
+    heightCm: 162,
+    weightKg: 65.6,
     priorFragilityFracture: true,
     priorHipFracture: true,
     recentFractureWithin2Years: true,
@@ -4311,8 +4544,8 @@ function tc112(): TCResult {
   const f2Flag = decision.flags.find(f => f.id === 'calcium_unmeasured_antiresorptive_block');
   check(failures, 'F2 (calcium_unmeasured_antiresorptive_block) fires URGENT',
     !!f2Flag && f2Flag.severity === 'urgent', `got severity=${f2Flag?.severity}`);
-  check(failures, 'F2 message anchors "Measure Ca, Vit D, and eGFR"',
-    !!f2Flag && /measure ca, vit d, and egfr/i.test(f2Flag.message));
+  check(failures, 'F2 message anchors "Measure Ca, Vit D, and serum creatinine" (v1.46)',
+    !!f2Flag && /measure ca, vit d, and serum creatinine/i.test(f2Flag.message));
 
   // NEGATIVE: F4 (vitd_unmeasured_parenteral_block) does NOT fire — dedup
   // contract. F2's broader message subsumes F4's guidance; emitting both
@@ -4349,6 +4582,8 @@ function tc113(): TCResult {
   const patient = basePatient({
     age: 65,
     sex: 'female',
+    heightCm: 162,
+    weightKg: 65.6,
     priorFragilityFracture: true,
     priorHipFracture: true,
     recentFractureWithin2Years: true,
@@ -4378,10 +4613,10 @@ function tc113(): TCResult {
   }
 
   // v1.47 pendingCaption contract — multi-missing variant.
-  // Locked wording: 'Complete Tier 1 bloods (calcium, Vit D, eGFR as
-  // applicable) before initiating treatment. Reassess once results available.'
+  // v1.46 wording update: 'eGFR' → 'serum creatinine' (engine consumes
+  // creatinine, computes CrCl via Cockcroft-Gault).
   const EXPECTED_MULTI =
-    'Complete Tier 1 bloods (calcium, Vit D, eGFR as applicable) before initiating treatment. Reassess once results available.';
+    'Complete Tier 1 bloods (calcium, Vit D, serum creatinine as applicable) before initiating treatment. Reassess once results available.';
   for (const rec of antiresorptives) {
     check(failures, `${rec.agent} pendingCaption populated`,
       typeof rec.pendingCaption === 'string' && rec.pendingCaption.length > 0,
@@ -4399,6 +4634,8 @@ function tc114(): TCResult {
   const patient = basePatient({
     age: 65,
     sex: 'female',
+    heightCm: 162,
+    weightKg: 65.6,
     priorFragilityFracture: true,
     priorHipFracture: true,
     recentFractureWithin2Years: true,
@@ -4406,7 +4643,7 @@ function tc114(): TCResult {
     bloodResults: {
       adjustedCalciumMmol: 2.3, // measured, in range → F2 skipped
       vitaminDNmol: null,        // missing → F4 fires (parenterals only)
-      egfr: 80,                  // normal renal → no CI cascade
+      creatinine: 64,                  // normal renal → no CI cascade
       alp: null,
       tshMUL: null,
       hbGramsPerLitre: null,

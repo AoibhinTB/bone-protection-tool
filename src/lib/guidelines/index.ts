@@ -7,6 +7,7 @@ import { assessInvestigationsNeeded } from './assessment';
 import { stratifyRisk, hasAnyClinicalRiskFactor } from './risk';
 import { deriveReferralSignals } from './referralSignals';
 import { applyPreTreatmentSafetyFilters } from './safetyFilters';
+import { computeBMI } from './thresholds';
 import { generateTreatmentOutput } from './treatment';
 import { generateBloodFlags } from './bloodFlags';
 import { generateRiskFactorsIdentified } from './riskFactorsSummary';
@@ -452,7 +453,8 @@ function lifestyleAdvice(patient: PatientInput): string[] {
   if (patient.alcoholUnitsPerWeek >= 14) {
     advice.push('Restrict alcohol to ≤2 units/day (≤14 units/week) — NOGG 2024 Strong. The FRAX risk threshold is ≥3 units/day; excess alcohol increases fall risk and suppresses osteoblast function.');
   }
-  if (patient.bmi !== null && patient.bmi < 18.5) {
+  const bmi = computeBMI(patient);
+  if (bmi !== null && bmi < 18.5) {
     advice.push('Low BMI (<18.5) is a FRAX risk factor — optimise nutritional intake and address any underlying cause.');
   }
 

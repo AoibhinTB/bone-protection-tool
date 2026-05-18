@@ -14,7 +14,8 @@ export const defaultPatient: PatientInput = {
   currentSmoker: false,
   vaping: false,
   alcoholUnitsPerWeek: 0,
-  bmi: null,
+  weightKg: null,    // v1.46 (formerly bmi: null) — used by computeBMI + computeCrCl
+  heightCm: null,    // v1.46 — used by computeBMI
   rheumatoidArthritis: false,
   secondaryOsteoporosis: [],
   type2Diabetes: false,

@@ -3,7 +3,7 @@
 // no IOS prescribing guideline document identified; NOGG 2024 covers DEXA case-finding independently)
 
 import type { PatientInput, InvestigationRecommendation, RiskCategory } from './types';
-import { BLOOD_RANGES, GIOP, isOnGC, gcDurationMonths, gcStoppedWithin12Months } from './thresholds';
+import { BLOOD_RANGES, GIOP, isOnGC, gcDurationMonths, gcStoppedWithin12Months, computeBMI } from './thresholds';
 import { deriveReferralSignals } from './referralSignals';
 
 export function assessInvestigationsNeeded(
@@ -142,21 +142,21 @@ export function assessInvestigationsNeeded(
     });
   }
 
-  const hasEGFR = (patient.bloodResults?.egfr ?? null) !== null;
-  if (!hasEGFR) {
+  const hasCreatinine = (patient.bloodResults?.creatinine ?? null) !== null;
+  if (!hasCreatinine) {
     // v1.36 A2-impl Pre.1 — append teriparatide-specific reason when an anabolic referral
-    // is active. Severe renal impairment is a contraindication; the GP confirms eGFR
+    // is active. Severe renal impairment is a contraindication; the GP confirms CrCl
     // before the referral letter so the specialist has a complete picture.
     const teriSuffix = referralSignals.teriparatideReferralFired
-      ? ' Teriparatide: contraindicated in severe renal impairment — confirm eGFR before referral.'
+      ? ' Teriparatide: contraindicated in severe renal impairment — confirm CrCl before referral.'
       : '';
     needed.push({
-      investigation: 'egfr',
+      investigation: 'creatinine',
       tier: 1,
       reason:
-        'eGFR required to select safe agent: ' +
-        'alendronate/zoledronate CI if eGFR <35; risedronate CI if eGFR <30. ' +
-        'eGFR <35 with denosumab: mandatory corrected calcium check 2 weeks after every injection.' +
+        'Serum creatinine required to compute CrCl (Cockcroft-Gault) and select safe agent: ' +
+        'all bisphosphonates CI at CrCl <=35; risedronate/ibandronate SPC strict is <30. ' +
+        'CrCl <30 with denosumab: mandatory corrected calcium check 2 weeks after every injection (SPC + FDA).' +
         teriSuffix,
       urgency: 'routine',
     });
@@ -523,7 +523,8 @@ function hasAnyOsteoporosisRiskFactor(p: PatientInput): boolean {
   if (p.parentalHipFracture) return true;
   if (p.currentSmoker) return true;
   if (p.alcoholUnitsPerWeek >= 21) return true;
-  if (p.bmi !== null && p.bmi < 19) return true;
+  const bmi = computeBMI(p);
+  if (bmi !== null && bmi < 19) return true;
   if (p.rheumatoidArthritis) return true;
   if (p.secondaryOsteoporosis.length > 0) return true;
   if (p.type2Diabetes) return true;

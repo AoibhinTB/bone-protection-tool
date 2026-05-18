@@ -3,6 +3,7 @@
 // effect on the decision are included; ticked factors with no effect are omitted.
 
 import type { PatientInput, ClinicalDecision, RiskFactorEffect } from './types';
+import { computeCrCl } from './thresholds';
 
 export function generateRiskFactorsIdentified(
   patient: PatientInput,
@@ -183,11 +184,11 @@ export function generateRiskFactorsIdentified(
 
   // Renal function — only material if it changed treatment
   const renalCI = decision.flags.some(f => f.id === 'renal_bp_ci' || f.id === 'denosumab_ckd_hypocalcaemia');
-  const egfr = patient.bloodResults?.egfr ?? null;
-  if (renalCI && egfr !== null) {
+  const crcl = computeCrCl(patient);
+  if (renalCI && crcl !== null) {
     items.push({
-      factor: `eGFR ${egfr} ml/min`,
-      effect: 'Bisphosphonates contraindicated/borderline; denosumab preferred (with mandatory Ca check 2 weeks post-injection)',
+      factor: `CrCl ${Math.round(crcl)} mL/min`,
+      effect: 'Bisphosphonates contraindicated/borderline; denosumab preferred (with mandatory Ca check 2 weeks post-injection at CrCl <30)',
     });
   }
 

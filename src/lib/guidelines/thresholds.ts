@@ -74,6 +74,44 @@ export function gcEverPreviouslyUsed(p: PatientInput): boolean {
          p.glucocorticoidStatus === 'stopped_over_12m_ago';
 }
 
+// ─── Renal function: CrCl via Cockcroft-Gault (v1.46) ─────────────────────
+// Replaces the prior raw eGFR field. Engine + UI + tests consume CrCl via
+// this helper.
+//
+// Cockcroft-Gault (SI):
+//   CrCl = ((140 − age) × weightKg × F) / serumCreatinine_µmol/L
+//   F = 1.04 (female), 1.23 (male)
+// Source: GPnotebook / MDCalc SI / UKidney. BNF expresses female as
+// F_male × 0.85 = 1.0455; rounded form 1.04 (vs 1.0455) differs by 0.5%
+// and is clinically indistinguishable at all current TCs (verified).
+//
+// Returns null if any input is missing — engine callers branch accordingly
+// (egfr_unknown / crcl_unknown flag emission path).
+const COCKCROFT_GAULT_F_FEMALE = 1.04;
+const COCKCROFT_GAULT_F_MALE   = 1.23;
+
+export function computeCrCl(p: PatientInput): number | null {
+  const creat = p.bloodResults?.creatinine ?? null;
+  if (creat === null || creat <= 0) return null;
+  if (p.weightKg === null || p.weightKg <= 0) return null;
+  if (p.age === null || p.age <= 0) return null;
+  const f = p.sex === 'female' ? COCKCROFT_GAULT_F_FEMALE : COCKCROFT_GAULT_F_MALE;
+  return ((140 - p.age) * p.weightKg * f) / creat;
+}
+
+// ─── Anthropometry: BMI via weight/height² (v1.46) ────────────────────────
+// Replaces the prior raw bmi field. Engine + UI + tests consume BMI via
+// this helper. Weight is dual-purpose: also used for CrCl.
+//
+// BMI = weightKg / heightM². Returns null if either input is missing.
+
+export function computeBMI(p: PatientInput): number | null {
+  if (p.weightKg === null || p.weightKg <= 0) return null;
+  if (p.heightCm === null || p.heightCm <= 0) return null;
+  const heightM = p.heightCm / 100;
+  return p.weightKg / (heightM * heightM);
+}
+
 // v1.14 — count of standard FRAX clinical risk factors a patient has, *excluding* the
 // AI-/ADT-/early-menopause condition itself (those are the primary trigger, not "additional").
 // Used by the IOF 2017 AI threshold logic.
@@ -83,7 +121,8 @@ export function aiAdditionalRiskFactorCount(p: PatientInput): number {
   if (p.parentalHipFracture) n++;
   if (p.currentSmoker) n++;
   if (p.alcoholUnitsPerWeek >= 21) n++;
-  if (p.bmi !== null && p.bmi < 19) n++;
+  const bmi = computeBMI(p);
+  if (bmi !== null && bmi < 19) n++;
   if (p.rheumatoidArthritis) n++;
   if (isOnGC(p)) n++;
   if (p.secondaryOsteoporosis.length > 0) n++;
@@ -303,12 +342,21 @@ export const VERY_HIGH_RISK = {
 // Stage 5 CKD: separate escalation logic in treatment.ts adds an urgent flag and
 // bumps nephrology referral urgency at eGFR <15.
 
+// CrCl (mL/min) — Cockcroft-Gault per computeCrCl helper. Engine values:
+// - BP CI gate (alendronate/risedronate/zoledronate/ibandronate): CrCl <=35.
+//   Engine-conservative-vs-source: SPC text reads "below 35" / "less than 35"
+//   (strict <35); engine uses <=35 (one tick more conservative at the boundary).
+//   Defer to backlog clinical-decision round whether to literal-align to <35.
+// - Denosumab Ca-watch (denosumab_ckd_hypocalcaemia): CrCl <30.
+//   SPC + FDA explicitly mandate Ca monitoring at CrCl <30. Engine prior <35
+//   was historical drift; v1.46 realigns to SPC <30.
+// - Stage 5 escalation (severe_ckd_specialist_only): CrCl <15. Unchanged.
 export const RENAL_LIMITS = {
-  alendronate:  { ci: 35 },   // eGFR <35: contraindicated (SmPC + spec table)
-  risedronate:  { ci: 35 },   // eGFR <35: contraindicated per spec table (SmPC strict CI is <30)
-  zoledronate:  { ci: 35 },   // eGFR <35: contraindicated
-  ibandronate:  { ci: 35 },   // eGFR <35: contraindicated per spec table (SmPC strict CI is <30)
-  denosumab:    { ci: null, hypocalcaemiaWatch: 35, extremeRiskBelow: 15 }, // no formal CI; mandatory Ca check <35; specialist-only <15
+  alendronate:  { ci: 35 },   // CrCl <=35: contraindicated (predicate inclusive — see note above)
+  risedronate:  { ci: 35 },   // CrCl <=35: contraindicated per spec table (SPC strict is <30)
+  zoledronate:  { ci: 35 },   // CrCl <=35: contraindicated
+  ibandronate:  { ci: 35 },   // CrCl <=35: contraindicated per spec table (SPC strict is <30)
+  denosumab:    { ci: null, hypocalcaemiaWatch: 30, extremeRiskBelow: 15 }, // no formal CI; mandatory Ca check <30 per SPC + FDA; specialist-only <15
 } as const;
 
 // ─── Bisphosphonate treatment duration thresholds ─────────────────────────

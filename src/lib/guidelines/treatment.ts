@@ -31,6 +31,8 @@ import {
   BP_INDIVIDUAL_BASIS_AFTER_YEARS,
   aiAdditionalRiskFactorCount,
   gcStoppedOver12MonthsAgo,
+  computeCrCl,
+  computeBMI,
 } from './thresholds';
 import type { RiskStratification } from './types';
 import { deriveReferralSignals } from './referralSignals';
@@ -177,20 +179,20 @@ export function generateTreatmentOutput(
     });
   }
 
-  // ── eGFR <60 but CKD not ticked as a secondary cause — prompt ──
-  // CKD 3a–5 is a Table 1 FRAX input (secondary cause). When the eGFR indicates CKD but
+  // ── CrCl <60 but CKD not ticked as a secondary cause — prompt ──
+  // CKD 3a–5 is a Table 1 FRAX input (secondary cause). When CrCl indicates CKD but
   // the clinician hasn't ticked it, prompt them to add it for FRAX accuracy.
   {
-    const egfr = patient.bloodResults?.egfr ?? null;
+    const crcl = computeCrCl(patient);
     const ckdTicked = patient.secondaryOsteoporosis.includes('chronic_kidney_disease');
-    if (egfr !== null && egfr < 60 && !ckdTicked) {
+    if (crcl !== null && crcl < 60 && !ckdTicked) {
       flags.push({
         id: 'ckd_not_ticked_for_frax',
         severity: 'info',
         message:
-          `eGFR ${egfr} ml/min indicates CKD 3a–5 — tick "Chronic kidney disease" under secondary causes to include it as a FRAX risk factor (NOGG Table 1).`,
+          `CrCl ${Math.round(crcl)} mL/min indicates CKD 3a–5 — tick "Chronic kidney disease" under secondary causes to include it as a FRAX risk factor (NOGG Table 1).`,
         rationale:
-          'Non-dialysis CKD (eGFR <60) is a NOGG Table 1 secondary cause of osteoporosis and a FRAX input. ' +
+          'Non-dialysis CKD (CrCl <60) is a NOGG Table 1 secondary cause of osteoporosis and a FRAX input. ' +
           'When BMD is not entered into FRAX, ticking secondary causes increases the calculated probability appropriately.',
         source: SRC_NOGG,
       });
@@ -562,7 +564,7 @@ export function generateTreatmentOutput(
       patient.parentalHipFracture ||
       patient.currentSmoker ||
       patient.alcoholUnitsPerWeek >= 21 ||
-      (patient.bmi !== null && patient.bmi < 19) ||
+      (() => { const _bmi = computeBMI(patient); return _bmi !== null && _bmi < 19; })() ||
       patient.rheumatoidArthritis ||
       patient.type2Diabetes ||
       patient.fallsInLastYear >= 2 ||
@@ -1066,12 +1068,12 @@ export function generateTreatmentOutput(
     const sharedCareDetail =
       current.agent === 'teriparatide'
         ? 'Side effects to monitor (v1.28): headache, nausea, dizziness, postural hypotension, leg pain, transient serum calcium elevation post-injection (expected). ' +
-          'Caution with moderate renal impairment — monitor eGFR during GP continuation (not just severe impairment as a CI). ' +
+          'Caution with moderate renal impairment — monitor CrCl during GP continuation (not just severe impairment as a CI). ' +
           'Begin planning sequential antiresorptive NOW — prescribe 1 month before final dose so there is zero gap. Failure to follow on negates the BMD gain.'
         : current.agent === 'abaloparatide'
         ? 'Abaloparatide (v1.39): PTHrP analogue with PTH-class side-effect profile similar to teriparatide ' +
           '(headache, nausea, dizziness, postural hypotension, transient post-injection serum calcium elevation expected). ' +
-          'Monitor for hypercalcaemia; monitor eGFR. Begin planning sequential antiresorptive NOW — prescribe 1 month before ' +
+          'Monitor for hypercalcaemia; monitor CrCl. Begin planning sequential antiresorptive NOW — prescribe 1 month before ' +
           'final dose so there is zero gap. Note: not currently reimbursed in Ireland (no HSE High-Tech listing — private pay ' +
           'must be confirmed; see abaloparatide_not_reimbursed_ireland flag).'
         : 'Romosozumab (v1.28): two SC injections of 105 mg each (total 210 mg) monthly for 12 months total. ' +
@@ -1366,16 +1368,16 @@ export function generateTreatmentOutput(
 
     const postmenopausalFemale = isPostmenopausalFemale(patient);
 
-    const egfrForRalox = resolveEGFR(patient);
+    const crclForRalox = resolveCrCl(patient);
     const bpContraindicated =
       patient.oesophagealDiseaseHistory ||
       hasAFFHistory(patient) ||
-      (egfrForRalox !== null && egfrForRalox <= RENAL_LIMITS.alendronate.ci) ||
+      (crclForRalox !== null && crclForRalox <= RENAL_LIMITS.alendronate.ci) ||
       hasGIIntoleranceToBothOralAndIVBP(patient);
 
     const denosumabUnsuitable =
       patient.refusesInjections ||
-      (egfrForRalox !== null && egfrForRalox < RENAL_LIMITS.denosumab.extremeRiskBelow);
+      (crclForRalox !== null && crclForRalox < RENAL_LIMITS.denosumab.extremeRiskBelow);
 
     const raloxifeneOwnEligible =
       !patient.strokeHistory && !patient.vteHistory;
@@ -1437,7 +1439,7 @@ export function generateTreatmentOutput(
   // route to denosumab as first-line. Spec requirements:
   //   * info severity (not warning / not urgent)
   //   * fires alongside the denosumab recommendation, not instead of it
-  //   * does NOT fire when ANY of: eGFR <35; AFF history; oesophageal disease;
+  //   * does NOT fire when ANY of: CrCl <35; AFF history; oesophageal disease;
   //     documented GI intolerance to BOTH oral AND IV bisphosphonate
   //   * does NOT fire when the patient is already established on denosumab
   //     (continuation scenario — the prescribing decision has been made)
@@ -1447,8 +1449,8 @@ export function generateTreatmentOutput(
       patient.currentTreatment?.agent === 'denosumab' &&
       patient.currentTreatment.currentlyOn === true;
     if (denoInRecs && !alreadyOnDenosumab) {
-      const egfr = resolveEGFR(patient);
-      const renalCI = egfr !== null && egfr <= RENAL_LIMITS.alendronate.ci;
+      const crcl = resolveCrCl(patient);
+      const renalCI = crcl !== null && crcl <= RENAL_LIMITS.alendronate.ci;
       const affCI = hasAFFHistory(patient);
       const oesophCI = patient.oesophagealDiseaseHistory === true;
       const giBothCI = hasGIIntoleranceToBothOralAndIVBP(patient);
@@ -1462,7 +1464,7 @@ export function generateTreatmentOutput(
             'If prescribing denosumab first-line, consider documenting your clinical rationale in the patient record.',
           rationale:
             'NOGG 2024 Strong (v1.30): bisphosphonate is preferred first-line as the most cost-effective antiresorptive; denosumab is the alternative when bisphosphonate is contraindicated. ' +
-            'This soft prompt surfaces only when denosumab is recommended in the absence of the four standard bisphosphonate contraindications (eGFR <35, AFF history, oesophageal disease, GI intolerance to BOTH oral and IV bisphosphonate). ' +
+            'This soft prompt surfaces only when denosumab is recommended in the absence of the four standard bisphosphonate contraindications (CrCl <35, AFF history, oesophageal disease, GI intolerance to BOTH oral and IV bisphosphonate). ' +
             'It is informational — it does not block the recommendation. A documented clinical rationale (e.g. adherence, patient preference, formulation issues) supports the prescribing decision.',
           source: SRC_NOGG,
         });
@@ -1481,7 +1483,7 @@ function initiateTherapy(
   flags: ClinicalFlag[],
   referrals: ReferralRecommendation[],
 ): TreatmentRecommendation[] {
-  const egfr = resolveEGFR(patient);
+  const crcl = resolveCrCl(patient);
   const recs: TreatmentRecommendation[] = [];
 
   // HRT: first-line in postmenopausal women ≤60 with high risk (NOGG 2024 update)
@@ -1528,26 +1530,26 @@ function initiateTherapy(
 
   // v1.19 Step 5 — Oesophageal disease contraindication. Step-1 check before
   // any drug selection (Section 5.2). All oral bisphosphonates permanently
-  // contraindicated. IV zoledronate from outset; if eGFR <35, denosumab.
+  // contraindicated. IV zoledronate from outset; if CrCl <35, denosumab.
   if (patient.oesophagealDiseaseHistory) {
     flags.push({
       id: 'oesophageal_disease_oral_bp_ci',
       severity: 'warning',
       message:
         'Oral bisphosphonates contraindicated — history of oesophageal disease (stricture / achalasia / dysmotility). ' +
-        'IV zoledronate first-line. If eGFR <35: denosumab. (NOGG 2024)',
+        'IV zoledronate first-line. If CrCl <35: denosumab. (NOGG 2024)',
       rationale:
         'NOGG 2024 Section 5.2 (v1.19): oesophageal abnormalities delaying gastric emptying or causing strictures are a ' +
         'permanent contraindication to all oral bisphosphonates (alendronate, risedronate, oral ibandronate). The risk of ' +
         'oesophageal ulceration or stricture worsening outweighs any benefit. IV zoledronate has no GI exposure and is ' +
-        'the preferred option; denosumab when zoledronate is not feasible (eGFR <35).',
+        'the preferred option; denosumab when zoledronate is not feasible (CrCl <35).',
       source: SRC_NOGG,
     });
-    if (canUse('zoledronate', egfr)) {
+    if (canUse('zoledronate', crcl)) {
       recs.push(withBPInitiationContext(zoledronate(), patient));
     } else {
       addVitDBlock(patient, flags);
-      recs.push(denosumab(egfr));
+      recs.push(denosumab(crcl));
     }
     return recs;
   }
@@ -1566,19 +1568,19 @@ function initiateTherapy(
   // first-line option, with alendronate + risedronate rendered as
   // alternatives (priority='alternative') so the GP can pick if IV is
   // unsuitable. This logic now lives at the standard primary push sites
-  // (this function, normal-eGFR + eGFR-unknown branches below) using the
+  // (this function, normal-CrCl + CrCl-unknown branches below) using the
   // existing TreatmentRecommendation.priority field. The flag is retired —
   // its Rec 3 + Lyles content moves into the IV zol card's inline rationale
   // as single source-of-truth.
   //
-  // Renal CI behaviour preserved: at eGFR ≤35 the IV zol push is blocked
+  // Renal CI behaviour preserved: at CrCl ≤35 the IV zol push is blocked
   // by canUse() (same renal cascade as the prior implementation); the
-  // patient falls through to the denosumab fallback in the eGFR-low branch.
+  // patient falls through to the denosumab fallback in the CrCl-low branch.
 
   // AFF history: permanent ban on ALL bisphosphonates — go directly to denosumab
   if (hasAFFHistory(patient)) {
     addVitDBlock(patient, flags);
-    recs.push(denosumab(egfr));
+    recs.push(denosumab(crcl));
     referrals.push({
       specialty: 'metabolic_bone',
       reason: 'AFF history — teriparatide biosimilar (HSE BVM policy March 2023) is the preferred specialist-initiated alternative to denosumab if antiresorptive is not tolerated.',
@@ -1609,11 +1611,11 @@ function initiateTherapy(
         'IV zoledronate has no GI exposure and is appropriate after oral bisphosphonate GI intolerance (NOGG 2024 Rec 13).',
       source: SRC_HSE,
     });
-    if (canUse('zoledronate', egfr)) {
+    if (canUse('zoledronate', crcl)) {
       recs.push(withBPInitiationContext(zoledronate(), patient));
     } else {
       addVitDBlock(patient, flags);
-      recs.push(denosumab(egfr));
+      recs.push(denosumab(crcl));
     }
     return recs;
   }
@@ -1635,7 +1637,7 @@ function initiateTherapy(
         'Plan for HRT review at 5 years total and reassess fracture risk.',
       source: SRC_BMS,
     });
-    if (canUse('alendronate', egfr)) {
+    if (canUse('alendronate', crcl)) {
       const tagged = bridgingTagOrNullForVHR({
         ...alendronate(),
         rationale:
@@ -1644,7 +1646,7 @@ function initiateTherapy(
       }, riskCategory, patient);
       if (tagged) recs.push(withBPInitiationContext(tagged, patient));
     }
-    if (canUse('risedronate', egfr)) {
+    if (canUse('risedronate', crcl)) {
       const tagged = bridgingTagOrNullForVHR({
         ...risedronate(),
         rationale:
@@ -1668,38 +1670,38 @@ function initiateTherapy(
   // gated explicitly on riskCategory !== 'very_high' so it does NOT enter the
   // bridging cards for VHR-GC, matching NOGG Rec 8(g)'s "start an oral
   // bisphosphonate in the meantime" wording).
-  if (canUse('alendronate', egfr) && (egfr === null || egfr > RENAL_LIMITS.alendronate.ci)) {
+  if (canUse('alendronate', crcl) && (crcl === null || crcl > RENAL_LIMITS.alendronate.ci)) {
     // Borderline renal function — monitoring guidance for any BP at this level.
     // v1.46 — reworded from "IV zol avoided / orals preferred" to a co-equal
     // monitoring frame matching the v1.46 NOGG Rec 2 co-equal first-line
-    // stance (alendronate, risedronate, IV zol all push at eGFR ≥ 35).
+    // stance (alendronate, risedronate, IV zol all push at CrCl ≥ 35).
     // The renal-monitoring expectation applies regardless of which BP is
     // selected; the flag now captures that rather than implying a
     // hierarchy that isn't NOGG-grounded.
-    if (egfr !== null && egfr < 50) {
+    if (crcl !== null && crcl < 50) {
       flags.push({
-        id: 'zoledronate_borderline_egfr',
+        id: 'bp_borderline_crcl',
         severity: 'info',
         message:
-          `eGFR ${egfr} ml/min — borderline renal function. Monitor eGFR at least annually for any patient on bisphosphonate therapy (oral or IV) at this level. NOGG 2024 Rec 2 co-equal first-line stance is preserved; renal monitoring is the prescribing safeguard.`,
+          `CrCl ${crcl} ml/min — borderline renal function. Monitor CrCl at least annually for any patient on bisphosphonate therapy (oral or IV) at this level. NOGG 2024 Rec 2 co-equal first-line stance is preserved; renal monitoring is the prescribing safeguard.`,
         rationale:
           'NOGG 2024 Rec 2 (Strong): alendronate, risedronate, and IV zoledronate are co-equal first-line antiresorptives. ' +
-          'All three carry renal CIs at eGFR <35 (alendronate, zoledronate) or <30 (risedronate). At borderline eGFR (35-49) ' +
-          'they remain prescribable; the SmPCs and NOGG monitoring guidance call for annual eGFR review while on therapy. ' +
+          'All three carry renal CIs at CrCl <35 (alendronate, zoledronate) or <30 (risedronate). At borderline CrCl (35-49) ' +
+          'they remain prescribable; the SmPCs and NOGG monitoring guidance call for annual CrCl review while on therapy. ' +
           'Choose based on patient suitability and preference; monitor renal function annually regardless of agent.',
         source: SRC_NICE,
       });
     }
     const priorHipFx = patient.priorHipFracture;
-    // v1.46 — IV zol viability gate is canUse only (eGFR ≥ 35; ≥ floor matches
+    // v1.46 — IV zol viability gate is canUse only (CrCl ≥ 35; ≥ floor matches
     // RENAL_LIMITS.zoledronate.ci, same as alendronate). Alendronate and IV
     // zoledronate share the same renal CI threshold (<35); pushing orals but
-    // withholding IV zol at eGFR 35-44 would be an asymmetric conservatism
+    // withholding IV zol at CrCl 35-44 would be an asymmetric conservatism
     // not grounded in NOGG. All three BPs push co-equally above their
-    // respective CI floors; the zoledronate_borderline_egfr info flag below
-    // continues to fire at eGFR <50 covering renal-monitoring guidance for
+    // respective CI floors; the bp_borderline_crcl info flag below
+    // continues to fire at CrCl <50 covering renal-monitoring guidance for
     // any BP at this level (oral or IV).
-    const ivZolViableHere = canUse('zoledronate', egfr);
+    const ivZolViableHere = canUse('zoledronate', crcl);
     // Alendronate
     {
       const base = alendronate();
@@ -1715,7 +1717,7 @@ function initiateTherapy(
       if (tagged) recs.push(withBPInitiationContext(tagged, patient));
     }
     // Risedronate
-    if (canUse('risedronate', egfr)) {
+    if (canUse('risedronate', crcl)) {
       const base = risedronate();
       const rec: TreatmentRecommendation = priorHipFx
         ? {
@@ -1755,31 +1757,31 @@ function initiateTherapy(
     return recs;
   }
 
-  // Alendronate contraindicated — renal impairment (eGFR ≤35 ml/min triggers BP ban; below
+  // Alendronate contraindicated — renal impairment (CrCl ≤35 ml/min triggers BP ban; below
   // strict NOGG CI of <35 we still prefer denosumab at the boundary because BPs accumulate
   // and denosumab is not renally cleared — the safer choice in borderline CKD).
-  if (egfr !== null && egfr <= RENAL_LIMITS.alendronate.ci) {
+  if (crcl !== null && crcl <= RENAL_LIMITS.alendronate.ci) {
     flags.push({
       id: 'renal_bp_ci',
       severity: 'warning',
       message:
-        `eGFR ${egfr} — all bisphosphonates contraindicated (<${RENAL_LIMITS.alendronate.ci}). Use denosumab.`,
+        `CrCl ${crcl} — all bisphosphonates contraindicated (<${RENAL_LIMITS.alendronate.ci}). Use denosumab.`,
       rationale:
         'Bisphosphonates accumulate in severe renal impairment. ' +
-        'Per spec table: all BPs contraindicated at eGFR <35 (oral and IV). ' +
+        'Per spec table: all BPs contraindicated at CrCl <35 (oral and IV). ' +
         'Denosumab is not renally cleared and is the preferred antiresorptive in this band.',
       source: SRC_HSE,
     });
 
     // Stage 5 CKD (<15 ml/min) — extreme hypocalcaemia risk; specialist-only.
-    const isStage5 = egfr < RENAL_LIMITS.denosumab.extremeRiskBelow;
+    const isStage5 = crcl < RENAL_LIMITS.denosumab.extremeRiskBelow;
 
-    if (egfr < RENAL_LIMITS.denosumab.hypocalcaemiaWatch) {
+    if (crcl < RENAL_LIMITS.denosumab.hypocalcaemiaWatch) {
       flags.push({
         id: 'denosumab_ckd_hypocalcaemia',
         severity: 'warning',
         message:
-          `eGFR ${egfr} — mandatory adjusted Ca check 2 weeks after EVERY denosumab injection. Vit D ≥50 + Ca replete first.`,
+          `CrCl ${crcl} — mandatory adjusted Ca check 2 weeks after EVERY denosumab injection. Vit D ≥50 + Ca replete first.`,
         rationale:
           'CKD impairs 1α-hydroxylase activity (active vitamin D production). ' +
           'Denosumab increases calcium uptake into bone, worsening hypocalcaemia in CKD.',
@@ -1788,8 +1790,8 @@ function initiateTherapy(
       referrals.push({
         specialty: 'nephrology',
         reason: isStage5
-          ? `Stage 5 CKD (eGFR ${egfr} ml/min, <15) with osteoporosis — extreme hypocalcaemia risk; URGENT specialist input before any antiresorptive.`
-          : `Severe renal impairment (eGFR ${egfr} ml/min) with osteoporosis — specialist guidance on safe bone protection.`,
+          ? `Stage 5 CKD (CrCl ${crcl} ml/min, <15) with osteoporosis — extreme hypocalcaemia risk; URGENT specialist input before any antiresorptive.`
+          : `Severe renal impairment (CrCl ${crcl} ml/min) with osteoporosis — specialist guidance on safe bone protection.`,
         urgency: isStage5 ? 'urgent' : 'routine',
       });
     }
@@ -1799,9 +1801,9 @@ function initiateTherapy(
         id: 'severe_ckd_specialist_only',
         severity: 'urgent',
         message:
-          `eGFR ${egfr} (Stage 5 CKD, <15 ml/min) — extreme hypocalcaemia risk with denosumab. Specialist initiation only. Bisphosphonates remain contraindicated. Refer urgently.`,
+          `CrCl ${crcl} (Stage 5 CKD, <15 ml/min) — extreme hypocalcaemia risk with denosumab. Specialist initiation only. Bisphosphonates remain contraindicated. Refer urgently.`,
         rationale:
-          'Stage 5 CKD (eGFR <15 ml/min, non-dialysis) carries an extreme risk of severe symptomatic hypocalcaemia following denosumab. ' +
+          'Stage 5 CKD (CrCl <15 ml/min, non-dialysis) carries an extreme risk of severe symptomatic hypocalcaemia following denosumab. ' +
           'Patients in this band should not be initiated on denosumab (or any antiresorptive) without specialist nephrology / metabolic bone input. ' +
           'Active vitamin D, calcium repletion, and individualised dosing decisions are required. ' +
           'Bisphosphonates are contraindicated in this band per SmPCs and clinical convention.',
@@ -1812,24 +1814,24 @@ function initiateTherapy(
     addVitDBlock(patient, flags);
     // At Stage 5, defer drug recommendation pending specialist input — surface only the flags.
     if (!isStage5) {
-      recs.push(denosumab(egfr));
+      recs.push(denosumab(crcl));
     }
     return recs;
   }
 
-  // eGFR unknown — add flag, still recommend with monitoring requirement
+  // CrCl unknown — add flag, still recommend with monitoring requirement
   flags.push({
-    id: 'egfr_unknown',
+    id: 'crcl_unknown',
     severity: 'warning',
-    message: 'Check eGFR before prescribing bisphosphonate — not recorded.',
-    rationale: 'eGFR <35 contraindicates alendronate and zoledronate; eGFR <30 contraindicates risedronate.',
+    message: 'Check CrCl before prescribing bisphosphonate — not recorded.',
+    rationale: 'CrCl <35 contraindicates alendronate and zoledronate; CrCl <30 contraindicates risedronate.',
     source: SRC_HSE,
   });
   // v1.33 — push both equivalent first-line oral BPs.
   // v1.46 — IV zoledronate added as co-equal first-line per NOGG 2024 Rec 2.
   // Prior-hip-fracture patients get IV zol as preferred first-line (NOGG Rec 3
   // / Lyles HORIZON-RF); orals become alternatives. Same priority-fork logic
-  // as the normal-eGFR block above. Non-VHR only.
+  // as the normal-CrCl block above. Non-VHR only.
   {
     const priorHipFx = patient.priorHipFracture;
     // Alendronate
@@ -1860,10 +1862,10 @@ function initiateTherapy(
       const tagged = bridgingTagOrNullForVHR(rec, riskCategory, patient);
       if (tagged) recs.push(withBPInitiationContext(tagged, patient));
     }
-    // IV zoledronate — eGFR-unknown branch can't pre-block on the <45
-    // borderline gate (no eGFR to check). The egfr_unknown flag above already
-    // tells the GP to check eGFR before prescribing; canUse('zoledronate',
-    // null) returns true for null eGFR (deferred to the GP). Non-VHR only.
+    // IV zoledronate — CrCl-unknown branch can't pre-block on the <45
+    // borderline gate (no CrCl to check). The crcl_unknown flag above already
+    // tells the GP to check CrCl before prescribing; canUse('zoledronate',
+    // null) returns true for null CrCl (deferred to the GP). Non-VHR only.
     if (riskCategory !== 'very_high') {
       const base = zoledronate();
       const rec: TreatmentRecommendation = priorHipFx
@@ -1897,7 +1899,7 @@ function sequencing(
   referrals: ReferralRecommendation[],
 ): Omit<TreatmentOutput, 'supplements' | 'specialistOptions'> {
   const current = patient.currentTreatment!;
-  const egfr = resolveEGFR(patient);
+  const crcl = resolveCrCl(patient);
   const recs: TreatmentRecommendation[] = [];
 
   // ── On HRT with high fracture risk: review HRT adequacy + add bisphosphonate ──
@@ -1913,7 +1915,7 @@ function sequencing(
         'Plan for HRT review at 5 years total and reassess fracture risk.',
       source: SRC_BMS,
     });
-    if (canUse('alendronate', egfr)) {
+    if (canUse('alendronate', crcl)) {
       const tagged = bridgingTagOrNullForVHR({
         ...alendronate(),
         rationale:
@@ -1922,7 +1924,7 @@ function sequencing(
       }, riskCategory, patient);
       if (tagged) recs.push(withBPInitiationContext(tagged, patient));
     }
-    if (canUse('risedronate', egfr)) {
+    if (canUse('risedronate', crcl)) {
       const tagged = bridgingTagOrNullForVHR({
         ...risedronate(),
         rationale:
@@ -1936,7 +1938,7 @@ function sequencing(
 
   // ── GI intolerance ──
   if (current.reasonStopped === 'gi_intolerance') {
-    return { ...giSwitch(patient, current.agent, egfr, flags), referrals };
+    return { ...giSwitch(patient, current.agent, crcl, flags), referrals };
   }
 
   // ── On-treatment fracture pathway (NOGG 2024 Section 6.3, Strong) — v1.13 Step 10 ──
@@ -2067,11 +2069,11 @@ function sequencing(
         rationale: 'Spec Section 7.4: oral BP failure → IV zoledronate OR denosumab OR specialist for anabolic.',
         source: SRC_NOGG,
       });
-      if (canUse('zoledronate', egfr) && !hasAFFHistory(patient)) {
+      if (canUse('zoledronate', crcl) && !hasAFFHistory(patient)) {
         recs.push(withBPInitiationContext(zoledronate(), patient));
       } else {
         addVitDBlock(patient, flags);
-        recs.push(denosumab(egfr));
+        recs.push(denosumab(crcl));
       }
     } else {
       // Denosumab failure or zoledronate failure → specialist
@@ -2088,7 +2090,7 @@ function sequencing(
   // denosumabReboundFlags() has already added the cessation plan flag explaining transition options.
   if (current.agent === 'denosumab' && current.currentlyOn && !isTreatmentFailure) {
     addVitDBlock(patient, flags);
-    recs.push(denosumab(egfr));
+    recs.push(denosumab(crcl));
     return { recommendations: recs, flags, referrals };
   }
 
@@ -2191,9 +2193,9 @@ function sequencing(
           source: SRC_NOGG,
         });
         // At very high risk after long-term bisphosphonate, offer denosumab switch
-        if (riskCategory === 'very_high' && canUse('denosumab', egfr)) {
+        if (riskCategory === 'very_high' && canUse('denosumab', crcl)) {
           addVitDBlock(patient, flags);
-          recs.push(denosumab(egfr));
+          recs.push(denosumab(crcl));
           flags.push({
             id: 'bp_to_denosumab',
             severity: 'info',
@@ -2332,7 +2334,7 @@ function shouldTakeBPHoliday(
 function giSwitch(
   patient: PatientInput,
   stoppedAgent: TreatmentAgent,
-  egfr: number | null,
+  crcl: number | null,
   flags: ClinicalFlag[],
 ): Omit<TreatmentOutput, 'supplements' | 'referrals' | 'specialistOptions'> {
   const recs: TreatmentRecommendation[] = [];
@@ -2352,12 +2354,12 @@ function giSwitch(
       rationale: 'NOGG 2024 Rec 13: switch oral bisphosphonate or move to IV if GI not tolerated.',
       source: SRC_HSE,
     });
-    if (!affCI && canUse('risedronate', egfr)) recs.push(withBPInitiationContext(risedronate(), patient));
-    if (!affCI && canUse('ibandronate', egfr)) recs.push(withBPInitiationContext(ibandronate(), patient));
-    if (!affCI && canUse('zoledronate', egfr)) recs.push(withBPInitiationContext(zoledronate(), patient));
-    if (affCI || (!canUse('risedronate', egfr) && !canUse('ibandronate', egfr) && !canUse('zoledronate', egfr))) {
+    if (!affCI && canUse('risedronate', crcl)) recs.push(withBPInitiationContext(risedronate(), patient));
+    if (!affCI && canUse('ibandronate', crcl)) recs.push(withBPInitiationContext(ibandronate(), patient));
+    if (!affCI && canUse('zoledronate', crcl)) recs.push(withBPInitiationContext(zoledronate(), patient));
+    if (affCI || (!canUse('risedronate', crcl) && !canUse('ibandronate', crcl) && !canUse('zoledronate', crcl))) {
       addVitDBlock(patient, flags);
-      recs.push(denosumab(egfr));
+      recs.push(denosumab(crcl));
     }
   } else if (stoppedAgent === 'risedronate') {
     flags.push({
@@ -2370,20 +2372,20 @@ function giSwitch(
       rationale: 'After failure of two oral bisphosphonates due to GI effects, IV or monthly oral is appropriate.',
       source: SRC_HSE,
     });
-    if (!affCI && canUse('ibandronate', egfr)) recs.push(withBPInitiationContext(ibandronate(), patient));
-    if (!affCI && canUse('zoledronate', egfr)) {
+    if (!affCI && canUse('ibandronate', crcl)) recs.push(withBPInitiationContext(ibandronate(), patient));
+    if (!affCI && canUse('zoledronate', crcl)) {
       recs.push(withBPInitiationContext(zoledronate(), patient));
     } else {
       addVitDBlock(patient, flags);
-      recs.push(denosumab(egfr));
+      recs.push(denosumab(crcl));
     }
   } else {
     // Any other agent — IV or denosumab
-    if (!affCI && canUse('zoledronate', egfr)) {
+    if (!affCI && canUse('zoledronate', crcl)) {
       recs.push(withBPInitiationContext(zoledronate(), patient));
     } else {
       addVitDBlock(patient, flags);
-      recs.push(denosumab(egfr));
+      recs.push(denosumab(crcl));
     }
   }
 
@@ -2498,7 +2500,7 @@ function denosumabReboundFlags(
   // Whether a sequential antiresorptive has been arranged. We treat any
   // bisphosphonate added AFTER the denosumab record (i.e. as the
   // currentTreatment when currentDeno is null, or as a later previousTreatment
-  // record) as evidence of a sequential plan. eGFR <35 is acknowledged
+  // record) as evidence of a sequential plan. CrCl <35 is acknowledged
   // separately so the "no sequential agent" alerts stay accurate.
   const sequentialBPArranged =
     (patient.currentTreatment !== null && isBisphosphonate(patient.currentTreatment.agent)) ||
@@ -2754,8 +2756,8 @@ function earlyMenopause(
         'factors is sufficient to indicate treatment — do not require established osteoporosis.',
       source: SRC_BMS,
     });
-    const egfr = resolveEGFR(patient);
-    if (canUse('alendronate', egfr) && (egfr === null || egfr > RENAL_LIMITS.alendronate.ci)) {
+    const crcl = resolveCrCl(patient);
+    if (canUse('alendronate', crcl) && (crcl === null || crcl > RENAL_LIMITS.alendronate.ci)) {
       recommendations.push(withBPInitiationContext({
         ...alendronate(),
         priority: 'first-line',
@@ -2763,7 +2765,7 @@ function earlyMenopause(
           'Primary bone protection in HRT-ineligible POI (VTE + breast cancer history). ' +
           'BMD criterion met (osteoporosis OR osteopenia + risk factors). Equivalent first-line with risedronate per NOGG 2024 Rec 12 (Strong).',
       }, patient));
-      if (canUse('risedronate', egfr)) {
+      if (canUse('risedronate', crcl)) {
         recommendations.push(withBPInitiationContext({
           ...risedronate(),
           priority: 'first-line',
@@ -2863,7 +2865,7 @@ function giop(
   flags: ClinicalFlag[],
   referrals: ReferralRecommendation[],
 ): Omit<TreatmentOutput, 'supplements' | 'specialistOptions'> {
-  const egfr = resolveEGFR(patient);
+  const crcl = resolveCrCl(patient);
   const recs: TreatmentRecommendation[] = [];
   const gcDose = effectiveGCDoseMgDay(patient);
 
@@ -2969,7 +2971,7 @@ function giop(
     severity: 'info',
     message:
       'GIOP monitoring: DEXA within 6 months of starting treatment, then every 1–2 years. ' +
-      'Annual bloods: calcium, vitamin D, eGFR, ALP. ' +
+      'Annual bloods: calcium, vitamin D, CrCl, ALP. ' +
       'Reassess FRAX with BMD at each DEXA repeat.',
     rationale: 'NOGG 2024 §9.6 monitoring recommendations for GIOP: ALP added (bone turnover / osteomalacia screen) and FRAX-at-DEXA-repeat made explicit.',
     source: SRC_IOS,
@@ -3069,7 +3071,7 @@ function giop(
     return { recommendations: recs, flags, referrals };
   }
 
-  if (!aff && !giIntolerance && canUse('alendronate', egfr)) {
+  if (!aff && !giIntolerance && canUse('alendronate', crcl)) {
     // Oral first-line per NOGG GIOP Rec 23 (Strong) — alendronate AND risedronate
     // are equivalent first-line oral options (v1.33). Push both.
     {
@@ -3082,7 +3084,7 @@ function giop(
       }, riskCategory, patient);
       if (tagged) recs.push(withBPInitiationContext(tagged, patient));
     }
-    if (canUse('risedronate', egfr)) {
+    if (canUse('risedronate', crcl)) {
       const tagged = bridgingTagOrNullForVHR({
         ...risedronate(),
         rationale:
@@ -3091,7 +3093,7 @@ function giop(
       }, riskCategory, patient);
       if (tagged) recs.push(withBPInitiationContext(tagged, patient));
     }
-  } else if (!aff && giIntolerance && !refuses && canUse('zoledronate', egfr)) {
+  } else if (!aff && giIntolerance && !refuses && canUse('zoledronate', crcl)) {
     // Prior oral GI intolerance — IV zoledronate bypasses GI tract
     flags.push({
       id: 'giop_iv_after_gi_intolerance',
@@ -3104,10 +3106,10 @@ function giop(
       source: SRC_HSE,
     });
     recs.push(withBPInitiationContext({ ...zoledronate(), rationale: 'IV zoledronate for GIOP when oral bisphosphonate is contraindicated by prior intolerance.' }, patient));
-  } else if (!aff && !refuses && canUse('zoledronate', egfr)) {
+  } else if (!aff && !refuses && canUse('zoledronate', crcl)) {
     recs.push(withBPInitiationContext({ ...zoledronate(), rationale: 'IV zoledronate for GIOP when oral bisphosphonate is contraindicated or not tolerated.' }, patient));
   } else {
-    // BP options exhausted (AFF history, refusal of IV, or eGFR too low) — denosumab
+    // BP options exhausted (AFF history, refusal of IV, or CrCl too low) — denosumab
     if (refuses) {
       flags.push({
         id: 'giop_no_treatment_option',
@@ -3121,7 +3123,7 @@ function giop(
       referrals.push({ specialty: 'metabolic_bone', reason: 'GIOP with no acceptable antiresorptive — patient preference vs clinical need.', urgency: 'urgent' });
     } else {
       addVitDBlock(patient, flags);
-      recs.push(denosumab(egfr));
+      recs.push(denosumab(crcl));
       flags.push({
         id: 'giop_denosumab_conditional',
         severity: 'info',
@@ -3374,13 +3376,13 @@ function getSupplements(patient: PatientInput): SupplementRecommendation[] {
   let vitDBullets: string[];
 
   // Patient context that modifies dosing
-  const obese = patient.bmi !== null && patient.bmi >= 30;
+  const obese = (() => { const _bmi = computeBMI(patient); return _bmi !== null && _bmi >= 30; })();
   const malabsorption =
     patient.secondaryOsteoporosis.includes('malabsorption') ||
     patient.secondaryOsteoporosis.includes('celiac_disease') ||
     patient.secondaryOsteoporosis.includes('inflammatory_bowel_disease');
   const ckd =
-    (patient.bloodResults?.egfr ?? 999) < 60;
+    (computeCrCl(patient) ?? 999) < 60;
   const hyperPTH = patient.secondaryOsteoporosis.includes('hyperparathyroidism');
 
   // Context bullets reused across deficient / insufficient tiers
@@ -3644,7 +3646,7 @@ function buildSpecialistOptions(
         'mandatory at end of course.',
       reference: 'NOGG 2024 Rec 11; spec §5.5 + §7.1; HSE BVM policy (biosimilar required since March 2023).',
       preReferralChecks:
-        'Trigger eGFR + PTH before referral — both must be available and within normal range before specialist ' +
+        'Trigger CrCl + PTH before referral — both must be available and within normal range before specialist ' +
         'initiation (severe renal impairment is a contraindication; raised PTH is a contraindication and must be ' +
         'investigated as secondary cause). Document the values in the referral letter.',
     });
@@ -3692,7 +3694,7 @@ function buildSpecialistOptions(
         '(lifetime limit); sequential antiresorptive mandatory at end of course.',
       reference: 'NOGG 2024 Rec 11; spec §5.5 + §7.1; HSE BVM policy.',
       preReferralChecks:
-        'Trigger eGFR + PTH before referral — both must be available and within normal range before specialist ' +
+        'Trigger CrCl + PTH before referral — both must be available and within normal range before specialist ' +
         'initiation. Document in referral letter.',
     });
     return options;
@@ -3722,7 +3724,7 @@ function applyPatientPreferenceFallbackIfRefuses(
   if (gcDrivesVHR) return;
   if (recommendations.length > 0) return;
 
-  const egfr = resolveEGFR(patient);
+  const crcl = resolveCrCl(patient);
   const fallbackRationale =
     'Patient has indicated they do not wish to receive injectable therapy. ' +
     'Document this preference in the specialist referral letter. If, following ' +
@@ -3730,14 +3732,14 @@ function applyPatientPreferenceFallbackIfRefuses(
     'oral bisphosphonates are the documented patient-preference path. Do not ' +
     'initiate before specialist review.';
 
-  if (canUse('alendronate', egfr) && (egfr === null || egfr > RENAL_LIMITS.alendronate.ci)) {
+  if (canUse('alendronate', crcl) && (crcl === null || crcl > RENAL_LIMITS.alendronate.ci)) {
     recommendations.push(withBPInitiationContext({
       ...alendronate(),
       rationale: fallbackRationale,
       category: 'patient_preference_fallback',
     }, patient));
   }
-  if (canUse('risedronate', egfr)) {
+  if (canUse('risedronate', crcl)) {
     recommendations.push(withBPInitiationContext({
       ...risedronate(),
       rationale: fallbackRationale,
@@ -3832,13 +3834,13 @@ function alendronate(): TreatmentRecommendation {
       'Reduces vertebral fractures ~47% and hip fractures ~51% (Black et al. Lancet 1996).',
     strength: 'strong',
     contraindications: [
-      'eGFR <35 ml/min',
+      'CrCl <35 ml/min',
       'Oesophageal abnormality (stricture, achalasia, dysmotility)',
       'Inability to sit/stand upright for ≥30 minutes',
       'Uncorrected hypocalcaemia',
     ],
     monitoring: [
-      'Adjusted calcium and eGFR at baseline',
+      'Adjusted calcium and CrCl at baseline',
       'Vitamin D ≥75 nmol/L before initiation',
       'DEXA at 1–2 years, then every 2 years',
       'Review for treatment holiday at 5 years per NOGG 2024 Rec 17',
@@ -3883,13 +3885,13 @@ function risedronate(): TreatmentRecommendation {
       'Slightly lower upper-GI adverse effect rate than alendronate. Licensed for men. Generic available.',
     strength: 'strong',
     contraindications: [
-      'eGFR <30 ml/min',
+      'CrCl <30 ml/min',
       'Oesophageal abnormality',
       'Inability to remain upright for ≥30 minutes',
       'Uncorrected hypocalcaemia',
     ],
     monitoring: [
-      'Calcium and eGFR at baseline',
+      'Calcium and CrCl at baseline',
       'Vitamin D ≥75 nmol/L before initiation',
       'DEXA at 1–2 years; holiday review at 5 years',
     ],
@@ -3926,13 +3928,13 @@ function ibandronate(): TreatmentRecommendation {
       'less robust hip fracture data than alendronate/zoledronate. Use where weekly oral dosing is not feasible.',
     strength: 'conditional',
     contraindications: [
-      'eGFR <30 ml/min',
+      'CrCl <30 ml/min',
       'Oesophageal abnormality',
       'Inability to remain upright ≥60 minutes',
       'Uncorrected hypocalcaemia',
     ],
     monitoring: [
-      'Calcium and eGFR at baseline',
+      'Calcium and CrCl at baseline',
       'DEXA at 1–2 years',
       'Insufficient evidence for hip fracture reduction — review fracture history at follow-up',
     ],
@@ -3974,13 +3976,13 @@ export function ibandronateIV(): TreatmentRecommendation {
       'Acute phase reaction may occur (flu-like symptoms), usually first injection only.',
     strength: 'conditional',
     contraindications: [
-      'eGFR <30 ml/min',
+      'CrCl <30 ml/min',
       'Uncorrected hypocalcaemia (CHECK adjusted calcium before each injection)',
       'Vitamin D deficiency (replete before starting)',
       'Pregnancy',
     ],
     monitoring: [
-      'Adjusted calcium and eGFR before each 3-monthly injection',
+      'Adjusted calcium and CrCl before each 3-monthly injection',
       'Vitamin D adequacy at baseline (no formal block — but optimise)',
       'DEXA at 1–2 years; reassessment at 3 years',
       'Insufficient evidence for hip fracture reduction — vertebral protection only',
@@ -4018,18 +4020,18 @@ function zoledronate(): TreatmentRecommendation {
       'Alternative dosing: 5 mg every 18 months in postmenopausal women with osteopenia maintains BMD benefit (HORIZON extension trial; NOGG 2024 Evidence Ib).',
     strength: 'strong',
     contraindications: [
-      'eGFR <35 ml/min',
+      'CrCl <35 ml/min',
       'PRE-INFUSION SAFETY CHECK: corrected calcium MUST be measured and within normal range before each infusion — risk of severe symptomatic hypocalcaemia if administered while low',
       'Vitamin D deficiency (replete before infusion)',
       'Pregnancy',
     ],
     monitoring: [
       'CHECK adjusted calcium IMMEDIATELY before each infusion — withhold if <2.10 mmol/L until corrected',
-      'Vitamin D adequacy and eGFR before each annual infusion',
-      // v1.24 — MHRA recommends creatinine clearance (not eGFR) for >75, BMI <18 or >40.
-      'MHRA recommendation: use CREATININE CLEARANCE (not eGFR) in patients aged >75 OR BMI <18 OR BMI >40 — eGFR formulae overestimate renal function in these groups',
-      // v1.24 — post-infusion creatinine/eGFR monitoring.
-      'CHECK creatinine / eGFR after the infusion (typically at the annual review) — transient creatinine rise can occur post-zoledronate',
+      'Vitamin D adequacy and CrCl before each annual infusion',
+      // v1.24 — MHRA recommends creatinine clearance (not CrCl) for >75, BMI <18 or >40.
+      'MHRA recommendation: use CREATININE CLEARANCE (not CrCl) in patients aged >75 OR BMI <18 OR BMI >40 — CrCl formulae overestimate renal function in these groups',
+      // v1.24 — post-infusion creatinine/CrCl monitoring.
+      'CHECK creatinine / CrCl after the infusion (typically at the annual review) — transient creatinine rise can occur post-zoledronate',
       'Premedication: paracetamol 1g 1 hour BEFORE infusion, then again 6 hours AFTER — reduces flu-like acute-phase reaction',
       // v1.24 — rare symptomatic AF.
       'Rare adverse event: symptomatic atrial fibrillation (HORIZON trial, Evidence Ib) — uncommon but serious; warn the patient and review cardiac history before infusion',
@@ -4171,11 +4173,11 @@ export function bazedoxifene(): TreatmentRecommendation {
   };
 }
 
-function denosumab(egfr: number | null): TreatmentRecommendation {
+function denosumab(crcl: number | null): TreatmentRecommendation {
   const ckdCaution =
-    egfr !== null && egfr < RENAL_LIMITS.denosumab.hypocalcaemiaWatch
+    crcl !== null && crcl < RENAL_LIMITS.denosumab.hypocalcaemiaWatch
       ? [
-          `eGFR ${egfr} ml/min: HIGH hypocalcaemia risk — mandatory corrected calcium check 2 weeks after EVERY injection.`,
+          `CrCl ${crcl} ml/min: HIGH hypocalcaemia risk — mandatory corrected calcium check 2 weeks after EVERY injection.`,
         ]
       : [];
 
@@ -4184,7 +4186,7 @@ function denosumab(egfr: number | null): TreatmentRecommendation {
     dose: '60 mg SC injection',
     frequency: 'Every 6 months (strict) — risk of rebound vertebral fractures begins if >6 months since last dose',
     rationale:
-      'POSITIONING: denosumab is FIRST-LINE only when bisphosphonate is contraindicated or unsuitable (AFF, eGFR <35, ' +
+      'POSITIONING: denosumab is FIRST-LINE only when bisphosphonate is contraindicated or unsuitable (AFF, CrCl <35, ' +
       'GI intolerance where IV zoledronate is also unsuitable, oesophageal disease where IV zoledronate is also unsuitable). ' +
       'For all other patients denosumab is the alternative when bisphosphonate is contraindicated (NOGG 2024 Strong) — ' +
       'bisphosphonate is preferred first-line as the most cost-effective antiresorptive. ' +
@@ -4206,11 +4208,11 @@ function denosumab(egfr: number | null): TreatmentRecommendation {
     ],
     monitoring: [
       // v1.26 Step 1 — pre-dose calcium check for ALL patients, not just CKD.
-      'PRE-DOSE CALCIUM CHECK (SPC requirement, ALL patients): corrected serum calcium must be checked before EVERY denosumab injection regardless of eGFR.',
+      'PRE-DOSE CALCIUM CHECK (SPC requirement, ALL patients): corrected serum calcium must be checked before EVERY denosumab injection regardless of CrCl.',
       'Vitamin D ≥50 nmol/L before each injection (do not administer if <50 nmol/L)',
       // v1.26 — post-injection check remains specific to CKD <35.
-      ...(egfr !== null && egfr < RENAL_LIMITS.denosumab.hypocalcaemiaWatch
-        ? ['POST-INJECTION: eGFR <35 — corrected calcium MANDATORY at 2 weeks after EVERY injection (severe asymptomatic hypocalcaemia risk).']
+      ...(crcl !== null && crcl < RENAL_LIMITS.denosumab.hypocalcaemiaWatch
+        ? ['POST-INJECTION: CrCl <35 — corrected calcium MANDATORY at 2 weeks after EVERY injection (severe asymptomatic hypocalcaemia risk).']
         : []),
       // v1.26 Step 2 — hypocalcaemia symptom advice for ALL patients.
       'Hypocalcaemia symptom advice (ALL patients): advise the patient to report symptoms promptly — muscle cramps, spasms, tingling in fingers/toes or around the mouth, seizures. Do NOT wait for routine review.',
@@ -4289,18 +4291,18 @@ function addVitDBlock(patient: PatientInput, flags: ClinicalFlag[]): void {
   }
 }
 
-function resolveEGFR(patient: PatientInput): number | null {
-  // v1.31 follow-up — eGFR now has a single schema home on BloodResults.egfr.
-  // The previous renalFunction slot has been removed; the UI exposes eGFR
-  // only on the bloods / investigations page.
-  return patient.bloodResults?.egfr ?? null;
+function resolveCrCl(patient: PatientInput): number | null {
+  // v1.46 — kidney function now expressed as CrCl (Cockcroft-Gault).
+  // computeCrCl returns null if creatinine, weight, age, or sex missing.
+  // (formerly resolveEGFR; CrCl raw field on BloodResults retired.)
+  return computeCrCl(patient);
 }
 
-function canUse(agent: keyof typeof RENAL_LIMITS, egfr: number | null): boolean {
+function canUse(agent: keyof typeof RENAL_LIMITS, crcl: number | null): boolean {
   const limit = RENAL_LIMITS[agent].ci;
   if (limit === null) return true;
-  if (egfr === null) return true; // unknown — permit with egfr_unknown flag
-  return egfr >= limit;
+  if (crcl === null) return true; // unknown — permit with crcl_unknown flag
+  return crcl >= limit;
 }
 
 const BISPHOSPHONATE_AGENTS: TreatmentAgent[] = ['alendronate', 'risedronate', 'zoledronate', 'ibandronate'];

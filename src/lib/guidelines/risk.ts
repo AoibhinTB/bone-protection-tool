@@ -12,6 +12,7 @@ import {
   isOnHighDoseGC,
   gcDurationMonths,
   aiAdditionalRiskFactorCount,
+  computeBMI,
 } from './thresholds';
 import { estimateFrax } from '../fraxEstimate';
 
@@ -405,7 +406,8 @@ function countFraxClinicalRiskFactors(p: PatientInput): number {
   if (p.parentalHipFracture) n++;
   if (p.currentSmoker) n++;
   if (p.alcoholUnitsPerWeek >= 21) n++;
-  if (p.bmi !== null && p.bmi < 19) n++;
+  const bmi = computeBMI(p);
+  if (bmi !== null && bmi < 19) n++;
   if (p.rheumatoidArthritis) n++;
   if (p.secondaryOsteoporosis.length > 0) n++;
   if (p.type2Diabetes) n++;
@@ -430,7 +432,8 @@ export function hasAnyClinicalRiskFactor(p: PatientInput): boolean {
   ) return true;
   if (p.parentalHipFracture || p.currentSmoker || p.vaping) return true;
   if (p.alcoholUnitsPerWeek >= 21) return true;            // FRAX threshold
-  if (p.bmi !== null && p.bmi < 19) return true;            // low BMI
+  const bmi = computeBMI(p);
+  if (bmi !== null && bmi < 19) return true;                // low BMI
   if (p.rheumatoidArthritis) return true;
   if (p.secondaryOsteoporosis.length > 0) return true;
   if (isOnGC(p)) return true;
