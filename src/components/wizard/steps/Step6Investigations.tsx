@@ -2,6 +2,7 @@
 
 import { estimateFrax } from '@/lib/fraxEstimate';
 import type { PatientInput } from '@/lib/guidelines/types';
+import { computeCrCl } from '@/lib/guidelines/thresholds';
 import { Field, NumInput, YesNo, SectionHeading, Segmented } from '../FormPrimitives';
 import { Term } from '@/components/Tooltip';
 
@@ -225,7 +226,7 @@ export function Step6Investigations({ data, onChange }: Props) {
                 ? {
                     adjustedCalciumMmol: null,
                     vitaminDNmol: null,
-                    egfr: null,
+                    creatinine: null,
                     alp: null,
                     tshMUL: null,
                     hbGramsPerLitre: null,
@@ -259,16 +260,29 @@ export function Step6Investigations({ data, onChange }: Props) {
               width="w-24"
             />
           </Field>
-          <Field label="eGFR" hint="ml/min/1.73 m² — kidney function" indent>
+          <Field label="Serum creatinine" hint="µmol/L — CrCl auto-computed via Cockcroft-Gault from creatinine + weight + age + sex" indent>
             <NumInput
-              value={data.bloodResults.egfr}
-              onChange={v => onChange({ bloodResults: { ...data.bloodResults!, egfr: v } })}
-              min={1}
-              max={130}
-              unit="ml/min"
+              value={data.bloodResults.creatinine}
+              onChange={v => onChange({ bloodResults: { ...data.bloodResults!, creatinine: v } })}
+              min={20}
+              max={1500}
+              step={1}
+              unit="µmol/L"
               width="w-24"
             />
           </Field>
+          {(() => {
+            const crcl = computeCrCl(data);
+            return (
+              <p className="text-xs text-slate-500 pl-4 sm:pl-6 -mt-1 mb-2 indent">
+                CrCl: <span className="font-medium text-slate-700">
+                  {crcl !== null ? `${Math.round(crcl)} mL/min` : '—'}
+                </span> <span className="text-slate-400">
+                  (Cockcroft-Gault; requires creatinine + weight + age + sex)
+                </span>
+              </p>
+            );
+          })()}
           <Field label="ALP" hint="U/L — normal 30–130; >200 markedly elevated" indent>
             <NumInput
               value={data.bloodResults.alp}

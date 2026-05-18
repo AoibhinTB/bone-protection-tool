@@ -13,7 +13,7 @@ import type {
   SpecialistOption,
 } from '@/lib/guidelines/types';
 import { Term } from '@/components/Tooltip';
-import { BLOOD_RANGES } from '@/lib/guidelines/thresholds';
+import { BLOOD_RANGES, computeCrCl } from '@/lib/guidelines/thresholds';
 
 interface Props {
   result: ClinicalDecision;
@@ -279,11 +279,11 @@ const INVESTIGATION_BULLETS: Partial<Record<string, string[]>> = {
     'Do NOT administer denosumab until Vit D ≥50 nmol/L',
     'Safety ceiling: do not exceed 4,000 IU/day long-term without specialist supervision',
   ],
-  egfr: [
-    'Required to select safe agent',
-    'eGFR <35: alendronate and zoledronate contraindicated',
-    'eGFR <30: risedronate also contraindicated',
-    'eGFR <35 on denosumab: mandatory corrected calcium check 2 weeks after every injection',
+  creatinine: [
+    'Required to select safe agent — CrCl computed from creatinine + weight + age + sex',
+    'CrCl <35: alendronate and zoledronate contraindicated',
+    'CrCl <30: risedronate also contraindicated',
+    'CrCl <35 on denosumab: mandatory corrected calcium check 2 weeks after every injection',
   ],
   alp: [
     'Bone turnover marker — useful baseline before treatment',
@@ -411,13 +411,18 @@ function buildBloodEntries(patient: PatientInput): BloodEntry[] {
     }
   }
 
-  // eGFR
-  const egfr = b.egfr ?? null;
-  if (egfr !== null) {
-    if (egfr <= 35) {
+  // Renal function — CrCl computed via Cockcroft-Gault from creatinine + weight + age + sex.
+  // Threshold values (<=35, <50, <45) and bullet content carry forward from the pre-v1.46
+  // state; full bullet audit + engine-predicate consolidation is Backlog #16.
+  const creat = b.creatinine ?? null;
+  const crcl = computeCrCl(patient);
+  if (creat !== null && crcl !== null) {
+    const crclR = Math.round(crcl);
+    const valueText = `${crclR} mL/min (creat ${creat} µmol/L)`;
+    if (crcl <= 35) {
       entries.push({
-        name: 'eGFR',
-        value: `${egfr} ml/min/1.73 m²`,
+        name: 'Renal function (CrCl)',
+        value: valueText,
         status: 'abnormal',
         statusLabel: 'bisphosphonate boundary',
         bullets: [
@@ -427,22 +432,22 @@ function buildBloodEntries(patient: PatientInput): BloodEntry[] {
           'Mandatory adjusted calcium check 2 weeks after every denosumab injection',
         ],
       });
-    } else if (egfr < 50) {
+    } else if (crcl < 50) {
       entries.push({
-        name: 'eGFR',
-        value: `${egfr} ml/min/1.73 m²`,
+        name: 'Renal function (CrCl)',
+        value: valueText,
         status: 'abnormal',
         statusLabel: 'borderline renal function',
         bullets: [
           'Oral bisphosphonate (alendronate or risedronate) preferred over IV zoledronate',
-          'Avoid IV zoledronate when eGFR <45',
-          'Monitor eGFR at least annually',
+          'Avoid IV zoledronate when CrCl <45',
+          'Monitor CrCl at least annually',
         ],
       });
     } else {
       entries.push({
-        name: 'eGFR',
-        value: `${egfr} ml/min/1.73 m²`,
+        name: 'Renal function (CrCl)',
+        value: valueText,
         status: 'normal',
         statusLabel: 'adequate',
         bullets: ['No renal restrictions on bisphosphonate or denosumab'],
@@ -1212,7 +1217,7 @@ export function ResultsView({ result, patient, onReset, onBack, onRevealNoRfFrax
           function formatInvestigationName(id: string): string {
             // Preserve canonical capitalisation (e.g. eGFR), expand abbreviations as needed.
             switch (id) {
-              case 'egfr':       return 'eGFR';
+              case 'creatinine': return 'Serum creatinine';
               case 'frax':       return 'FRAX';
               case 'dexa':       return 'DEXA';
               case 'vfa':        return 'VFA';

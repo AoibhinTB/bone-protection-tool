@@ -1,6 +1,7 @@
 'use client';
 
 import type { PatientInput } from '@/lib/guidelines/types';
+import { computeBMI } from '@/lib/guidelines/thresholds';
 import { Field, NumInput, YesNo, SectionHeading } from '../FormPrimitives';
 
 interface Props {
@@ -14,21 +15,41 @@ interface Props {
 // history (female), and HRT safety (female). Page 3 becomes Medical History
 // only.
 export function Step2FractureHistory({ data, onChange }: Props) {
+  // v1.46 — BMI is no longer a direct schema field; it derives from
+  // height + weight via computeBMI(). Weight is dual-purpose: also feeds
+  // Cockcroft-Gault CrCl computation in Step 6's renal flow.
+  const derivedBMI = computeBMI(data);
   return (
     <div>
       {/* ── Lifestyle ──────────────────────────────────────────────────── */}
       <SectionHeading>Lifestyle</SectionHeading>
-      <Field label="BMI" hint="kg/m²">
+      <Field label="Height" hint="cm">
         <NumInput
-          value={data.bmi}
-          onChange={v => onChange({ bmi: v })}
-          min={10}
-          max={70}
-          step={0.1}
-          unit="kg/m²"
+          value={data.heightCm}
+          onChange={v => onChange({ heightCm: v })}
+          min={100}
+          max={220}
+          step={1}
+          unit="cm"
           width="w-20"
         />
       </Field>
+      <Field label="Weight" hint="kg — also used for Cockcroft-Gault CrCl computation">
+        <NumInput
+          value={data.weightKg}
+          onChange={v => onChange({ weightKg: v })}
+          min={20}
+          max={250}
+          step={0.1}
+          unit="kg"
+          width="w-20"
+        />
+      </Field>
+      <p className="text-xs text-slate-500 pl-4 sm:pl-6 -mt-1 mb-2">
+        BMI: <span className="font-medium text-slate-700">
+          {derivedBMI !== null ? `${derivedBMI.toFixed(1)} kg/m²` : '—'}
+        </span> <span className="text-slate-400">(derived from height + weight)</span>
+      </p>
       <Field label="Current smoker">
         <YesNo
           value={data.currentSmoker}
