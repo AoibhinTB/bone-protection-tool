@@ -1,57 +1,69 @@
-// v1.37 Filters 1-5 — structural pre-treatment safety filters for hypocalcaemia and Vit D.
+// Pre-treatment structural safety filter chain — flag emission + recipe-status
+// mutations for missing/abnormal Tier 1 prerequisites before any antiresorptive
+// initiation.
+//
+// Filter inventory (by flag ID; numbering retired v1.48):
+//   - hypocalcaemia_antiresorptive_block       Ca measured + <2.10
+//   - calcium_unmeasured_antiresorptive_block  Ca missing (+ antiresorptive candidate)
+//   - vitd_parenteral_block                    Vit D measured + <50
+//   - vitd_unmeasured_parenteral_block         Vit D missing (+ parenteral candidate)
+//   - crcl_pending_renal_drug                  CrCl uncomputable (+ renally-cleared candidate)
+//   - denosumab_continuation_hypocalcaemia_hold  Ca low + currently-on denosumab
+//
+// Two emission classes (v1.48 — D3):
+//   - Measurement filters (Ca low, Vit D low): fire regardless of recommendations
+//     content. Hypocalcaemia / Vit D deficiency are clinical findings worth
+//     surfacing in their own right.
+//   - Missingness filters (Ca missing, Vit D missing, CrCl uncomputable): gate
+//     on the relevant drug class being in `treatmentRecommendations` OR
+//     `specialistOptions` (Shape B specialist-menu inclusion per D4). If no
+//     relevant drug is being considered for this patient, the prerequisite
+//     would create cognitive friction for no clinical action.
+//
+// Multi-flag emission (v1.48 — D2): the prior F2/F4 dedup is retired. When
+// multiple missingness conditions hold, all relevant flags fire. Each filter's
+// message is specific to its own prerequisite so duplication-of-information is
+// not a concern (D7).
+//
+// Status-mutation precedence: filters mutate `rec.status` in source order
+// (Ca low → Ca missing → Vit D low → Vit D missing → CrCl uncomputable). The
+// guard `if (rec.status && rec.status !== 'active') continue;` ensures the
+// first filter to fire on a given recommendation wins both the status tag and
+// the pendingCaption. Subsequent filters still emit their FLAGS (additive) but
+// do not overwrite per-rec state.
 //
 // Sources:
-//   - NOGG 2024 p.29 §a: oral and intravenous bisphosphonates are contraindicated in
-//     patients with hypocalcaemia.
-//   - NOGG 2024 p.30 §a: denosumab is contraindicated in patients with hypocalcaemia.
-//   - NOGG 2024 p.34 §c: romosozumab is contraindicated in patients with hypocalcaemia.
-//   - NOGG 2024 Recommendation 17 (Strong): treat vitamin D deficiency and insufficiency
-//     prior to initiation of parenteral anti-osteoporosis drug treatment, and alongside
-//     initiation of oral anti-osteoporosis drug treatment.
-//
-// Architectural pattern:
-//   - Recommendations are NOT removed when blocked/pending. They are tagged via the
-//     status/blockReason/unblockAction fields on TreatmentRecommendation. This preserves
-//     the "planned treatment once blocker resolved" UX requirement — clinician sees what
-//     they'd be prescribing and what to do to unblock it.
-//   - Filters fire urgent flags that accumulate (all reasons surfaced). The status tag
-//     uses precedence Ca-low > Ca-missing > Vit D-low > Vit D-missing: implemented by
-//     processing filters in order and only mutating entries currently 'active' (undefined
-//     treated as 'active').
-//   - teriparatide + abaloparatide are explicitly NOT in scope (anabolics, hyperCa CI not
-//     hypoCa).
-//   - HRT, raloxifene, bazedoxifene also NOT in scope (NOGG p.29-34 hypoCa CI text covers
-//     bisphosphonates / denosumab / romosozumab specifically).
-//   - The existing combined safety gate at treatment.ts:77-95 (severe Vit D <25 AND hypoCa
-//     <2.10 simultaneously) continues to return empty recommendations and is unaffected by
-//     this filter — that gate is a hard halt, this filter operates on the post-recipe set.
+//   - NOGG 2024 p.29 §a (oral + IV bisphosphonates CI in hypocalcaemia)
+//   - NOGG 2024 p.30 §a (denosumab CI in hypocalcaemia)
+//   - NOGG 2024 p.34 §c (romosozumab CI in hypocalcaemia)
+//   - NOGG 2024 Recommendation 17 (Strong, Vit D parenteral pre-condition)
+//   - Spec v1.46 §4.2 Tier 1 row (CrCl prerequisite for renally-cleared
+//     antiresorptive initiation)
+//   - Per-drug SmPC renal thresholds — RENAL_LIMITS at thresholds.ts:354
 
 import type {
   PatientInput,
   TreatmentRecommendation,
   ClinicalFlag,
   TreatmentAgent,
+  SpecialistOption,
 } from './types';
-import { GUIDELINE_VERSIONS } from './thresholds';
+import { GUIDELINE_VERSIONS, computeCrCl } from './thresholds';
 
 const SRC_NOGG = GUIDELINE_VERSIONS.nogg;
 
 const CA_LOW = 2.10; // mmol/L — NOGG threshold for hypocalcaemia
 const VITD_INSUFFICIENT = 50; // nmol/L — NOGG Rec 17 parenteral threshold
 
-// v1.47 — Pending-prerequisites caption variants (locked wording). Surfaced to
-// the UI via TreatmentRecommendation.pendingCaption at every pending-tagging
-// site below. Variant chosen at filter-chain entry based on the global
-// missing-prerequisite state — NOT per-filter (filters carry filter-specific
-// blockReason/unblockAction subject to precedence; the caption must summarise
-// every gap, which a single filter's view can't reflect). See types.ts
-// TreatmentRecommendation.pendingCaption comment for the variant table.
+// Pending-prerequisite captions (D7) — each missingness filter carries its own
+// caption; no MULTI variant. Surfaced via TreatmentRecommendation.pendingCaption
+// at every pending-tagging site below.
 const CAPTION_CALCIUM_ONLY =
   'Complete corrected calcium before initiating treatment. Reassess once result available.';
-const CAPTION_VITD_ONLY_PARENTERAL =
+const CAPTION_VITD_ONLY =
   'Complete Vit D measurement before initiating parenteral therapy. Reassess once result available.';
-const CAPTION_MULTI_MISSING =
-  'Complete Tier 1 bloods (calcium, Vit D, serum creatinine as applicable) before initiating treatment. Reassess once results available.';
+const CAPTION_CRCL_ONLY =
+  'Complete CrCl (Cockcroft-Gault) before initiating renally-cleared therapy. Reassess once result available.';
 
 const ANTIRESORPTIVES: ReadonlySet<TreatmentAgent> = new Set<TreatmentAgent>([
   'alendronate',
@@ -62,13 +74,28 @@ const ANTIRESORPTIVES: ReadonlySet<TreatmentAgent> = new Set<TreatmentAgent>([
   'romosozumab',
 ]);
 
+// Renally-cleared drug set — matches RENAL_LIMITS keys at thresholds.ts:354.
+// Bisphosphonates + denosumab carry CrCl-based prescribing decisions (CI cascade
+// or Ca-watch threshold). Teriparatide / romosozumab / abaloparatide are
+// deliberately excluded per Resolution γ: their renal considerations are
+// specialist-judgement (caution at <30 / hypocalcaemia-risk flagging in
+// referral), not GP-level prerequisite gating.
+const RENALLY_CLEARED: ReadonlySet<TreatmentAgent> = new Set<TreatmentAgent>([
+  'alendronate',
+  'risedronate',
+  'ibandronate',
+  'zoledronate',
+  'denosumab',
+]);
+
 function isAntiresorptive(rec: TreatmentRecommendation): boolean {
   return ANTIRESORPTIVES.has(rec.agent);
 }
 
-// Parenteral antiresorptive: SC injection or IV infusion. Ibandronate has both oral and
-// IV preparations and shares the 'ibandronate' agent enum; distinguish via the dose string
-// (same pattern used by withBPInitiationContext at treatment.ts).
+// Parenteral antiresorptive: SC injection or IV infusion. Ibandronate has both
+// oral and IV preparations and shares the 'ibandronate' agent enum; distinguish
+// via the dose string (same pattern used by withBPInitiationContext at
+// treatment.ts).
 function isParenteralAntiresorptive(rec: TreatmentRecommendation): boolean {
   if (rec.agent === 'denosumab' || rec.agent === 'romosozumab' || rec.agent === 'zoledronate') return true;
   if (rec.agent === 'ibandronate' && rec.dose.includes('IV')) return true;
@@ -81,45 +108,76 @@ function isOralBisphosphonate(rec: TreatmentRecommendation): boolean {
   return false;
 }
 
+function isRenallyCleared(rec: TreatmentRecommendation): boolean {
+  return RENALLY_CLEARED.has(rec.agent);
+}
+
+// SpecialistOption gate helpers. SpecialistOption.drug is the AnabolicAgent set
+// (teriparatide / romosozumab / abaloparatide). Of those:
+//   - romosozumab IS in ANTIRESORPTIVES and IS parenteral.
+//   - none are in RENALLY_CLEARED (per Resolution γ).
+function specialistOptionsIncludesAntiresorptive(opts: SpecialistOption[]): boolean {
+  return opts.some(o => ANTIRESORPTIVES.has(o.drug));
+}
+function specialistOptionsIncludesParenteralAntiresorptive(opts: SpecialistOption[]): boolean {
+  return opts.some(o => o.drug === 'romosozumab');
+}
+function specialistOptionsIncludesRenallyCleared(opts: SpecialistOption[]): boolean {
+  // RENALLY_CLEARED ∩ AnabolicAgent = ∅. Always false. Kept for structural
+  // parallelism with the other helpers and to make gate composition
+  // self-documenting at the call site; tree-shakes to a constant `false`.
+  return opts.some(o => RENALLY_CLEARED.has(o.drug));
+}
+
 /**
- * Mutates recommendations array in place to tag entries with status/blockReason/unblockAction
- * per NOGG 2024 p.29/30/34 + Rec 17, and pushes urgent flags into the flags array.
+ * Mutates `recommendations` array in place to tag entries with status /
+ * blockReason / unblockAction per the safety-filter chain, and pushes urgent
+ * flags into the `flags` array.
  *
- * Called once from index.ts after generateTreatmentOutput returns — single call site applies
- * to every code path that produced recommendations (standard recipe, GIOP, early menopause,
- * oesophageal disease pathway, sequencing continuation).
+ * Called once from index.ts after generateTreatmentOutput returns — single call
+ * site applies to every code path that produced recommendations (standard
+ * recipe, GIOP, early menopause, oesophageal disease, sequencing continuation).
+ *
+ * `specialistOptions` participates in the missingness-filter gate predicates per
+ * D4 (Shape B specialist-menu drugs count as "in scope for prerequisite
+ * surfacing"). It is not itself mutated.
  */
 export function applyPreTreatmentSafetyFilters(
   patient: PatientInput,
   recommendations: TreatmentRecommendation[],
+  specialistOptions: SpecialistOption[],
   flags: ClinicalFlag[],
 ): void {
   const ca = patient.bloodResults?.adjustedCalciumMmol ?? null;
   const vitD = patient.bloodResults?.vitaminDNmol ?? null;
+  const crcl = computeCrCl(patient);
 
   const caLow = ca !== null && ca < CA_LOW;
   const caMissing = ca === null;
   const vitDLow = vitD !== null && vitD < VITD_INSUFFICIENT;
   const vitDMissing = vitD === null;
+  const crclUnknown = crcl === null;
 
-  // v1.47 — pending-caption variant selection based on the global missing-
-  // prerequisite state. F2 (caMissing) tags all antiresorptives — when
-  // vitDMissing is also true, caption captures both gaps because F2's mutation
-  // wins precedence over F4's (status-already-set guard skips F4's mutation).
-  // F4 (vitDMissing standalone) only runs on entries not already tagged by F2,
-  // so by construction caMissing is false at F4's mutation site → Vit D-only
-  // caption applies.
-  const f2PendingCaption =
-    caMissing && vitDMissing ? CAPTION_MULTI_MISSING : CAPTION_CALCIUM_ONLY;
-  const f4PendingCaption = CAPTION_VITD_ONLY_PARENTERAL;
+  // Gate predicates for missingness filters (D3 + D4). Computed once.
+  const anyAntiresorptiveCandidate =
+    recommendations.some(isAntiresorptive) ||
+    specialistOptionsIncludesAntiresorptive(specialistOptions);
+  const anyParenteralAntiresorptiveCandidate =
+    recommendations.some(isParenteralAntiresorptive) ||
+    specialistOptionsIncludesParenteralAntiresorptive(specialistOptions);
+  const anyRenallyClearedCandidate =
+    recommendations.some(isRenallyCleared) ||
+    specialistOptionsIncludesRenallyCleared(specialistOptions);
 
-  // ─── Filter 1: Universal hypocalcaemia (Ca < 2.10) ──────────────────────
+  // ─── hypocalcaemia_antiresorptive_block — measurement filter (Ca low) ───
   // NOGG p.29 §a (oral + IV BPs), p.30 §a (denosumab), p.34 §c (romosozumab) —
   // hypocalcaemia is an absolute contraindication for all antiresorptives.
+  // Fires regardless of recommendations content (D3 — clinical urgency
+  // independent of treatment context).
   if (caLow) {
     for (const rec of recommendations) {
       if (!isAntiresorptive(rec)) continue;
-      if (rec.status && rec.status !== 'active') continue; // precedence: don't override
+      if (rec.status && rec.status !== 'active') continue;
       rec.status = 'blocked';
       rec.blockReason = `Hypocalcaemia: corrected calcium ${ca} mmol/L below 2.10`;
       rec.unblockAction =
@@ -142,11 +200,13 @@ export function applyPreTreatmentSafetyFilters(
     });
   }
 
-  // ─── Filter 2: Missing calcium (Ca null) ─────────────────────────────────
-  // Spec v1.37 §4 line 323 + §5.3 line 444 — calcium must be measured before any
-  // antiresorptive can be initiated (cannot verify CI without measurement; pre-each-dose
-  // Ca check is SmPC mandate for denosumab and IV zoledronate).
-  if (caMissing) {
+  // ─── calcium_unmeasured_antiresorptive_block — missingness filter ───
+  // Spec v1.46 §4.2 Tier 1 row + §5.3: calcium must be measured before any
+  // antiresorptive can be initiated (cannot verify CI without measurement;
+  // pre-each-dose Ca check is SmPC mandate for denosumab and IV zoledronate).
+  // Gated on antiresorptive candidate (D3): if no antiresorptive is being
+  // considered for this patient, the Ca prerequisite is not yet load-bearing.
+  if (caMissing && anyAntiresorptiveCandidate) {
     for (const rec of recommendations) {
       if (!isAntiresorptive(rec)) continue;
       if (rec.status && rec.status !== 'active') continue;
@@ -154,16 +214,16 @@ export function applyPreTreatmentSafetyFilters(
       rec.blockReason = 'Pre-treatment corrected calcium not yet measured';
       rec.unblockAction =
         'Check corrected calcium (Tier 1 bloods); confirm in range (2.10–2.55 mmol/L) before initiation.';
-      rec.pendingCaption = f2PendingCaption;
+      rec.pendingCaption = CAPTION_CALCIUM_ONLY;
     }
     flags.push({
       id: 'calcium_unmeasured_antiresorptive_block',
       severity: 'urgent',
       message:
         'Mandatory pre-treatment corrected calcium check required before any antiresorptive can be initiated. ' +
-        'Measure Ca, Vit D, and serum creatinine as Tier 1 bloods (see investigationsNeeded). Reassess once results available.',
+        'Measure corrected calcium as a Tier 1 blood (see investigationsNeeded). Reassess once result available.',
       rationale:
-        'Spec v1.37 §4 line 323 + §5.3 line 444: corrected calcium must be measured before any antiresorptive ' +
+        'Spec v1.46 §4.2 Tier 1 row + §5.3: corrected calcium must be measured before any antiresorptive ' +
         'initiation (cannot verify NOGG hypoCa CI without measurement; pre-each-dose Ca check is the SmPC mandate ' +
         'for denosumab and IV zoledronate). The Tier 1 missing-Ca investigation entry continues to surface in ' +
         'investigationsNeeded — this flag adds the recommendation-time gate.',
@@ -171,10 +231,12 @@ export function applyPreTreatmentSafetyFilters(
     });
   }
 
-  // ─── Filter 3: Vit D < 50 — parenteral block ────────────────────────────
-  // NOGG Rec 17 (Strong) — treat Vit D deficiency/insufficiency prior to initiation of
-  // PARENTERAL anti-osteoporosis drug treatment. Oral BPs continue alongside Vit D
-  // supplementation per Rec 17. Scope: parenterals only.
+  // ─── vitd_parenteral_block — measurement filter (Vit D low) ───
+  // NOGG Rec 17 (Strong) — treat Vit D deficiency/insufficiency prior to
+  // initiation of PARENTERAL anti-osteoporosis drug treatment. Oral BPs
+  // continue alongside Vit D supplementation per Rec 17. Scope: parenterals
+  // only. Fires regardless of recommendations content (D3 — Vit D deficiency
+  // is a clinical finding worth surfacing).
   if (vitDLow) {
     for (const rec of recommendations) {
       if (!isParenteralAntiresorptive(rec)) continue;
@@ -185,7 +247,6 @@ export function applyPreTreatmentSafetyFilters(
         'Treat Vit D per spec §4.3 loading protocol; recheck after loading; once Vit D ≥50 nmol/L ' +
         '(or consultant-confirmed target — see §14.11), reassess parenteral options.';
     }
-    // Oral BPs continue with NOGG Rec 17 concurrent-supplementation note.
     for (const rec of recommendations) {
       if (!isOralBisphosphonate(rec)) continue;
       if (rec.status && rec.status !== 'active') continue;
@@ -208,10 +269,13 @@ export function applyPreTreatmentSafetyFilters(
     });
   }
 
-  // ─── Filter 4: Vit D missing — parenteral block ─────────────────────────
-  // NOGG Rec 17 (Strong) — cannot verify replete status without measurement. Same scope
-  // as Filter 3 (parenterals).
-  if (vitDMissing) {
+  // ─── vitd_unmeasured_parenteral_block — missingness filter ───
+  // NOGG Rec 17 (Strong) — cannot verify replete status without measurement.
+  // Same drug scope as vitd_parenteral_block (parenterals). Gated on parenteral
+  // antiresorptive candidate (D3); the prior F2/F4 dedup is retired (D2 —
+  // each filter speaks for its own prerequisite, so co-firing with the
+  // calcium-missing flag does not duplicate guidance).
+  if (vitDMissing && anyParenteralAntiresorptiveCandidate) {
     for (const rec of recommendations) {
       if (!isParenteralAntiresorptive(rec)) continue;
       if (rec.status && rec.status !== 'active') continue;
@@ -219,9 +283,8 @@ export function applyPreTreatmentSafetyFilters(
       rec.blockReason = 'Vit D not yet measured — parenteral antiresorptives require Vit D ≥50 before initiation';
       rec.unblockAction =
         'Check Vit D (Tier 1 bloods); confirm ≥50 nmol/L before parenteral initiation.';
-      rec.pendingCaption = f4PendingCaption;
+      rec.pendingCaption = CAPTION_VITD_ONLY;
     }
-    // Oral BPs continue with NOGG Rec 17 concurrent-supplementation note.
     for (const rec of recommendations) {
       if (!isOralBisphosphonate(rec)) continue;
       if (rec.status && rec.status !== 'active') continue;
@@ -230,47 +293,74 @@ export function applyPreTreatmentSafetyFilters(
         'NOGG Rec 17: Vit D not yet measured. Check Vit D; supplement alongside oral bisphosphonate; recheck at 8–12 weeks.',
       ];
     }
-    // v1.45 dedup — suppress F4 flag emission when F2
-    // (calcium_unmeasured_antiresorptive_block) is already firing. F2's
-    // message explicitly says "Measure Ca, Vit D, and serum creatinine as Tier 1 bloods"
-    // — the parenteral-specific Vit D message below duplicates that
-    // guidance, producing two URGENT alerts both prompting Vit D
-    // measurement. The recipe-status mutation block above (pending +
-    // blockReason on parenteral entries; Rec 17 monitoring note on oral
-    // BPs) is preserved regardless — parenteral entries should still be
-    // tagged 'pending' even when the user-facing message is consolidated
-    // under F2. F3 (vitd_parenteral_block, Vit D measured + LOW) is NOT
-    // affected by this dedup — F3 carries distinct "Treat Vit D first"
-    // actionable guidance that F2 does not duplicate.
-    //
-    // v1.46.2 — refactored from `flags.some(f => f.id === '...')` runtime
-    // introspection to deterministic boolean check on the precondition
-    // (caMissing) that gates F2. F2's emission is unconditional inside
-    // its `if (caMissing)` block, so caMissing ⇔ F2 fires. Using the
-    // boolean directly decouples the dedup from source order — even if
-    // a future refactor moves F4 above F2, the guard remains correct.
-    // Locked structurally by TC112 (F2+F4 dedup contract).
-    const f2WouldFire = caMissing;
-    if (!f2WouldFire) {
-      flags.push({
-        id: 'vitd_unmeasured_parenteral_block',
-        severity: 'urgent',
-        message:
-          'Parenteral antiresorptives require pre-treatment Vit D measurement (NOGG 2024 Rec 17). ' +
-          'Measure as part of Tier 1 bloods. Oral bisphosphonates may be initiated with concurrent supplementation.',
-        rationale:
-          'NOGG 2024 Recommendation 17 (Strong): Vit D status must be established before parenteral initiation. ' +
-          'Without measurement, the Rec 17 precondition cannot be verified.',
-        source: SRC_NOGG,
-      });
-    }
+    flags.push({
+      id: 'vitd_unmeasured_parenteral_block',
+      severity: 'urgent',
+      message:
+        'Parenteral antiresorptives require pre-treatment Vit D measurement (NOGG 2024 Rec 17). ' +
+        'Measure serum Vit D as a Tier 1 blood. Oral bisphosphonates may be initiated with concurrent supplementation.',
+      rationale:
+        'NOGG 2024 Recommendation 17 (Strong): Vit D status must be established before parenteral initiation. ' +
+        'Without measurement, the Rec 17 precondition cannot be verified.',
+      source: SRC_NOGG,
+    });
   }
 
-  // ─── Filter 5: Continuation-context hypocalcaemia for on-denosumab patients ──
-  // Distinct from initiation context (Filter 1 covers initiation). NOGG p.30 §c +
-  // denosumab SmPC: corrected Ca must be measured before EVERY dose. This flag fires
-  // alongside the existing bloodFlags.ts hypocalcaemia narrative — the new flag adds
-  // the continuation-specific "withhold next dose" action.
+  // ─── crcl_pending_renal_drug — missingness filter (NEW v1.48) ───
+  // Spec v1.46 §4.2 Tier 1 row: CrCl must be available before initiating any
+  // renally-cleared antiresorptive. CrCl is computed via Cockcroft-Gault
+  // (creatinine + weight + age + sex) — when any required input is missing
+  // the renal cascade at RENAL_LIMITS (thresholds.ts:354) cannot be evaluated.
+  //
+  // Drug scope (Resolution γ): bisphosphonates (alendronate / risedronate /
+  // ibandronate / zoledronate) + denosumab. Teriparatide / romosozumab /
+  // abaloparatide are excluded — their renal considerations are
+  // specialist-judgement, not GP-level prerequisite gating.
+  if (crclUnknown && anyRenallyClearedCandidate) {
+    for (const rec of recommendations) {
+      if (!isRenallyCleared(rec)) continue;
+      if (rec.status && rec.status !== 'active') continue;
+      rec.status = 'pending';
+      rec.blockReason = 'CrCl (Cockcroft-Gault) not yet computable — required for renally-cleared antiresorptive selection';
+      rec.unblockAction =
+        'Complete the inputs needed for CrCl computation (serum creatinine, weight, age); recheck before initiation.';
+      rec.pendingCaption = CAPTION_CRCL_ONLY;
+    }
+    // Dynamic body listing the actual missing CrCl inputs. computeCrCl returns
+    // null when {creatinine, weight, age} is missing or non-positive; sex
+    // cannot be null per the PatientInput type. Age is non-nullable in
+    // PatientInput too, so the practical enumerable set is {creatinine,
+    // weight} unless the patient is constructed with a non-positive age.
+    const creat = patient.bloodResults?.creatinine ?? null;
+    const missing: string[] = [];
+    if (creat === null) missing.push('serum creatinine (Tier 1 blood)');
+    if (patient.weightKg === null) missing.push('patient weight');
+    const list =
+      missing.length === 0
+        ? 'the inputs required for Cockcroft-Gault computation'
+        : missing.length === 1
+          ? missing[0]
+          : `${missing[0]} and ${missing[1]}`;
+    flags.push({
+      id: 'crcl_pending_renal_drug',
+      severity: 'urgent',
+      message:
+        'Mandatory pre-treatment CrCl (Cockcroft-Gault) required before any renally-cleared antiresorptive can be initiated. ' +
+        `Complete ${list} to enable CrCl computation. Reassess once available.`,
+      rationale:
+        'Spec v1.46 §4.2 Tier 1 row: CrCl must be available before initiation of any renally-cleared ' +
+        'antiresorptive (bisphosphonates have CrCl-based CI thresholds; denosumab has CrCl-based Ca-watch + ' +
+        'specialist-only thresholds). Cockcroft-Gault requires creatinine, weight, and age — when any input ' +
+        'is missing the renal cascade at thresholds.ts:354 cannot be evaluated.',
+      source: SRC_NOGG,
+    });
+  }
+
+  // ─── denosumab_continuation_hypocalcaemia_hold — continuation-context (Ca low + on deno) ───
+  // Distinct from initiation context (hypocalcaemia_antiresorptive_block covers
+  // initiation). NOGG p.30 §c + denosumab SmPC: corrected Ca must be measured
+  // before EVERY dose. Fires alongside the existing bloodFlags.ts hypocalcaemia
+  // narrative — adds the continuation-specific "withhold next dose" action.
   if (
     caLow &&
     patient.currentTreatment?.currentlyOn === true &&
@@ -291,9 +381,10 @@ export function applyPreTreatmentSafetyFilters(
         'The 7-month rebound risk window constrains how long the hold can safely run.',
       source: SRC_NOGG,
     });
-    // Filter 1 has already tagged the denosumab recipe as 'blocked' with the generic
-    // initiation-context unblockAction. Override with continuation-specific wording so
-    // the UI surfaces the right action for an already-on patient.
+    // hypocalcaemia_antiresorptive_block already tagged the denosumab recipe as
+    // 'blocked' with the generic initiation-context unblockAction. Override
+    // with continuation-specific wording so the UI surfaces the right action
+    // for an already-on patient.
     for (const rec of recommendations) {
       if (rec.agent === 'denosumab' && rec.status === 'blocked') {
         rec.unblockAction =

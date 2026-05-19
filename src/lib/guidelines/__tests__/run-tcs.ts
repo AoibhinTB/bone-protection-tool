@@ -3678,9 +3678,9 @@ function tc99(): TCResult {
   check(failures, 'treatmentRecommended === true',
     decision.treatmentRecommended === true);
 
-  // Parenteral entries (if any) tagged 'blocked'. With eGFR 68 there are no parenteral
-  // recipes pushed — the engine's first-line for normal eGFR is oral BPs. The assertion
-  // is vacuously true; the flag firing is the meaningful test.
+  // Parenteral entries tagged 'blocked'. Post-v1.46 IV zol push, parenterals
+  // is non-empty (IV zol is in recs at normal CrCl); the assertion is no
+  // longer vacuous. The flag firing remains the headline check.
   const parenterals = decision.treatmentRecommendations.filter(isParenteralAR);
   for (const rec of parenterals) {
     check(failures, `${rec.agent} (parenteral) status === 'blocked'`,
@@ -3753,7 +3753,8 @@ function tc100(): TCResult {
     decision.riskStratification.category === 'high',
     `got ${decision.riskStratification.category}`);
 
-  // Parenteral entries (if any) tagged 'pending'. Vacuous when no parenterals in recs.
+  // Parenteral entries tagged 'pending'. Post-v1.46 IV zol push, parenterals
+  // is non-empty at normal CrCl; the assertion is no longer vacuous.
   const parenterals = decision.treatmentRecommendations.filter(isParenteralAR);
   for (const rec of parenterals) {
     check(failures, `${rec.agent} (parenteral) status === 'pending'`,
@@ -4478,30 +4479,25 @@ function tc111(): TCResult {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// v1.46.2 TEST CASE — F2 + F4 dedup contract lock
+// v1.48 (Backlog #18) — Triple-missingness emission lock
 // ═══════════════════════════════════════════════════════════════════════════
 
 // ─── TC112 ─────────────────────────────────────────────────────────────────
-// Non-VHR + prior hip fracture + no bloods entered. Locks the v1.45 F2+F4
-// dedup contract that was previously verified by Vercel eyeball only ("lean
-// coverage" trade-off per the v1.45 round commit). This TC closes that gap.
+// Triple-emission contract for the three missingness filters
+// (calcium_unmeasured_antiresorptive_block, vitd_unmeasured_parenteral_block,
+// crcl_pending_renal_drug). The prior F2/F4 dedup is retired (D2) — all three
+// flags fire independently when their preconditions hold and their drug-class
+// gates are satisfied.
 //
 // Profile: 65F + prior hip fracture (recent within 24mo) + T-2.0 osteopenia
-// + NO bloods entered (bloodResults: null — so calcium, Vit D, eGFR all
-// null). Patient routes to 'high' via prior-fx-high path (priorHipFracture
-// true → engine routes to high regardless of FRAX).
+// + NO bloods entered (bloodResults: null — calcium, Vit D, creatinine all
+// null). Routes to 'high' via prior-fx-high path. Recs include alendronate,
+// risedronate, IV zoledronate (Rule 1 / Rule 2 push). All three
+// missingness-filter gates satisfied (antiresorptive in recs; parenteral in
+// recs via IV zol; renally-cleared in recs via the BPs). F2 wins source-order
+// precedence for the recipe-status mutation and caption — verified at TC113.
 //
-// Both caMissing AND vitDMissing are true. Without the dedup, BOTH F2
-// (calcium_unmeasured_antiresorptive_block) AND F4 (vitd_unmeasured_
-// parenteral_block) would fire as URGENT — two alerts both prompting Vit D
-// measurement, with F2's broader message already covering F4's narrower
-// guidance. Dedup suppresses F4 emission when F2 fires.
-//
-// v1.46.2 refactored the dedup guard from `flags.some(...)` runtime
-// introspection to deterministic `f2WouldFire = caMissing` boolean check
-// — same behavioural contract, decoupled from source-order ordering.
-// This TC locks the contract structurally so future filter-chain
-// refactors can't silently regress it.
+// Sibling lock at TC113 (caption-precedence verbatim).
 function tc112(): TCResult {
   const failures: string[] = [];
   const patient = basePatient({
@@ -4528,54 +4524,66 @@ function tc112(): TCResult {
   check(failures, 'risedronate in recommendations', hasAgent(decision, 'risedronate'));
   check(failures, 'IV zoledronate in recommendations', hasAgent(decision, 'zoledronate'));
 
-  // F2 missing-calcium recipe-status mutation: every antiresorptive in
-  // recommendations gets tagged status='pending' (the F2 contract independent
-  // of the flag emission). Locks the behavioural side of F2's filter.
+  // Recipe-status mutation: every antiresorptive in recommendations tagged
+  // status='pending'. Source-order precedence puts calcium_unmeasured first;
+  // the per-rec caption-precedence is asserted at TC113.
   const antiresorptives = decision.treatmentRecommendations.filter(
     r => r.agent === 'alendronate' || r.agent === 'risedronate' || r.agent === 'zoledronate',
   );
   for (const rec of antiresorptives) {
-    check(failures, `${rec.agent} status === 'pending' (F2 status mutation)`,
+    check(failures, `${rec.agent} status === 'pending'`,
       rec.status === 'pending', `got status=${rec.status}`);
   }
 
-  // POSITIVE: F2 fires URGENT (the broad calcium-led message that covers
-  // Ca + Vit D + eGFR Tier 1 bloods guidance).
+  // POSITIVE: calcium_unmeasured_antiresorptive_block fires URGENT with
+  // calcium-only body wording (v1.48 — D7 each filter speaks for itself).
   const f2Flag = decision.flags.find(f => f.id === 'calcium_unmeasured_antiresorptive_block');
-  check(failures, 'F2 (calcium_unmeasured_antiresorptive_block) fires URGENT',
+  check(failures, 'calcium_unmeasured_antiresorptive_block fires URGENT',
     !!f2Flag && f2Flag.severity === 'urgent', `got severity=${f2Flag?.severity}`);
-  check(failures, 'F2 message anchors "Measure Ca, Vit D, and serum creatinine" (v1.46)',
-    !!f2Flag && /measure ca, vit d, and serum creatinine/i.test(f2Flag.message));
+  check(failures, 'calcium_unmeasured_antiresorptive_block body anchors "Measure corrected calcium"',
+    !!f2Flag && /measure corrected calcium/i.test(f2Flag.message));
 
-  // NEGATIVE: F4 (vitd_unmeasured_parenteral_block) does NOT fire — dedup
-  // contract. F2's broader message subsumes F4's guidance; emitting both
-  // would surface two URGENT alerts both prompting Vit D measurement.
-  check(failures, 'F4 (vitd_unmeasured_parenteral_block) does NOT fire — dedup contract',
-    !decision.flags.some(f => f.id === 'vitd_unmeasured_parenteral_block'));
+  // POSITIVE: vitd_unmeasured_parenteral_block fires URGENT (v1.48 — D2 dedup
+  // retired; flag emits independently because IV zoledronate is a parenteral
+  // antiresorptive in recs).
+  const f4Flag = decision.flags.find(f => f.id === 'vitd_unmeasured_parenteral_block');
+  check(failures, 'vitd_unmeasured_parenteral_block fires URGENT (v1.48 — dedup retired)',
+    !!f4Flag && f4Flag.severity === 'urgent', `got severity=${f4Flag?.severity}`);
+  check(failures, 'vitd_unmeasured_parenteral_block body anchors "Measure serum Vit D"',
+    !!f4Flag && /measure serum vit d/i.test(f4Flag.message));
 
-  // NEGATIVE: F3 (vitd_parenteral_block) does NOT fire — Vit D is MISSING
-  // (vitDMissing branch), not measured + low (vitDLow branch). F3 scope
-  // is unaffected by the F2/F4 dedup.
-  check(failures, 'F3 (vitd_parenteral_block) does NOT fire — Vit D missing, not low',
+  // POSITIVE: crcl_pending_renal_drug fires URGENT (v1.48 — new filter).
+  // CrCl uncomputable (creat null + weight set + age set → null). Renally-
+  // cleared bisphosphonates in recs satisfy the gate.
+  const crclFlag = decision.flags.find(f => f.id === 'crcl_pending_renal_drug');
+  check(failures, 'crcl_pending_renal_drug fires URGENT (v1.48 — new filter)',
+    !!crclFlag && crclFlag.severity === 'urgent', `got severity=${crclFlag?.severity}`);
+  check(failures, 'crcl_pending_renal_drug body lists serum creatinine (creat null, weight set)',
+    !!crclFlag && /serum creatinine/i.test(crclFlag.message));
+
+  // NEGATIVE: vitd_parenteral_block does NOT fire — Vit D is MISSING
+  // (vitDMissing branch), not measured + low (vitDLow branch).
+  check(failures, 'vitd_parenteral_block does NOT fire — Vit D missing, not low',
     !decision.flags.some(f => f.id === 'vitd_parenteral_block'));
 
-  return { name: 'TC112 — F2+F4 dedup contract lock: 65F + hip fx + no bloods (v1.46.2)', passed: failures.length === 0, failures, decision };
+  return { name: 'TC112 — triple missingness emission lock (v1.48): F2 + F4 + CrCl all fire on 65F+hip fx+no bloods', passed: failures.length === 0, failures, decision };
 }
 
-// v1.47 — Pending Prerequisites render contract. Locks the engine-side
-// pendingCaption field that drives the UI's amber banner caption on
-// status='pending' Treatment cards. Two TCs cover the two producible caption
-// variants — multi-missing (TC113, mirroring TC112's profile) and Vit D-only
-// parenteral (TC114, drug-class asymmetry).
+// v1.48 (Backlog #18) — Repurpose: caption-precedence verbatim lock.
 //
-// The calcium-only variant (caMissing + vitDPresent) IS exercised at the F2
-// caption-selection site (`f2PendingCaption = caMissing && vitDMissing ?
-// MULTI : CALCIUM_ONLY`) — the false branch of that ternary is the calcium-
-// only path. Not added as a dedicated TC: the false branch produces the same
-// status='pending' contract as TC113's true branch, just with a different
-// caption string. TC113 + TC114 together cover both ternary branches; a third
-// TC would add ~zero engine-behaviour coverage. Tracked for future addition
-// if a calcium-only-specific UI variant emerges.
+// Pre-v1.48 this TC asserted the (now-retired) CAPTION_MULTI_MISSING verbatim
+// across all antiresorptives when caMissing + vitDMissing both held. Under
+// D7, each missingness filter carries its OWN caption (CAPTION_CALCIUM_ONLY,
+// CAPTION_VITD_ONLY, CAPTION_CRCL_ONLY) — there is no MULTI variant. The
+// remaining caption question is precedence: when multiple filters' gates
+// satisfy on the same patient, the first filter in source order wins the
+// per-rec caption (the `if (rec.status && rec.status !== 'active') continue;`
+// guard at each filter blocks subsequent mutation).
+//
+// Profile mirrors TC112 (65F + prior hip fx + no bloods → all three
+// missingness filters fire as flags). F2 (Ca missing) runs first → all
+// antiresorptives get CAPTION_CALCIUM_ONLY. F4 + CrCl flag-emit but their
+// per-rec mutations skip.
 
 function tc113(): TCResult {
   const failures: string[] = [];
@@ -4592,16 +4600,11 @@ function tc113(): TCResult {
   });
   const decision = runClinicalDecision(patient);
 
-  // Profile mirrors TC112 (65F + prior hip fx + no bloods → 'high' via
-  // prior-fx-high; F2 + F4 both gate-evaluate true; F2's mutation wins
-  // precedence and tags all antiresorptives 'pending').
   check(failures, "riskCategory === 'high'",
     decision.riskStratification.category === 'high',
     `got ${decision.riskStratification.category}`);
 
-  // Re-assert the TC112 status='pending' contract (independent lock here so
-  // that if TC112 is ever weakened, TC113's caption assertion doesn't pass
-  // vacuously on a missing pending state).
+  // Re-assert status='pending' so the caption assertion isn't vacuous.
   const antiresorptives = decision.treatmentRecommendations.filter(
     r => r.agent === 'alendronate' || r.agent === 'risedronate' || r.agent === 'zoledronate',
   );
@@ -4612,21 +4615,21 @@ function tc113(): TCResult {
       rec.status === 'pending', `got status=${rec.status}`);
   }
 
-  // v1.47 pendingCaption contract — multi-missing variant.
-  // v1.46 wording update: 'eGFR' → 'serum creatinine' (engine consumes
-  // creatinine, computes CrCl via Cockcroft-Gault).
-  const EXPECTED_MULTI =
-    'Complete Tier 1 bloods (calcium, Vit D, serum creatinine as applicable) before initiating treatment. Reassess once results available.';
+  // Caption-precedence: every antiresorptive carries CAPTION_CALCIUM_ONLY
+  // (the calcium-missing filter wins source-order precedence over the
+  // vitd-missing and crcl-missing filters).
+  const EXPECTED_CALCIUM_ONLY =
+    'Complete corrected calcium before initiating treatment. Reassess once result available.';
   for (const rec of antiresorptives) {
     check(failures, `${rec.agent} pendingCaption populated`,
       typeof rec.pendingCaption === 'string' && rec.pendingCaption.length > 0,
       `got pendingCaption=${JSON.stringify(rec.pendingCaption)}`);
-    check(failures, `${rec.agent} pendingCaption matches multi-missing variant verbatim`,
-      rec.pendingCaption === EXPECTED_MULTI,
+    check(failures, `${rec.agent} pendingCaption === CAPTION_CALCIUM_ONLY verbatim (precedence: calcium-missing wins)`,
+      rec.pendingCaption === EXPECTED_CALCIUM_ONLY,
       `got ${JSON.stringify(rec.pendingCaption)}`);
   }
 
-  return { name: 'TC113 — pendingCaption multi-missing variant: 65F + hip fx + no bloods (v1.47)', passed: failures.length === 0, failures, decision };
+  return { name: 'TC113 — caption-precedence lock (v1.48): CAPTION_CALCIUM_ONLY wins on triple-missing profile', passed: failures.length === 0, failures, decision };
 }
 
 function tc114(): TCResult {
@@ -4694,16 +4697,158 @@ function tc114(): TCResult {
     !!zol && zol.pendingCaption === EXPECTED_VITD_ONLY,
     `got ${JSON.stringify(zol?.pendingCaption)}`);
 
-  // F4 fires URGENT (since F2 doesn't fire here, the F2/F4 dedup doesn't
-  // suppress F4 — locks the standalone-F4 contract).
-  check(failures, 'F4 (vitd_unmeasured_parenteral_block) fires URGENT',
+  // POSITIVE: vitd_unmeasured_parenteral_block fires URGENT (Vit D missing +
+  // IV zoledronate parenteral in recs satisfies the gate).
+  check(failures, 'vitd_unmeasured_parenteral_block fires URGENT',
     decision.flags.some(f => f.id === 'vitd_unmeasured_parenteral_block' && f.severity === 'urgent'));
 
-  // F2 does NOT fire (calcium is measured + in range).
-  check(failures, 'F2 (calcium_unmeasured_antiresorptive_block) does NOT fire',
+  // NEGATIVE: calcium_unmeasured_antiresorptive_block does NOT fire (Ca
+  // measured + in range).
+  check(failures, 'calcium_unmeasured_antiresorptive_block does NOT fire',
     !decision.flags.some(f => f.id === 'calcium_unmeasured_antiresorptive_block'));
 
+  // NEGATIVE (v1.48 new filter): crcl_pending_renal_drug does NOT fire — all
+  // CrCl inputs present (creat=64, weight=65.6, age=65 → CrCl ≈ 76 mL/min,
+  // computable).
+  check(failures, 'crcl_pending_renal_drug does NOT fire (CrCl computable)',
+    !decision.flags.some(f => f.id === 'crcl_pending_renal_drug'));
+
   return { name: 'TC114 — pendingCaption Vit D-only variant + drug-class asymmetry: 65F + hip fx + Ca measured + Vit D missing (v1.47)', passed: failures.length === 0, failures, decision };
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// v1.48 (Backlog #18) — Missingness-filter gate lock on empty-recommendations
+// ═══════════════════════════════════════════════════════════════════════════
+// TC115/116/117 lock the D3 gating behaviour: missingness filters fire only
+// when their relevant drug class is in `treatmentRecommendations` or
+// `specialistOptions`. A low-risk patient (no clinical risk factors, no
+// fragility fx, no T-score, no GC) routes to empty recommendations + empty
+// specialistOptions — none of the three missingness filters should fire,
+// regardless of which blood is missing. Pre-v1.48 the filters emitted
+// unconditionally on missing-blood state, producing urgent alerts for
+// patients with no treatment to gate against (Backlog #18 root cause).
+
+// ─── TC115 — calcium_unmeasured_antiresorptive_block NEG on empty recs ───
+// Profile: 55F low-risk + Ca null (Vit D + creat measured). No antiresorptive
+// in recs → gate fails → flag does NOT fire.
+function tc115(): TCResult {
+  const failures: string[] = [];
+  const patient = basePatient({
+    age: 55,
+    sex: 'female',
+    heightCm: 162,
+    weightKg: 65.6,
+    fraxMOFPercent: null,
+    fraxHipPercent: null,
+    dexaResults: null,
+    bloodResults: {
+      adjustedCalciumMmol: null, // MISSING — would have fired pre-v1.48
+      vitaminDNmol: 60,
+      creatinine: 70,
+      alp: null,
+      tshMUL: null,
+      hbGramsPerLitre: null,
+      esrOrCrp: null,
+    },
+  });
+  const decision = runClinicalDecision(patient);
+
+  check(failures, "riskCategory === 'low'",
+    decision.riskStratification.category === 'low',
+    `got ${decision.riskStratification.category}`);
+  check(failures, 'treatmentRecommendations is empty',
+    decision.treatmentRecommendations.length === 0,
+    `got ${decision.treatmentRecommendations.length}`);
+  check(failures, 'specialistOptions is empty',
+    decision.specialistOptions.length === 0,
+    `got ${decision.specialistOptions.length}`);
+
+  // The crux: caMissing is true, but no antiresorptive candidate exists, so
+  // the filter must not fire.
+  check(failures, 'calcium_unmeasured_antiresorptive_block does NOT fire (no antiresorptive in recs)',
+    !decision.flags.some(f => f.id === 'calcium_unmeasured_antiresorptive_block'));
+
+  return { name: 'TC115 — calcium-missing filter gate-suppressed on low-risk empty recs (v1.48)', passed: failures.length === 0, failures, decision };
+}
+
+// ─── TC116 — vitd_unmeasured_parenteral_block NEG on empty recs ───
+// Profile: 55F low-risk + Vit D null (Ca + creat measured). No parenteral
+// antiresorptive in recs → gate fails → flag does NOT fire.
+function tc116(): TCResult {
+  const failures: string[] = [];
+  const patient = basePatient({
+    age: 55,
+    sex: 'female',
+    heightCm: 162,
+    weightKg: 65.6,
+    fraxMOFPercent: null,
+    fraxHipPercent: null,
+    dexaResults: null,
+    bloodResults: {
+      adjustedCalciumMmol: 2.30,
+      vitaminDNmol: null, // MISSING — would have fired pre-v1.48
+      creatinine: 70,
+      alp: null,
+      tshMUL: null,
+      hbGramsPerLitre: null,
+      esrOrCrp: null,
+    },
+  });
+  const decision = runClinicalDecision(patient);
+
+  check(failures, "riskCategory === 'low'",
+    decision.riskStratification.category === 'low',
+    `got ${decision.riskStratification.category}`);
+  check(failures, 'treatmentRecommendations is empty',
+    decision.treatmentRecommendations.length === 0,
+    `got ${decision.treatmentRecommendations.length}`);
+  check(failures, 'specialistOptions is empty',
+    decision.specialistOptions.length === 0);
+
+  check(failures, 'vitd_unmeasured_parenteral_block does NOT fire (no parenteral antiresorptive in recs)',
+    !decision.flags.some(f => f.id === 'vitd_unmeasured_parenteral_block'));
+
+  return { name: 'TC116 — vitd-missing filter gate-suppressed on low-risk empty recs (v1.48)', passed: failures.length === 0, failures, decision };
+}
+
+// ─── TC117 — crcl_pending_renal_drug NEG on empty recs ───
+// Profile: 55F low-risk + creat null (Ca + Vit D measured). CrCl uncomputable
+// but no renally-cleared drug in recs → gate fails → flag does NOT fire.
+function tc117(): TCResult {
+  const failures: string[] = [];
+  const patient = basePatient({
+    age: 55,
+    sex: 'female',
+    heightCm: 162,
+    weightKg: 65.6,
+    fraxMOFPercent: null,
+    fraxHipPercent: null,
+    dexaResults: null,
+    bloodResults: {
+      adjustedCalciumMmol: 2.30,
+      vitaminDNmol: 60,
+      creatinine: null, // MISSING — CrCl uncomputable
+      alp: null,
+      tshMUL: null,
+      hbGramsPerLitre: null,
+      esrOrCrp: null,
+    },
+  });
+  const decision = runClinicalDecision(patient);
+
+  check(failures, "riskCategory === 'low'",
+    decision.riskStratification.category === 'low',
+    `got ${decision.riskStratification.category}`);
+  check(failures, 'treatmentRecommendations is empty',
+    decision.treatmentRecommendations.length === 0,
+    `got ${decision.treatmentRecommendations.length}`);
+  check(failures, 'specialistOptions is empty',
+    decision.specialistOptions.length === 0);
+
+  check(failures, 'crcl_pending_renal_drug does NOT fire (no renally-cleared drug in recs)',
+    !decision.flags.some(f => f.id === 'crcl_pending_renal_drug'));
+
+  return { name: 'TC117 — crcl-pending filter gate-suppressed on low-risk empty recs (v1.48)', passed: failures.length === 0, failures, decision };
 }
 
 // ─── Runner ───────────────────────────────────────────────────────────────
@@ -4752,18 +4897,19 @@ const TCs: Array<() => TCResult> = [
   // post_hip_fracture_zoledronate_first_line flag negative-asserted; Rule 1
   // co-equal first-line locked separately via TC1's added hasAgent(zoledronate).
   tc111,
-  // v1.46.2 — F2+F4 dedup contract lock (65F + hip fx + no bloods); closes the
-  // v1.45 lean-coverage gap; deterministic `f2WouldFire = caMissing` guard
-  // refactor at safetyFilters.ts:218 (was: `flags.some(...)` runtime introspection).
-  tc112,
-  // v1.47 — Pending Prerequisites render contract: lock the engine-side
-  // pendingCaption field that drives the UI's amber banner caption on
-  // status='pending' Treatment cards. TC113 covers multi-missing variant (Ca
-  // + Vit D both missing; mirrors TC112's profile + adds caption assertions).
-  // TC114 covers Vit D-only-parenteral variant + drug-class asymmetry (Ca
-  // measured + Vit D missing → orals active, IV zol pending with Vit D-only
-  // caption). Locks the verbatim caption strings + the asymmetry contract.
-  tc113, tc114,
+  // v1.48 (Backlog #18) — Safety-filter rebuild. TC112 repurposed from F2/F4
+  // dedup contract lock to triple-missingness emission lock (all three
+  // missingness filters fire independently on same profile post-dedup
+  // retirement). TC113 repurposed from MULTI_MISSING caption to
+  // caption-precedence (CAPTION_CALCIUM_ONLY wins source-order). TC114
+  // extended with crcl_pending_renal_drug NEG assertion.
+  tc112, tc113, tc114,
+  // v1.48 (Backlog #18) — Missingness-filter gate locks: each missingness
+  // filter must NOT fire when its relevant drug class is absent from
+  // treatmentRecommendations + specialistOptions (low-risk empty-recs
+  // profiles). Pre-v1.48 these filters fired unconditionally; the gating fix
+  // is the headline behaviour change.
+  tc115, tc116, tc117,
 ];
 
 const results = TCs.map(fn => fn());

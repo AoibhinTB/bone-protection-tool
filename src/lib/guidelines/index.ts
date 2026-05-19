@@ -43,13 +43,17 @@ export function runClinicalDecision(patient: PatientInput): ClinicalDecision {
   const { recommendations, flags, referrals, supplements, specialistOptions } =
     generateTreatmentOutput(patient, riskCategory, riskStratification);
 
-  // v1.37 Filters 1-5 — structural pre-treatment safety filters (hypoCa + Vit D).
-  // Mutates recommendations in place (tags status/blockReason/unblockAction) and pushes
-  // urgent flags. Single call site applies regardless of which path produced the recipes
-  // (standard recipe / GIOP / early menopause / oesophageal disease / sequencing).
+  // v1.48 — Structural pre-treatment safety filter chain. Tags recommendation
+  // status (blocked/pending) and pushes urgent flags for hypocalcaemia, missing
+  // calcium, low/missing Vit D, and uncomputable CrCl. specialistOptions
+  // participates in the missingness-filter gate predicates per D4 (Shape B
+  // specialist-menu drugs count as in-scope for prerequisite surfacing). Single
+  // call site applies regardless of which path produced the recipes (standard
+  // recipe / GIOP / early menopause / oesophageal disease / sequencing).
   // Sources: NOGG 2024 p.29 §a, p.30 §a, p.34 §c (universal hypoCa CI for all
-  // antiresorptives); NOGG Rec 17 Strong (parenteral Vit D pre-condition).
-  applyPreTreatmentSafetyFilters(patient, recommendations, flags);
+  // antiresorptives); NOGG Rec 17 Strong (parenteral Vit D pre-condition);
+  // spec v1.46 §4.2 Tier 1 row (CrCl pre-condition for renally-cleared drugs).
+  applyPreTreatmentSafetyFilters(patient, recommendations, specialistOptions, flags);
 
   // Append biochemistry-driven flags (ALP, TSH, calcium)
   flags.push(...generateBloodFlags(patient));
