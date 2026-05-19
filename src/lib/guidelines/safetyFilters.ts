@@ -74,18 +74,31 @@ const ANTIRESORPTIVES: ReadonlySet<TreatmentAgent> = new Set<TreatmentAgent>([
   'romosozumab',
 ]);
 
-// Renally-cleared drug set — matches RENAL_LIMITS keys at thresholds.ts:354.
-// Bisphosphonates + denosumab carry CrCl-based prescribing decisions (CI cascade
-// or Ca-watch threshold). Teriparatide / romosozumab / abaloparatide are
-// deliberately excluded per Resolution γ: their renal considerations are
-// specialist-judgement (caution at <30 / hypocalcaemia-risk flagging in
-// referral), not GP-level prerequisite gating.
+// Renally-cleared drug set. Includes the RENAL_LIMITS keys at thresholds.ts:354
+// (bisphosphonates + denosumab — CrCl-based CI cascade / Ca-watch threshold)
+// AND the specialist-anabolic SPCs that carry severe-renal-impairment absolute
+// CIs (teriparatide per Forsteo SPC §4.3; abaloparatide per Eladynos SPC §4.3).
+//
+// v1.48 — Resolution flipped from γ to α (Backlog #18 eyeball Fix 2): the
+// earlier γ rationale ("specialist will catch the renal CI") was wrong. The
+// teri/abalo SPCs read as hard contraindications equivalent in shape to the
+// bisphosphonate cascade, not specialist-judgement caveats. GP-level
+// prerequisite surfacing of CrCl is therefore appropriate when teri or abalo
+// sits in specialistOptions — completes the bloods before referral.
+//
+// Romosozumab remains OUT of RENALLY_CLEARED: the Evenity SPC has no renal
+// dose adjustment, and severe-renal-impairment hypocalcaemia risk is covered
+// by F1 (measurement filter, fires regardless). Romo is in ANTIRESORPTIVES
+// + parenteral sets per existing classification, so F2/F4 still fire on
+// romo-bearing profiles.
 const RENALLY_CLEARED: ReadonlySet<TreatmentAgent> = new Set<TreatmentAgent>([
   'alendronate',
   'risedronate',
   'ibandronate',
   'zoledronate',
   'denosumab',
+  'teriparatide',
+  'abaloparatide',
 ]);
 
 function isAntiresorptive(rec: TreatmentRecommendation): boolean {
@@ -123,9 +136,11 @@ function specialistOptionsIncludesParenteralAntiresorptive(opts: SpecialistOptio
   return opts.some(o => o.drug === 'romosozumab');
 }
 function specialistOptionsIncludesRenallyCleared(opts: SpecialistOption[]): boolean {
-  // RENALLY_CLEARED ∩ AnabolicAgent = ∅. Always false. Kept for structural
-  // parallelism with the other helpers and to make gate composition
-  // self-documenting at the call site; tree-shakes to a constant `false`.
+  // v1.48 — RENALLY_CLEARED ∩ AnabolicAgent = {teriparatide, abaloparatide}
+  // (romosozumab is not in RENALLY_CLEARED — see set comment above). When
+  // either anabolic appears in specialistOptions and CrCl is uncomputable,
+  // the crcl_pending_renal_drug gate is satisfied even with empty
+  // treatmentRecommendations.
   return opts.some(o => RENALLY_CLEARED.has(o.drug));
 }
 
@@ -209,19 +224,22 @@ export function applyPreTreatmentSafetyFilters(
   if (caMissing && anyAntiresorptiveCandidate) {
     for (const rec of recommendations) {
       if (!isAntiresorptive(rec)) continue;
-      if (rec.status && rec.status !== 'active') continue;
+      if (rec.status === 'blocked') continue;
+      // Caption accumulates per-card (Backlog #18 Fix 1) — every filter that
+      // applies to this rec appends its prerequisite to the array.
+      rec.pendingCaption = [...(rec.pendingCaption ?? []), CAPTION_CALCIUM_ONLY];
+      // Status / blockReason / unblockAction respect first-fire precedence.
+      if (rec.status === 'pending') continue;
       rec.status = 'pending';
       rec.blockReason = 'Pre-treatment corrected calcium not yet measured';
       rec.unblockAction =
         'Check corrected calcium (Tier 1 bloods); confirm in range (2.10–2.55 mmol/L) before initiation.';
-      rec.pendingCaption = CAPTION_CALCIUM_ONLY;
     }
     flags.push({
       id: 'calcium_unmeasured_antiresorptive_block',
       severity: 'urgent',
       message:
-        'Mandatory pre-treatment corrected calcium check required before any antiresorptive can be initiated. ' +
-        'Measure corrected calcium as a Tier 1 blood (see investigationsNeeded). Reassess once result available.',
+        'Corrected calcium has not been measured. Complete corrected calcium as a Tier 1 blood and reassess once result is available.',
       rationale:
         'Spec v1.46 §4.2 Tier 1 row + §5.3: corrected calcium must be measured before any antiresorptive ' +
         'initiation (cannot verify NOGG hypoCa CI without measurement; pre-each-dose Ca check is the SmPC mandate ' +
@@ -278,12 +296,13 @@ export function applyPreTreatmentSafetyFilters(
   if (vitDMissing && anyParenteralAntiresorptiveCandidate) {
     for (const rec of recommendations) {
       if (!isParenteralAntiresorptive(rec)) continue;
-      if (rec.status && rec.status !== 'active') continue;
+      if (rec.status === 'blocked') continue;
+      rec.pendingCaption = [...(rec.pendingCaption ?? []), CAPTION_VITD_ONLY];
+      if (rec.status === 'pending') continue;
       rec.status = 'pending';
       rec.blockReason = 'Vit D not yet measured — parenteral antiresorptives require Vit D ≥50 before initiation';
       rec.unblockAction =
         'Check Vit D (Tier 1 bloods); confirm ≥50 nmol/L before parenteral initiation.';
-      rec.pendingCaption = CAPTION_VITD_ONLY;
     }
     for (const rec of recommendations) {
       if (!isOralBisphosphonate(rec)) continue;
@@ -297,7 +316,7 @@ export function applyPreTreatmentSafetyFilters(
       id: 'vitd_unmeasured_parenteral_block',
       severity: 'urgent',
       message:
-        'Parenteral antiresorptives require pre-treatment Vit D measurement (NOGG 2024 Rec 17). ' +
+        'Vit D has not been measured. Parenteral antiresorptives require pre-treatment Vit D per NOGG 2024 Rec 17. ' +
         'Measure serum Vit D as a Tier 1 blood. Oral bisphosphonates may be initiated with concurrent supplementation.',
       rationale:
         'NOGG 2024 Recommendation 17 (Strong): Vit D status must be established before parenteral initiation. ' +
@@ -319,39 +338,43 @@ export function applyPreTreatmentSafetyFilters(
   if (crclUnknown && anyRenallyClearedCandidate) {
     for (const rec of recommendations) {
       if (!isRenallyCleared(rec)) continue;
-      if (rec.status && rec.status !== 'active') continue;
+      if (rec.status === 'blocked') continue;
+      rec.pendingCaption = [...(rec.pendingCaption ?? []), CAPTION_CRCL_ONLY];
+      if (rec.status === 'pending') continue;
       rec.status = 'pending';
       rec.blockReason = 'CrCl (Cockcroft-Gault) not yet computable — required for renally-cleared antiresorptive selection';
       rec.unblockAction =
         'Complete the inputs needed for CrCl computation (serum creatinine, weight, age); recheck before initiation.';
-      rec.pendingCaption = CAPTION_CRCL_ONLY;
     }
     // Dynamic body listing the actual missing CrCl inputs. computeCrCl returns
-    // null when {creatinine, weight, age} is missing or non-positive; sex
-    // cannot be null per the PatientInput type. Age is non-nullable in
-    // PatientInput too, so the practical enumerable set is {creatinine,
-    // weight} unless the patient is constructed with a non-positive age.
+    // null when any of {creatinine, weight, age} is missing or non-positive.
+    // creatinine is BloodResults.creatinine (nullable). weightKg is nullable.
+    // age is typed non-null in PatientInput but defensively listed when <=0
+    // for completeness; in practice the wizard prevents that case.
     const creat = patient.bloodResults?.creatinine ?? null;
     const missing: string[] = [];
-    if (creat === null) missing.push('serum creatinine (Tier 1 blood)');
-    if (patient.weightKg === null) missing.push('patient weight');
+    if (creat === null || creat <= 0) missing.push('serum creatinine (Tier 1 blood)');
+    if (patient.weightKg === null || patient.weightKg <= 0) missing.push('patient weight');
+    if (patient.age <= 0) missing.push('patient age');
     const list =
       missing.length === 0
         ? 'the inputs required for Cockcroft-Gault computation'
         : missing.length === 1
           ? missing[0]
-          : `${missing[0]} and ${missing[1]}`;
+          : missing.length === 2
+            ? `${missing[0]} and ${missing[1]}`
+            : `${missing[0]}, ${missing[1]}, and ${missing[2]}`;
     flags.push({
       id: 'crcl_pending_renal_drug',
       severity: 'urgent',
       message:
-        'Mandatory pre-treatment CrCl (Cockcroft-Gault) required before any renally-cleared antiresorptive can be initiated. ' +
-        `Complete ${list} to enable CrCl computation. Reassess once available.`,
+        `CrCl (Cockcroft-Gault) cannot be computed for this patient. Complete ${list} to enable computation. Reassess once available.`,
       rationale:
         'Spec v1.46 §4.2 Tier 1 row: CrCl must be available before initiation of any renally-cleared ' +
         'antiresorptive (bisphosphonates have CrCl-based CI thresholds; denosumab has CrCl-based Ca-watch + ' +
-        'specialist-only thresholds). Cockcroft-Gault requires creatinine, weight, and age — when any input ' +
-        'is missing the renal cascade at thresholds.ts:354 cannot be evaluated.',
+        'specialist-only thresholds; teriparatide and abaloparatide have severe-renal absolute CIs per SPC §4.3). ' +
+        'Cockcroft-Gault requires creatinine, weight, and age — when any input is missing the renal cascade at ' +
+        'thresholds.ts:354 cannot be evaluated.',
       source: SRC_NOGG,
     });
   }

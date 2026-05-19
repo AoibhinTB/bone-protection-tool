@@ -4540,8 +4540,8 @@ function tc112(): TCResult {
   const f2Flag = decision.flags.find(f => f.id === 'calcium_unmeasured_antiresorptive_block');
   check(failures, 'calcium_unmeasured_antiresorptive_block fires URGENT',
     !!f2Flag && f2Flag.severity === 'urgent', `got severity=${f2Flag?.severity}`);
-  check(failures, 'calcium_unmeasured_antiresorptive_block body anchors "Measure corrected calcium"',
-    !!f2Flag && /measure corrected calcium/i.test(f2Flag.message));
+  check(failures, 'calcium_unmeasured_antiresorptive_block body anchors "Complete corrected calcium" (v1.48 missingness-as-fact framing)',
+    !!f2Flag && /complete corrected calcium/i.test(f2Flag.message));
 
   // POSITIVE: vitd_unmeasured_parenteral_block fires URGENT (v1.48 — D2 dedup
   // retired; flag emits independently because IV zoledronate is a parenteral
@@ -4566,37 +4566,71 @@ function tc112(): TCResult {
   check(failures, 'vitd_parenteral_block does NOT fire — Vit D missing, not low',
     !decision.flags.some(f => f.id === 'vitd_parenteral_block'));
 
-  return { name: 'TC112 — triple missingness emission lock (v1.48): F2 + F4 + CrCl all fire on 65F+hip fx+no bloods', passed: failures.length === 0, failures, decision };
+  // Caption-accumulation lock (v1.48 Backlog #18 Fix 1) — pendingCaption is
+  // now string[] and accumulates per filter. Source order: Ca → Vit D → CrCl.
+  //   - alendronate / risedronate (antiresorptive + renally-cleared, NOT
+  //     parenteral) carry [CAPTION_CALCIUM_ONLY, CAPTION_CRCL_ONLY] (F4 skipped).
+  //   - IV zoledronate (antiresorptive + parenteral + renally-cleared) carries
+  //     [CAPTION_CALCIUM_ONLY, CAPTION_VITD_ONLY, CAPTION_CRCL_ONLY].
+  const CAPTION_CA = 'Complete corrected calcium before initiating treatment. Reassess once result available.';
+  const CAPTION_VD = 'Complete Vit D measurement before initiating parenteral therapy. Reassess once result available.';
+  const CAPTION_CRCL = 'Complete CrCl (Cockcroft-Gault) before initiating renally-cleared therapy. Reassess once result available.';
+  for (const rec of antiresorptives) {
+    if (rec.agent === 'zoledronate') {
+      check(failures, `${rec.agent} pendingCaption === [Ca, VitD, CrCl] (parenteral + renally-cleared + antiresorptive)`,
+        Array.isArray(rec.pendingCaption) &&
+          rec.pendingCaption.length === 3 &&
+          rec.pendingCaption[0] === CAPTION_CA &&
+          rec.pendingCaption[1] === CAPTION_VD &&
+          rec.pendingCaption[2] === CAPTION_CRCL,
+        `got ${JSON.stringify(rec.pendingCaption)}`);
+    } else {
+      check(failures, `${rec.agent} pendingCaption === [Ca, CrCl] (oral BP: antiresorptive + renally-cleared, not parenteral)`,
+        Array.isArray(rec.pendingCaption) &&
+          rec.pendingCaption.length === 2 &&
+          rec.pendingCaption[0] === CAPTION_CA &&
+          rec.pendingCaption[1] === CAPTION_CRCL,
+        `got ${JSON.stringify(rec.pendingCaption)}`);
+    }
+  }
+
+  return { name: 'TC112 — triple missingness emission + caption-accumulation lock (v1.48): F2 + F4 + CrCl all fire on 65F+hip fx+no bloods', passed: failures.length === 0, failures, decision };
 }
 
-// v1.48 (Backlog #18) — Repurpose: caption-precedence verbatim lock.
+// v1.48 (Backlog #18) — Repurpose: dual-fire dual-caption lock (mirrors the
+// Profile 2 eyeball scenario surfaced by Aoibhin on 2026-05-19). Distinct
+// caption-accumulation coverage from TC112 (triple-fire triple-caption):
 //
-// Pre-v1.48 this TC asserted the (now-retired) CAPTION_MULTI_MISSING verbatim
-// across all antiresorptives when caMissing + vitDMissing both held. Under
-// D7, each missingness filter carries its OWN caption (CAPTION_CALCIUM_ONLY,
-// CAPTION_VITD_ONLY, CAPTION_CRCL_ONLY) — there is no MULTI variant. The
-// remaining caption question is precedence: when multiple filters' gates
-// satisfy on the same patient, the first filter in source order wins the
-// per-rec caption (the `if (rec.status && rec.status !== 'active') continue;`
-// guard at each filter blocks subsequent mutation).
+//   - F2 does NOT fire (Ca measured + in range).
+//   - F4 fires (Vit D null + IV zol parenteral in recs).
+//   - CrCl fires (CrCl uncomputable via missing creat + missing weight +
+//     renally-cleared drugs in recs).
 //
-// Profile mirrors TC112 (65F + prior hip fx + no bloods → all three
-// missingness filters fire as flags). F2 (Ca missing) runs first → all
-// antiresorptives get CAPTION_CALCIUM_ONLY. F4 + CrCl flag-emit but their
-// per-rec mutations skip.
+// Pre-Fix 1 the IV zol card would have carried only CAPTION_VITD_ONLY,
+// dropping the CrCl prerequisite. Under v1.48 Fix 1 it accumulates
+// [CAPTION_VITD_ONLY, CAPTION_CRCL_ONLY]. Oral BPs (renally-cleared but not
+// parenteral) carry [CAPTION_CRCL_ONLY].
+//
+// Also locks the dynamic CrCl-message-body listing the two missing inputs
+// ("serum creatinine ... and patient weight").
 
 function tc113(): TCResult {
   const failures: string[] = [];
   const patient = basePatient({
-    age: 65,
+    age: 72,
     sex: 'female',
     heightCm: 162,
-    weightKg: 65.6,
+    weightKg: null, // MISSING — drives CrCl uncomputability
     priorFragilityFracture: true,
     priorHipFracture: true,
     recentFractureWithin2Years: true,
-    dexaResults: { lumbarSpineTScore: -2.0, totalHipTScore: -2.0, femoralNeckTScore: -2.0, forearmTScore: null },
-    bloodResults: null,
+    dexaResults: { lumbarSpineTScore: -2.5, totalHipTScore: -2.5, femoralNeckTScore: -2.5, forearmTScore: null },
+    bloodResults: {
+      adjustedCalciumMmol: 2.30,
+      vitaminDNmol: null, // MISSING
+      creatinine: null,   // MISSING
+      alp: null, tshMUL: null, hbGramsPerLitre: null, esrOrCrp: null,
+    },
   });
   const decision = runClinicalDecision(patient);
 
@@ -4604,32 +4638,52 @@ function tc113(): TCResult {
     decision.riskStratification.category === 'high',
     `got ${decision.riskStratification.category}`);
 
-  // Re-assert status='pending' so the caption assertion isn't vacuous.
   const antiresorptives = decision.treatmentRecommendations.filter(
     r => r.agent === 'alendronate' || r.agent === 'risedronate' || r.agent === 'zoledronate',
   );
   check(failures, '3 antiresorptives present', antiresorptives.length === 3,
     `got ${antiresorptives.length}`);
+
+  // Status mutation: F4 tags IV zol pending (parenteral). CrCl tags ALL
+  // renally-cleared (so all 3 BPs end up pending — F4's mutation precedes
+  // CrCl's, but the renal cascade still tags orals via CrCl filter).
   for (const rec of antiresorptives) {
     check(failures, `${rec.agent} status === 'pending'`,
       rec.status === 'pending', `got status=${rec.status}`);
   }
 
-  // Caption-precedence: every antiresorptive carries CAPTION_CALCIUM_ONLY
-  // (the calcium-missing filter wins source-order precedence over the
-  // vitd-missing and crcl-missing filters).
-  const EXPECTED_CALCIUM_ONLY =
-    'Complete corrected calcium before initiating treatment. Reassess once result available.';
+  // Flag-level emission lock for this profile.
+  check(failures, 'calcium_unmeasured_antiresorptive_block does NOT fire (Ca measured)',
+    !decision.flags.some(f => f.id === 'calcium_unmeasured_antiresorptive_block'));
+  check(failures, 'vitd_unmeasured_parenteral_block fires URGENT',
+    decision.flags.some(f => f.id === 'vitd_unmeasured_parenteral_block' && f.severity === 'urgent'));
+  const crclFlag = decision.flags.find(f => f.id === 'crcl_pending_renal_drug');
+  check(failures, 'crcl_pending_renal_drug fires URGENT',
+    !!crclFlag && crclFlag.severity === 'urgent');
+  check(failures, 'crcl body lists "serum creatinine" and "patient weight" (dual-missing input case)',
+    !!crclFlag && /serum creatinine/i.test(crclFlag.message) && /patient weight/i.test(crclFlag.message));
+
+  // Caption-accumulation per drug class.
+  const CAPTION_VD = 'Complete Vit D measurement before initiating parenteral therapy. Reassess once result available.';
+  const CAPTION_CRCL = 'Complete CrCl (Cockcroft-Gault) before initiating renally-cleared therapy. Reassess once result available.';
   for (const rec of antiresorptives) {
-    check(failures, `${rec.agent} pendingCaption populated`,
-      typeof rec.pendingCaption === 'string' && rec.pendingCaption.length > 0,
-      `got pendingCaption=${JSON.stringify(rec.pendingCaption)}`);
-    check(failures, `${rec.agent} pendingCaption === CAPTION_CALCIUM_ONLY verbatim (precedence: calcium-missing wins)`,
-      rec.pendingCaption === EXPECTED_CALCIUM_ONLY,
-      `got ${JSON.stringify(rec.pendingCaption)}`);
+    if (rec.agent === 'zoledronate') {
+      check(failures, 'zoledronate pendingCaption === [VitD, CrCl] (parenteral + renally-cleared)',
+        Array.isArray(rec.pendingCaption) &&
+          rec.pendingCaption.length === 2 &&
+          rec.pendingCaption[0] === CAPTION_VD &&
+          rec.pendingCaption[1] === CAPTION_CRCL,
+        `got ${JSON.stringify(rec.pendingCaption)}`);
+    } else {
+      check(failures, `${rec.agent} pendingCaption === [CrCl] (oral BP: renally-cleared, not parenteral, Ca measured)`,
+        Array.isArray(rec.pendingCaption) &&
+          rec.pendingCaption.length === 1 &&
+          rec.pendingCaption[0] === CAPTION_CRCL,
+        `got ${JSON.stringify(rec.pendingCaption)}`);
+    }
   }
 
-  return { name: 'TC113 — caption-precedence lock (v1.48): CAPTION_CALCIUM_ONLY wins on triple-missing profile', passed: failures.length === 0, failures, decision };
+  return { name: 'TC113 — dual-fire dual-caption lock (v1.48 Fix 1): 72F + hip fx + Ca measured + VitD/creat/weight null', passed: failures.length === 0, failures, decision };
 }
 
 function tc114(): TCResult {
@@ -4688,13 +4742,16 @@ function tc114(): TCResult {
     !!risedronate && !risedronate.pendingCaption,
     `got pendingCaption=${JSON.stringify(risedronate?.pendingCaption)}`);
 
-  // IV zol: status='pending' with Vit D-only caption verbatim.
+  // IV zol: status='pending' with Vit D-only caption (single-element array
+  // under v1.48 Fix 1's pendingCaption accumulation schema).
   const EXPECTED_VITD_ONLY =
     'Complete Vit D measurement before initiating parenteral therapy. Reassess once result available.';
   check(failures, "zoledronate status === 'pending' (F4 parenteral tag)",
     !!zol && zol.status === 'pending', `got status=${zol?.status}`);
-  check(failures, 'zoledronate pendingCaption matches Vit D-only variant verbatim',
-    !!zol && zol.pendingCaption === EXPECTED_VITD_ONLY,
+  check(failures, 'zoledronate pendingCaption === [CAPTION_VITD_ONLY] (single-fire single-caption)',
+    !!zol && Array.isArray(zol.pendingCaption) &&
+      zol.pendingCaption.length === 1 &&
+      zol.pendingCaption[0] === EXPECTED_VITD_ONLY,
     `got ${JSON.stringify(zol?.pendingCaption)}`);
 
   // POSITIVE: vitd_unmeasured_parenteral_block fires URGENT (Vit D missing +
@@ -4851,6 +4908,70 @@ function tc117(): TCResult {
   return { name: 'TC117 — crcl-pending filter gate-suppressed on low-risk empty recs (v1.48)', passed: failures.length === 0, failures, decision };
 }
 
+// ─── TC118 — crcl_pending_renal_drug fires via specialistOptions (Fix 2 lock) ───
+// Male non-GC VHR with teriparatide-only specialistOptions. Empty
+// treatmentRecommendations (Shape B suppression). creatinine missing →
+// CrCl uncomputable.
+//
+// Under Resolution α (v1.48 Backlog #18 eyeball Fix 2), teriparatide is in
+// RENALLY_CLEARED (Forsteo SPC §4.3 severe-renal CI). The
+// crcl_pending_renal_drug filter therefore fires on this profile via the
+// specialistOptions gate path — surfacing the CrCl bloods to the GP before
+// specialist referral. Pre-Fix 2 (Resolution γ) this profile would have
+// produced NO filter flag despite the SPC-grounded CI.
+//
+// F2 + F4 do NOT fire on this profile: teriparatide is anabolic (not in
+// ANTIRESORPTIVES, not in parenteral antiresorptive set). The anabolic-only
+// F2/F4 case is tracked separately under Backlog #19.
+function tc118(): TCResult {
+  const failures: string[] = [];
+  const patient = basePatient({
+    age: 60,
+    sex: 'male',
+    heightCm: 175,
+    weightKg: 76.6,
+    priorFragilityFracture: true,
+    dexaResults: { lumbarSpineTScore: -3.6, totalHipTScore: -2.8, femoralNeckTScore: -2.7, forearmTScore: null },
+    bloodResults: {
+      adjustedCalciumMmol: 2.32,
+      vitaminDNmol: 60,
+      creatinine: null, // MISSING — drives CrCl uncomputability
+      alp: 80, tshMUL: 2.0, hbGramsPerLitre: 140, esrOrCrp: 'normal',
+    },
+  });
+  const decision = runClinicalDecision(patient);
+
+  check(failures, "riskCategory === 'very_high' (T ≤ −3.5)",
+    decision.riskStratification.category === 'very_high',
+    `got ${decision.riskStratification.category}`);
+
+  // Shape B: empty recs; teriparatide in specialistOptions.
+  check(failures, 'treatmentRecommendations is empty (Shape B suppression)',
+    decision.treatmentRecommendations.length === 0,
+    `got ${decision.treatmentRecommendations.length}`);
+  check(failures, 'specialistOptions includes teriparatide',
+    decision.specialistOptions.some(o => o.drug === 'teriparatide'));
+
+  // POSITIVE: crcl_pending_renal_drug fires via specialistOptions gate
+  // (teri ∈ RENALLY_CLEARED under Resolution α). Body lists serum creatinine
+  // (creat is the missing input).
+  const crclFlag = decision.flags.find(f => f.id === 'crcl_pending_renal_drug');
+  check(failures, 'crcl_pending_renal_drug fires URGENT (Fix 2: teri in RENALLY_CLEARED)',
+    !!crclFlag && crclFlag.severity === 'urgent', `got severity=${crclFlag?.severity}`);
+  check(failures, 'crcl body lists serum creatinine',
+    !!crclFlag && /serum creatinine/i.test(crclFlag.message));
+
+  // NEGATIVE: F2 / F4 do NOT fire — teri is anabolic, not in ANTIRESORPTIVES
+  // or parenteral antiresorptive sets. Anabolic-only F2/F4 coverage tracked
+  // separately under Backlog #19.
+  check(failures, 'calcium_unmeasured_antiresorptive_block does NOT fire (Ca measured anyway)',
+    !decision.flags.some(f => f.id === 'calcium_unmeasured_antiresorptive_block'));
+  check(failures, 'vitd_unmeasured_parenteral_block does NOT fire (Vit D measured)',
+    !decision.flags.some(f => f.id === 'vitd_unmeasured_parenteral_block'));
+
+  return { name: 'TC118 — crcl_pending_renal_drug fires via teri-only specialistOptions (v1.48 Fix 2)', passed: failures.length === 0, failures, decision };
+}
+
 // ─── Runner ───────────────────────────────────────────────────────────────
 
 const TCs: Array<() => TCResult> = [
@@ -4910,6 +5031,10 @@ const TCs: Array<() => TCResult> = [
   // profiles). Pre-v1.48 these filters fired unconditionally; the gating fix
   // is the headline behaviour change.
   tc115, tc116, tc117,
+  // v1.48 Backlog #18 eyeball Fix 2 — Resolution α: teri + abalo added to
+  // RENALLY_CLEARED. TC118 locks the specialistOptions-gate path: teri-only
+  // anabolic specialist menu + creat null → crcl_pending_renal_drug fires.
+  tc118,
 ];
 
 const results = TCs.map(fn => fn());

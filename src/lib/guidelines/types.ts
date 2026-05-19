@@ -445,22 +445,26 @@ export interface TreatmentRecommendation {
   /** What the GP needs to do to unblock the recommendation. */
   unblockAction?: string;
   /**
-   * v1.47 — caption surfaced in the UI's "Pending prerequisites" banner on a
-   * TreatmentRecommendation. Populated by applyPreTreatmentSafetyFilters when a
-   * filter tags an entry status='pending'. Variant chosen based on the global
-   * missing-prerequisite state (calcium-only / Vit-D-only-parenteral / multi-
-   * missing), NOT per-filter — filters carry filter-specific blockReason /
-   * unblockAction subject to precedence (first filter to tag wins). The
-   * caption summarises every missing prerequisite the patient has, which a
-   * single filter's view can't reflect. Three locked variants per spec:
-   *   - calcium-only:        F2 fires alone (Ca missing, Vit D measured)
-   *   - Vit-D-only:          F4 fires alone (Vit D missing, Ca measured)
-   *   - multi-missing:       F2 fires AND vitDMissing also true (caption
-   *                          assigned at F2's mutation site, where it
-   *                          captures both gaps; F4's mutation is then
-   *                          short-circuited by the status-precedence guard)
+   * v1.48 — captions surfaced in the UI's "Pending prerequisites" banner on a
+   * TreatmentRecommendation. Populated additively by applyPreTreatmentSafetyFilters:
+   * each missingness filter that applies to this rec appends its own caption.
+   * Order = filter source order (Ca, Vit D, CrCl). The card renders each
+   * caption as a stacked paragraph so the GP sees every prerequisite to
+   * complete for this specific drug.
+   *
+   * Pre-v1.48 this was a single scalar string with the first-filter-wins
+   * precedence applied; that masked subsequent filters' prerequisites on a
+   * card tagged by multiple filters (Backlog #18 eyeball Fix 1).
+   *
+   * Per-card caption examples under v1.48:
+   *   - oral BP (antiresorptive + renally-cleared, not parenteral) with
+   *     caMissing + creatMissing → [CAPTION_CALCIUM_ONLY, CAPTION_CRCL_ONLY]
+   *   - IV zol (antiresorptive + parenteral + renally-cleared) with
+   *     caMissing + vitDMissing + creatMissing → [CAPTION_CALCIUM_ONLY,
+   *     CAPTION_VITD_ONLY, CAPTION_CRCL_ONLY]
+   *   - IV zol with vitDMissing alone → [CAPTION_VITD_ONLY]
    */
-  pendingCaption?: string;
+  pendingCaption?: string[];
   /**
    * Role of this recommendation in the overall treatment plan.
    *   'primary'                     — definitive treatment for the patient at their risk level (default; undefined treated as 'primary')

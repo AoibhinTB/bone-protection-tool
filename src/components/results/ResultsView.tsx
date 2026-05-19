@@ -706,12 +706,13 @@ function TreatmentCard({ tr, variant }: { tr: TreatmentRecommendation; variant: 
   const isPatientPref = variant === 'patient_preference_fallback';
   const muted = isBridging || isPatientPref;
   // v1.47 — pending-prerequisites visual state. Renders an amber "PENDING
-  // PREREQUISITES" banner flush at the top of the card + a caption box below
-  // (tr.pendingCaption, sourced from safetyFilters.ts F2/F4 variant selection),
-  // and applies opacity-75 to the entire card. Banner sits flush via
-  // outer/inner div split with overflow-hidden on the outer wrapper. Blocked
-  // cards never reach this component — filtered out at the Treatment section
-  // IIFE.
+  // PREREQUISITES" banner flush at the top of the card + per-prerequisite
+  // caption box below (tr.pendingCaption, sourced from safetyFilters.ts
+  // missingness-filter accumulation — v1.48 Fix 1 changed scalar → array so
+  // multi-prerequisite cards surface every caption). Applies opacity-75 to
+  // the entire card. Banner sits flush via outer/inner div split with
+  // overflow-hidden on the outer wrapper. Blocked cards never reach this
+  // component — filtered out at the Treatment section IIFE.
   const isPending = tr.status === 'pending';
   const outerBase = muted
     ? 'bg-slate-50 border border-slate-200'
@@ -730,10 +731,12 @@ function TreatmentCard({ tr, variant }: { tr: TreatmentRecommendation; variant: 
           <div className="bg-amber-500 text-white text-[11px] sm:text-xs font-bold uppercase tracking-wider px-3 py-1.5">
             Pending prerequisites
           </div>
-          {tr.pendingCaption && (
-            <p className="text-xs text-amber-900 bg-amber-50 border-b border-amber-200 px-3 py-2 leading-snug">
-              {tr.pendingCaption}
-            </p>
+          {tr.pendingCaption && tr.pendingCaption.length > 0 && (
+            <div className="text-xs text-amber-900 bg-amber-50 border-b border-amber-200 px-3 py-2 leading-snug space-y-1">
+              {tr.pendingCaption.map((c, i) => (
+                <p key={i}>{c}</p>
+              ))}
+            </div>
           )}
         </>
       )}
