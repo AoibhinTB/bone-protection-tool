@@ -85,8 +85,10 @@ export function gcEverPreviouslyUsed(p: PatientInput): boolean {
 // F_male × 0.85 = 1.0455; rounded form 1.04 (vs 1.0455) differs by 0.5%
 // and is clinically indistinguishable at all current TCs (verified).
 //
-// Returns null if any input is missing — engine callers branch accordingly
-// (egfr_unknown / crcl_unknown flag emission path).
+// Returns null if any input is missing — engine callers branch accordingly.
+// Null-CrCl surfacing lives at safetyFilters.ts via the crcl_pending_renal_drug
+// filter (v1.48 Backlog #18); the prior crcl_unknown flag emission in
+// treatment.ts was removed as unreachable dead code.
 const COCKCROFT_GAULT_F_FEMALE = 1.04;
 const COCKCROFT_GAULT_F_MALE   = 1.23;
 

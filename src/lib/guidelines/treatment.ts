@@ -1819,73 +1819,17 @@ function initiateTherapy(
     return recs;
   }
 
-  // CrCl unknown — add flag, still recommend with monitoring requirement
-  flags.push({
-    id: 'crcl_unknown',
-    severity: 'warning',
-    message: 'Check CrCl before prescribing bisphosphonate — not recorded.',
-    rationale: 'CrCl <35 contraindicates alendronate and zoledronate; CrCl <30 contraindicates risedronate.',
-    source: SRC_HSE,
-  });
-  // v1.33 — push both equivalent first-line oral BPs.
-  // v1.46 — IV zoledronate added as co-equal first-line per NOGG 2024 Rec 2.
-  // Prior-hip-fracture patients get IV zol as preferred first-line (NOGG Rec 3
-  // / Lyles HORIZON-RF); orals become alternatives. Same priority-fork logic
-  // as the normal-CrCl block above. Non-VHR only.
-  {
-    const priorHipFx = patient.priorHipFracture;
-    // Alendronate
-    {
-      const base = alendronate();
-      const rec: TreatmentRecommendation = priorHipFx
-        ? {
-            ...base,
-            priority: 'alternative',
-            rationale:
-              'Alternative to IV zoledronate, which is the NOGG-preferred first-line option following a hip fracture (per NOGG 2024 Rec 3). Reasonable choice if IV is unsuitable or patient prefers oral therapy.',
-          }
-        : base;
-      const tagged = bridgingTagOrNullForVHR(rec, riskCategory, patient);
-      if (tagged) recs.push(withBPInitiationContext(tagged, patient));
-    }
-    // Risedronate
-    {
-      const base = risedronate();
-      const rec: TreatmentRecommendation = priorHipFx
-        ? {
-            ...base,
-            priority: 'alternative',
-            rationale:
-              'Alternative to IV zoledronate, which is the NOGG-preferred first-line option following a hip fracture (per NOGG 2024 Rec 3). Reasonable choice if IV is unsuitable or patient prefers oral therapy.',
-          }
-        : base;
-      const tagged = bridgingTagOrNullForVHR(rec, riskCategory, patient);
-      if (tagged) recs.push(withBPInitiationContext(tagged, patient));
-    }
-    // IV zoledronate — CrCl-unknown branch can't pre-block on the <45
-    // borderline gate (no CrCl to check). The crcl_unknown flag above already
-    // tells the GP to check CrCl before prescribing; canUse('zoledronate',
-    // null) returns true for null CrCl (deferred to the GP). Non-VHR only.
-    if (riskCategory !== 'very_high') {
-      const base = zoledronate();
-      const rec: TreatmentRecommendation = priorHipFx
-        ? {
-            ...base,
-            priority: 'first-line',
-            rationale:
-              'IV zoledronate is the NOGG-preferred first-line option following a hip fracture (NOGG 2024 Rec 3, Strong). ' +
-              'The HORIZON-Recurrent Fractures trial (Lyles et al, NEJM 2007) demonstrated both subsequent fracture reduction AND mortality reduction in patients receiving annual IV zoledronate after hip-fracture repair compared to placebo. ' +
-              'Oral bisphosphonates remain alternatives if IV is unsuitable.',
-          }
-        : {
-            ...base,
-            rationale:
-              'IV zoledronate is a first-line antiresorptive option, co-equal with oral bisphosphonates per NOGG 2024 Rec 2 (Strong). ' +
-              'Annual IV infusion may suit patients preferring infrequent dosing, those with oral intolerance, or those with adherence concerns on weekly oral therapy.',
-          };
-      recs.push(withBPInitiationContext(rec, patient));
-    }
-  }
+  // Defensive tail return. Every branch above this point (canUse-alendronate,
+  // renal-CI band, and the early-exit pathways for oesophageal-disease / AFF /
+  // GI-intolerance / HRT-on-board) returns unconditionally; in particular for
+  // crcl === null the first branch at canUse('alendronate', null) → true
+  // captures the case. The fallthrough is therefore unreachable. Kept to
+  // satisfy TypeScript's control-flow analysis (it cannot prove disjointness
+  // of the if-condition predicates) and as a future-refactor safety net.
+  //
+  // The unreachable BP-push block + crcl_unknown flag emission that used to
+  // sit here were deleted in v1.48 (Backlog #18 Commit 2). The CrCl-missing
+  // surfacing now lives at safetyFilters.ts:271 as crcl_pending_renal_drug.
   return recs;
 }
 
@@ -4301,7 +4245,7 @@ function resolveCrCl(patient: PatientInput): number | null {
 function canUse(agent: keyof typeof RENAL_LIMITS, crcl: number | null): boolean {
   const limit = RENAL_LIMITS[agent].ci;
   if (limit === null) return true;
-  if (crcl === null) return true; // unknown — permit with crcl_unknown flag
+  if (crcl === null) return true; // unknown — permit; crcl_pending_renal_drug filter (safetyFilters.ts) surfaces the gate
   return crcl >= limit;
 }
 
